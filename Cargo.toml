@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "yuu-codegen",
+    "yuu-main",
+    "yuu-transform",
+    "yuu-parse",
+    "yuu-shared",
+]
+resolver = "2"

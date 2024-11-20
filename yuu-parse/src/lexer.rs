@@ -1,0 +1,156 @@
+use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use logos::{Logos, Span};
+use thiserror::Error;
+use yuu_shared::token::{Token, TokenVariants};
+
+pub struct UnprocessedCodeInfo<'a> {
+    pub code: &'a str,
+    pub file_name: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct Note {
+    pub message: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericError {
+    pub expected: String,
+    pub found: String,
+    pub note: Vec<Note>,
+    pub span: Span,
+}
+
+// Parser Error with thiserror
+#[derive(Debug, Clone, Error)]
+pub enum ParseError {
+    #[error("")]
+    UnexpectedToken(Span),
+    #[error("")]
+    UnexpectedEOF,
+    #[error("")]
+    GenericSyntaxError(GenericError),
+}
+
+impl ParseError {
+    pub fn print(&self, code_info: &UnprocessedCodeInfo) {
+        match self {
+            ParseError::UnexpectedToken(span) => {
+                Report::build(ReportKind::Error, (code_info.file_name, span.clone()))
+                    .with_label(
+                        Label::new((code_info.file_name, span.clone()))
+                            .with_message("Unexpected token")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((code_info.file_name, Source::from(code_info.code)))
+                    .unwrap();
+            }
+            ParseError::UnexpectedEOF => {
+                Report::build(
+                    ReportKind::Error,
+                    (
+                        code_info.file_name,
+                        code_info.code.len()..code_info.code.len(),
+                    ),
+                )
+                .with_message("Unexpected end of file")
+                .finish()
+                .print((code_info.file_name, Source::from(code_info.code)))
+                .unwrap();
+            }
+            ParseError::GenericSyntaxError(error) => {
+                let mut report =
+                    Report::build(ReportKind::Error, (code_info.file_name, error.span.clone()))
+                        .with_message("Syntax error")
+                        .with_label(
+                            Label::new((code_info.file_name, error.span.clone()))
+                                .with_message(format!(
+                                    "Expected {}, but found '{}'",
+                                    error.expected, error.found
+                                ))
+                                .with_color(Color::Red),
+                        );
+
+                // Add all notes with their respective spans
+                for note in &error.note {
+                    report = report.with_label(
+                        Label::new((code_info.file_name, note.span.clone()))
+                            .with_message(&note.message)
+                            .with_color(Color::Blue),
+                    );
+                }
+
+                report
+                    .finish()
+                    .print((code_info.file_name, Source::from(code_info.code)))
+                    .unwrap();
+            }
+        }
+    }
+}
+
+pub struct Lexer<'a> {
+    lexer: logos::Lexer<'a, TokenVariants>,
+    lookahead: Result<Token, ParseError>,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new(code_info: &UnprocessedCodeInfo<'a>) -> Self {
+        let mut lexer = TokenVariants::lexer(code_info.code);
+        let t = lexer.next();
+        let span = lexer.span();
+        let lookahead = match t {
+            Some(t) => match t {
+                Ok(tkn) => Ok(Token { kind: tkn, span }),
+                Err(()) => Err(ParseError::UnexpectedToken(span)),
+            },
+            None => Err(ParseError::UnexpectedEOF),
+        };
+
+        Self { lexer, lookahead }
+    }
+
+    fn next_token_internal(&mut self) -> Result<Token, ParseError> {
+        let t = self.lexer.next();
+        let span = self.lexer.span();
+        match t {
+            Some(t) => match t {
+                Ok(tkn) => Ok(Token { kind: tkn, span }),
+                Err(()) => Err(ParseError::UnexpectedToken(self.lexer.span())),
+            },
+            None => Ok(Token {
+                kind: TokenVariants::EOF,
+                span,
+            }),
+        }
+    }
+
+    pub fn peek(&mut self) -> Result<&Token, ParseError> {
+        self.lookahead.as_ref().map_err(|x| x.clone())
+    }
+
+    pub fn expect(
+        &mut self,
+        expected: &[TokenVariants],
+        note: Vec<Note>,
+    ) -> Result<Token, ParseError> {
+        let t = self.next_token()?;
+        if expected.contains(&t.kind) {
+            Ok(t)
+        } else {
+            Err(ParseError::GenericSyntaxError(GenericError {
+                expected: format!("{:?}", expected),
+                found: format!("{:?}", t.kind),
+                note,
+                span: t.span,
+            }))
+        }
+    }
+
+    pub fn next_token(&mut self) -> Result<Token, ParseError> {
+        let new_la = self.next_token_internal();
+        std::mem::replace(&mut self.lookahead, new_la)
+    }
+}
