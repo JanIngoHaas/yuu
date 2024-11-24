@@ -1,4 +1,5 @@
 use logos::Logos;
+use serde::{Deserialize, Serialize};
 
 // Helper function for parsing i64 with different bases
 fn parse_integer(s: &str) -> Option<Integer> {
@@ -11,7 +12,7 @@ fn parse_integer(s: &str) -> Option<Integer> {
     }
 }
 
-#[derive(Logos, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone)]
 pub enum Integer {
     I64(i64),
     // CannotParseI64_TooManyDigits,
@@ -26,10 +27,12 @@ pub enum Integer {
     // Idx(isize),
 }
 
-#[derive(Logos, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"\s+")] // Skip whitespace
 #[logos(skip r"//.*")]
 #[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
+// This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
+#[logos(skip r"\^-[-]+.*")]
 pub enum TokenVariants {
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
@@ -54,6 +57,48 @@ pub enum TokenVariants {
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
 
+    #[token("i64")]
+    I64Kw,
+
+    #[token("f32")]
+    F32Kw,
+
+    #[token("f64")]
+    F64Kw,
+
+    #[token("let")]
+    Let,
+
+    #[token("mut")]
+    Mut,
+
+    #[token("fn")]
+    Fn,
+
+    #[token("->")]
+    Arrow,
+
+    #[token("return")]
+    Return,
+
+    #[token("=>")]
+    FatArrow,
+
+    #[token("result")]
+    Result,
+
+    #[token(":")]
+    Colon,
+
+    #[token("=")]
+    Equal,
+
+    #[token(",")]
+    Comma,
+
+    #[token(";")]
+    Semicolon,
+
     // Basic operators
     #[token("+")]
     Plus,
@@ -75,7 +120,7 @@ pub enum TokenVariants {
     EOF,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Token {
     pub kind: TokenVariants,
     pub span: logos::Span,

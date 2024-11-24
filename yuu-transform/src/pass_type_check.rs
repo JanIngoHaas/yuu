@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use hashbrown::HashMap;
 use yuu_parse::parser::SourceCodeInfo;
 use yuu_shared::ast::*;
@@ -7,20 +9,42 @@ use yuu_shared::{Context, Pass};
 use crate::semantic_error::{GenericSemanticMsg, Note, NoteType, SemanticMsg, Severity};
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct TypeInfo {
-    pub name: String,
+pub enum BuiltInType {
+    I64,
+    F32,
+    F64,
+    Error,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum TypeInfo {
+    //Custom(String),
+    BuiltIn(BuiltInType),
     // pub size: usize,
     // pub align: usize,
 }
 
-struct TypeCheckData {
+impl Display for TypeInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeInfo::BuiltIn(built_in) => match built_in {
+                BuiltInType::I64 => write!(f, "i64"),
+                BuiltInType::F32 => write!(f, "f32"),
+                BuiltInType::F64 => write!(f, "f64"),
+                BuiltInType::Error => write!(f, "<error>"),
+            },
+        }
+    }
+}
+
+pub struct TypeInfoMap {
     pub types: HashMap<usize, TypeInfo>,
-    pub failed: bool,
 }
 
 pub struct TypeCheckPass<'a> {
     pub(crate) msgs: Vec<SemanticMsg>,
     pub(crate) temp_code_info: &'a SourceCodeInfo,
+    pub(crate) failed: bool,
 }
 
 impl<'a> TypeCheckPass<'a> {
@@ -28,31 +52,28 @@ impl<'a> TypeCheckPass<'a> {
         Self {
             msgs: Vec::new(),
             temp_code_info: source_code_info,
+            failed: false,
         }
     }
 
-    fn infer(&mut self, root: &Node, data: &mut TypeCheckData) -> TypeInfo {
+    fn infer(&mut self, root: &Node, data: &mut TypeInfoMap) -> TypeInfo {
         match root {
             Node::Expr(expr) => self.infer_expr(expr, data),
+            Node::Stmt(stmt_node) => todo!(),
+            Node::Type(type_node) => todo!(),
         }
     }
 
     fn get_type_from_lit(lit: &Token) -> TypeInfo {
         match lit.kind {
-            TokenVariants::Integer(Integer::I64(_)) => TypeInfo {
-                name: "i64".to_string(),
-            },
-            TokenVariants::F32(_) => TypeInfo {
-                name: "f32".to_string(),
-            },
-            TokenVariants::F64(_) => TypeInfo {
-                name: "f64".to_string(),
-            },
+            TokenVariants::Integer(Integer::I64(_)) => TypeInfo::BuiltIn(BuiltInType::F64),
+            TokenVariants::F32(_) => TypeInfo::BuiltIn(BuiltInType::F32),
+            TokenVariants::F64(_) => TypeInfo::BuiltIn(BuiltInType::F64),
             _ => panic!("literal kind has no immediate type"),
         }
     }
 
-    fn infer_expr(&mut self, expr: &ExprNode, data: &mut TypeCheckData) -> TypeInfo {
+    fn infer_expr(&mut self, expr: &ExprNode, data: &mut TypeInfoMap) -> TypeInfo {
         match expr {
             ExprNode::Literal(literal) => {
                 let type_info = Self::get_type_from_lit(&literal.lit);
@@ -63,19 +84,20 @@ impl<'a> TypeCheckPass<'a> {
                 let mut lhs = self.infer_expr(&binary.left, data);
                 let rhs = self.infer_expr(&binary.right, data);
 
-                if lhs.name != rhs.name {
+                if lhs != rhs {
+                    self.failed = true;
                     let error = GenericSemanticMsg {
                         message: "Type mismatch in expression".to_string(),
                         cache: self.temp_code_info.cache.clone(),
                         span: binary.span.clone(),
                         notes: vec![
                             Note {
-                                message: format!("This expression has type `{}`", lhs.name),
+                                message: format!("This expression has type `{}`", lhs),
                                 span: Some(binary.left.span()),
                                 note_type: NoteType::Explanation,
                             },
                             Note {
-                                message: format!("This expression has type `{}`", rhs.name),
+                                message: format!("This expression has type `{}`", rhs),
                                 span: Some(binary.right.span()),
                                 note_type: NoteType::Explanation,
                             },
@@ -88,9 +110,7 @@ impl<'a> TypeCheckPass<'a> {
                         severity: Severity::Error,
                     };
                     self.msgs.push(SemanticMsg::Generic(error));
-                    lhs = TypeInfo {
-                        name: "<error>".to_string(),
-                    };
+                    lhs = TypeInfo::BuiltIn(BuiltInType::Error);
                 }
 
                 data.types.insert(binary.id, lhs.clone());
@@ -104,9 +124,7 @@ impl<'a> TypeCheckPass<'a> {
                 }
             },
             ExprNode::Ident(ident_expr) => {
-                let type_info = TypeInfo {
-                    name: "i64".to_string(),
-                };
+                let type_info = TypeInfo::BuiltIn(BuiltInType::I64);
                 data.types.insert(ident_expr.id, type_info.clone());
                 type_info
             }
@@ -115,10 +133,9 @@ impl<'a> TypeCheckPass<'a> {
 }
 
 impl<'a> Pass for TypeCheckPass<'a> {
-    fn run(&mut self, ast: &Node, context: &mut Context) {
-        let mut data = TypeCheckData {
+    fn run(&mut self, ast: &Node, context: &mut Context) -> bool {
+        let mut data = TypeInfoMap {
             types: HashMap::new(),
-            failed: false,
         };
         self.infer(ast, &mut data);
         context.replace_pass_data(data);
@@ -126,6 +143,8 @@ impl<'a> Pass for TypeCheckPass<'a> {
         for msg in &self.msgs {
             msg.eprint();
         }
+
+        self.failed
     }
 }
 

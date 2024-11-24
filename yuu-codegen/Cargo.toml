@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+yuu-shared = { path = "../yuu-shared" }
+yuu-transform = { path = "../yuu-transform" }
+yuu-parse = { path = "../yuu-parse" }
+inkwell = "0.5.0"

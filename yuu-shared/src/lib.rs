@@ -36,5 +36,5 @@ impl Context {
 }
 
 pub trait Pass {
-    fn run(&mut self, ast: &Node, context: &mut Context);
+    fn run(&mut self, ast: &Node, context: &mut Context) -> bool;
 }
