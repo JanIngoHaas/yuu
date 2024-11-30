@@ -1,7 +1,7 @@
 use ariadne::{Color, Config, Label, Report, ReportKind, Source};
 use logos::{Logos, Span};
 use thiserror::Error;
-use yuu_shared::token::{Token, TokenVariants};
+use yuu_shared::token::{Token, TokenKind};
 
 pub struct UnprocessedCodeInfo<'a> {
     pub code: &'a str,
@@ -92,13 +92,13 @@ impl ParseError {
 }
 
 pub struct Lexer<'a> {
-    lexer: logos::Lexer<'a, TokenVariants>,
+    lexer: logos::Lexer<'a, TokenKind>,
     lookahead: Result<Token, ParseError>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(code_info: &UnprocessedCodeInfo<'a>) -> Self {
-        let mut lexer = TokenVariants::lexer(code_info.code);
+        let mut lexer = TokenKind::lexer(code_info.code);
         let t = lexer.next();
         let span = lexer.span();
         let lookahead = match t {
@@ -121,7 +121,7 @@ impl<'a> Lexer<'a> {
                 Err(()) => Err(ParseError::UnexpectedToken(self.lexer.span())),
             },
             None => Ok(Token {
-                kind: TokenVariants::EOF,
+                kind: TokenKind::EOF,
                 span,
             }),
         }
@@ -133,7 +133,7 @@ impl<'a> Lexer<'a> {
 
     pub fn expect(
         &mut self,
-        expected: &[TokenVariants],
+        expected: &[TokenKind],
         note: Vec<Note>,
     ) -> Result<Token, ParseError> {
         let t = self.next_token()?;

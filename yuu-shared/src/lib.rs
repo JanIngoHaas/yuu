@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod graphviz_output;
 pub mod token;
 use ast::Node;
 use hashbrown::HashMap;

@@ -33,7 +33,7 @@ pub enum Integer {
 #[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
-pub enum TokenVariants {
+pub enum TokenKind {
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
         lex.slice().trim_end_matches('f').parse().ok()
@@ -122,6 +122,6 @@ pub enum TokenVariants {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Token {
-    pub kind: TokenVariants,
+    pub kind: TokenKind,
     pub span: logos::Span,
 }

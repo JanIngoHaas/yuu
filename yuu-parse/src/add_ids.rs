@@ -27,6 +27,7 @@ impl AddId for Node {
             Node::Stmt(stmt) => stmt.add_id(gen),
             Node::Type(ty) => ty.add_id(gen),
             Node::Structural(s) => s.add_id(gen),
+            Node::Pattern(pn) => pn.add_id(gen),
         }
     }
 }
@@ -51,6 +52,13 @@ impl AddId for ExprNode {
                     stmt.add_id(gen);
                 }
             }
+            ExprNode::FuncCall(func_call_expr) => {
+                func_call_expr.lhs.add_id(gen);
+                for arg in &mut func_call_expr.args {
+                    arg.add_id(gen);
+                }
+                func_call_expr.id = gen.next();
+            }
         }
     }
 }
@@ -59,13 +67,18 @@ impl AddId for StmtNode {
     fn add_id(&mut self, gen: &mut IdGenerator) {
         match self {
             StmtNode::Let(let_stmt) => {
+                let_stmt.id = gen.next();
+                let_stmt.pattern.add_id(gen);
                 let_stmt.expr.add_id(gen);
                 if let Some(ty) = &mut let_stmt.ty {
                     ty.add_id(gen);
                 }
             }
             StmtNode::Atomic(expr) => expr.add_id(gen),
-            StmtNode::Return(ret) => ret.expr.add_id(gen),
+            StmtNode::Return(ret) => {
+                ret.id = gen.next();
+                ret.expr.add_id(gen);
+            }
         }
     }
 }
@@ -83,20 +96,46 @@ impl AddId for TypeNode {
     }
 }
 
+impl AddId for PatternNode {
+    fn add_id(&mut self, gen: &mut IdGenerator) {
+        match self {
+            PatternNode::Ident(i) => {
+                i.id = gen.next();
+            }
+        }
+    }
+}
+
+impl AddId for FuncArg {
+    fn add_id(&mut self, gen: &mut IdGenerator) {
+        self.pattern.add_id(gen);
+        self.ty.add_id(gen);
+        self.id = gen.next();
+    }
+}
+
+impl AddId for FuncDeclStructural {
+    fn add_id(&mut self, gen: &mut IdGenerator) {
+        self.id = gen.next();
+        for arg in &mut self.args {
+            arg.add_id(gen);
+        }
+        if let Some(ty) = &mut self.ret_ty {
+            ty.add_id(gen);
+        }
+    }
+}
+
 impl AddId for StructuralNode {
     fn add_id(&mut self, gen: &mut IdGenerator) {
         match self {
             StructuralNode::FuncDecl(fd) => {
-                fd.id = gen.next();
-                for arg in &mut fd.args {
-                    arg.add_id(gen);
-                }
-                if let Some(ty) = &mut fd.ret_ty {
-                    ty.add_id(gen);
-                }
+                fd.add_id(gen);
             }
             StructuralNode::FuncDef(def) => {
+                def.decl.add_id(gen);
                 def.id = gen.next();
+                def.body.id = gen.next();
                 for stmt in &mut def.body.body {
                     stmt.add_id(gen);
                 }

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use hashbrown::HashMap;
 use yuu_parse::parser::SourceCodeInfo;
 use yuu_shared::ast::*;
-use yuu_shared::token::{Integer, Token, TokenVariants};
+use yuu_shared::token::{Integer, Token, TokenKind};
 use yuu_shared::{Context, Pass};
 
 use crate::semantic_error::{GenericSemanticMsg, Note, NoteType, SemanticMsg, Severity};
@@ -13,15 +13,42 @@ pub enum BuiltInType {
     I64,
     F32,
     F64,
+    Nil,
     Error,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct FunctionType {
+    pub args: Vec<TypeInfo>,
+    pub ret: Box<TypeInfo>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum TypeInfo {
     //Custom(String),
     BuiltIn(BuiltInType),
+    Function(FunctionType),
     // pub size: usize,
     // pub align: usize,
+}
+
+impl From<TypeNode> for TypeInfo {
+    fn from(ty: TypeNode) -> Self {
+        match ty {
+            TypeNode::BuiltIn(built_in) => match built_in.kind {
+                yuu_shared::ast::BuiltInTypeKind::I64 => TypeInfo::BuiltIn(BuiltInType::I64),
+                yuu_shared::ast::BuiltInTypeKind::F32 => TypeInfo::BuiltIn(BuiltInType::F32),
+                yuu_shared::ast::BuiltInTypeKind::F64 => TypeInfo::BuiltIn(BuiltInType::F64),
+            },
+            TypeNode::Ident(_ident) => todo!(),
+        }
+    }
+}
+
+impl TypeInfo {
+    pub fn does_coerce_to_same_type(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl Display for TypeInfo {
@@ -32,19 +59,28 @@ impl Display for TypeInfo {
                 BuiltInType::F32 => write!(f, "f32"),
                 BuiltInType::F64 => write!(f, "f64"),
                 BuiltInType::Error => write!(f, "<error>"),
+                BuiltInType::Nil => write!(f, "nil"),
             },
         }
     }
 }
 
+pub struct Block {
+    pub symbols: HashMap<String, TypeInfo>,
+    pub parent: Option<usize>,
+}
+
 pub struct TypeInfoMap {
     pub types: HashMap<usize, TypeInfo>,
+    pub blocks: HashMap<usize, Block>,
 }
 
 pub struct TypeCheckPass<'a> {
     pub(crate) msgs: Vec<SemanticMsg>,
     pub(crate) temp_code_info: &'a SourceCodeInfo,
     pub(crate) failed: bool,
+    pub(crate) current_block: Option<usize>,
+    pub(crate) current_function: Option<usize>,
 }
 
 impl<'a> TypeCheckPass<'a> {
@@ -53,22 +89,81 @@ impl<'a> TypeCheckPass<'a> {
             msgs: Vec::new(),
             temp_code_info: source_code_info,
             failed: false,
+            current_block: None,
+        }
+    }
+
+    fn infer_stmt(
+        &mut self,
+        stmt: &StmtNode,
+        data: &mut TypeInfoMap,
+    ) -> (TypeInfo, Option<ReturnStmtType>) {
+        match stmt {
+            StmtNode::Atomic(expr) => (self.infer_expr(expr, data), None),
+            StmtNode::Let(let_stmt) => {
+                let type_info_inferred = self.infer_expr(&let_stmt.expr, data);
+                let type_info_declared: Option<TypeInfo> =
+                    let_stmt.ty.as_ref().map(|ty| ty.clone().into());
+                let out_type = if let Some(t_decl) = type_info_declared {
+                    if !type_info_inferred.does_coerce_to_same_type(&t_decl) {
+                        self.failed = true;
+                        let error = GenericSemanticMsg {
+                            message: "Type mismatch in let statement".to_string(),
+                            cache: self.temp_code_info.cache.clone(),
+                            span: let_stmt.span.clone(),
+                            notes: vec![
+                                Note {
+                                    message: format!(
+                                        "variable `{}` is declared as `{}` here",
+                                        let_stmt.pattern, t_decl
+                                    ),
+                                    span: let_stmt.ty.as_ref().map(|ty| ty.span().clone()),
+                                    note_type: NoteType::Explanation,
+                                },
+                                Note {
+                                    message: format!(
+                                        "But its expression was inferred to have type `{}`",
+                                        type_info_inferred
+                                    ),
+                                    span: None,
+                                    note_type: NoteType::Explanation,
+                                },
+                            ],
+                            severity: Severity::Error,
+                        };
+                        self.msgs.push(SemanticMsg::Generic(error));
+                        return (TypeInfo::BuiltIn(BuiltInType::Error), None);
+                    }
+                    t_decl
+                } else {
+                    type_info_inferred
+                };
+                data.types.insert(let_stmt.id, out_type.clone());
+                (out_type, None)
+            }
+            StmtNode::Return(return_stmt) => {
+                let type_info = self.infer_expr(&return_stmt.expr, data);
+                data.types.insert(return_stmt.id, type_info.clone());
+                (type_info, None)
+            }
         }
     }
 
     fn infer(&mut self, root: &Node, data: &mut TypeInfoMap) -> TypeInfo {
         match root {
             Node::Expr(expr) => self.infer_expr(expr, data),
-            Node::Stmt(stmt_node) => todo!(),
+            Node::Stmt(stmt_node) => self.infer_stmt(stmt_node, data).0,
             Node::Type(type_node) => todo!(),
+            Node::Structural(structural_node) => todo!(),
+            Node::Pattern(pattern_node) => todo!(),
         }
     }
 
     fn get_type_from_lit(lit: &Token) -> TypeInfo {
         match lit.kind {
-            TokenVariants::Integer(Integer::I64(_)) => TypeInfo::BuiltIn(BuiltInType::F64),
-            TokenVariants::F32(_) => TypeInfo::BuiltIn(BuiltInType::F32),
-            TokenVariants::F64(_) => TypeInfo::BuiltIn(BuiltInType::F64),
+            TokenKind::Integer(Integer::I64(_)) => TypeInfo::BuiltIn(BuiltInType::F64),
+            TokenKind::F32(_) => TypeInfo::BuiltIn(BuiltInType::F32),
+            TokenKind::F64(_) => TypeInfo::BuiltIn(BuiltInType::F64),
             _ => panic!("literal kind has no immediate type"),
         }
     }
@@ -128,6 +223,149 @@ impl<'a> TypeCheckPass<'a> {
                 data.types.insert(ident_expr.id, type_info.clone());
                 type_info
             }
+            ExprNode::Block(block_expr) => {
+                let old_parent = self.current_block;
+                let block = Block {
+                    symbols: HashMap::new(),
+                    parent: self.current_block,
+                };
+
+                self.current_block = Some(block_expr.id);
+                data.blocks.insert(block_expr.id, block);
+
+                for stmt in &block_expr.body {
+                    let (ty, ret_stmt) = self.infer_stmt(stmt, data);
+                    if let Some(ReturnStmtType::ReturnFromBlock) = ret_stmt {
+                        self.current_block = old_parent;
+                        return ty;
+                    } else if let Some(ReturnStmtType::ReturnFromFunction) = ret_stmt {
+                        todo!("return from function in block");
+                        // Check if the function return type and the type of this block coerece to the same type
+                        // If not -> error
+
+                        // First check if we are in a function
+                        if self.current_function.is_none() {
+                            self.failed = true;
+                            let error = GenericSemanticMsg {
+                                message: "Return statement outside of function".to_string(),
+                                cache: self.temp_code_info.cache.clone(),
+                                span: stmt.span().clone(),
+                                notes: vec![],
+                                severity: Severity::Error,
+                            };
+                            self.msgs.push(SemanticMsg::Generic(error));
+                        }
+
+                        // TODO: This needs to be checked at the top level actually...
+                        /*let current_function = self.current_function.unwrap();
+                        let ty_func = data.types.get(&current_function);
+
+                        if let Some(ty_func) = ty_func {
+                            if !ty_func.does_coerce_to_same_type(&ty) {
+                                self.failed = true;
+                                let error = GenericSemanticMsg {
+                                    message: "Type mismatch in function return".to_string(),
+                                    cache: self.temp_code_info.cache.clone(),
+                                    span: stmt.span().clone(),
+                                    notes: vec![
+                                        Note {
+                                            message: format!("This block has type `{}`", ty),
+                                            span: Some(block_expr.span.clone()),
+                                            note_type: NoteType::Explanation,
+                                        },
+                                        Note {
+                                            message: format!(
+                                                "But the function return type is `{}`",
+                                                current_function
+                                            ),
+                                            span: None,
+                                            note_type: NoteType::Explanation,
+                                        },
+                                    ],
+                                    severity: Severity::Error,
+                                };
+                                self.msgs.push(SemanticMsg::Generic(error));
+                            } */
+
+                        // } else {
+                        //     // Function currently has no return type set -> set it
+                        //     data.types.insert(current_function, ty);
+                        // }
+                    }
+                }
+
+                self.current_block = old_parent;
+
+                TypeInfo::BuiltIn(BuiltInType::Nil)
+            }
+            ExprNode::FuncCall(func_call_expr) => {
+                let lhs_ty = self.infer_expr(&func_call_expr.lhs, data);
+
+                let arg_tys = func_call_expr
+                    .args
+                    .iter()
+                    .map(|arg| self.infer_expr(arg, data));
+
+                match lhs_ty {
+                    TypeInfo::BuiltIn(_) => {
+                        self.failed = true;
+                        let error = GenericSemanticMsg {
+                            message: "Function call on non-function".to_string(),
+                            cache: self.temp_code_info.cache.clone(),
+                            span: func_call_expr.span.clone(),
+                            notes: vec![],
+                            severity: Severity::Error,
+                        };
+                        self.msgs.push(SemanticMsg::Generic(error));
+                    }
+
+                    TypeInfo::Function(fun) => {
+                        for (idx, arg_ty) in arg_tys.enumerate() {
+                            let expected_ty = fun.args.get(idx);
+                            if expected_ty.is_none() {
+                                self.failed = true;
+                                let error = GenericSemanticMsg {
+                                    message: "Too many arguments in function call".to_string(),
+                                    cache: self.temp_code_info.cache.clone(),
+                                    span: func_call_expr.span.clone(),
+                                    notes: vec![],
+                                    severity: Severity::Error,
+                                };
+                                self.msgs.push(SemanticMsg::Generic(error));
+                                break;
+                            }
+                            let expected_ty = expected_ty.unwrap(); 
+                            if !expected_ty.does_coerce_to_same_type(&arg_ty) {
+                                self.failed = true;
+                                let error = GenericSemanticMsg {
+                                    message: "Type mismatch in function call".to_string(),
+                                    cache: self.temp_code_info.cache.clone(),
+                                    span: func_call_expr.span.clone(),
+                                    notes: vec![
+                                        Note {
+                                            message: format!("Expected type `{}`", expected_ty),
+                                            span: Some(func_call_expr.args[idx].span()),
+                                            note_type: NoteType::Explanation,
+                                        },
+                                        Note {
+                                            message: format!("But found type `{}`", arg_ty),
+                                            span: Some(func_call_expr.args[idx].span()),
+                                            note_type: NoteType::Explanation,
+                                        },
+                                    ],
+                                    severity: Severity::Error,
+                                };
+                                self.msgs.push(SemanticMsg::Generic(error));
+                        }
+                    } 
+                }
+
+                assert!(lhs_ty.does_coerce_to_same_type(&TypeInfo::Function(rhs_ty)));
+
+                data.types.insert(func_call_expr.id, lhs_ty.clone());
+
+                todo!()
+            }
         }
     }
 }
@@ -136,6 +374,7 @@ impl<'a> Pass for TypeCheckPass<'a> {
     fn run(&mut self, ast: &Node, context: &mut Context) -> bool {
         let mut data = TypeInfoMap {
             types: HashMap::new(),
+            blocks: HashMap::new(),
         };
         self.infer(ast, &mut data);
         context.replace_pass_data(data);

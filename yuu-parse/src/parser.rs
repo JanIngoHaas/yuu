@@ -5,7 +5,7 @@ use ariadne::Source;
 use logos::Span;
 use yuu_shared::{
     ast::*,
-    token::{Token, TokenVariants},
+    token::{Token, TokenKind},
 };
 
 pub struct Parser<'a> {
@@ -28,17 +28,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn get_infix_precedence(op: &TokenVariants) -> (i32, i32) {
+    fn get_infix_precedence(op: &TokenKind) -> (i32, i32) {
         match op {
-            TokenVariants::Plus | TokenVariants::Minus => (1, 1),
-            TokenVariants::Asterix | TokenVariants::Slash => (2, 2),
+            TokenKind::Plus | TokenKind::Minus => (1, 1),
+            TokenKind::Asterix | TokenKind::Slash => (2, 2),
+            TokenKind::LParen => (7, 0),
             _ => (-1, -1),
         }
     }
 
-    fn get_prefix_precedence(op: &TokenVariants) -> i32 {
+    fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
-            TokenVariants::Plus | TokenVariants::Minus => 5,
+            TokenKind::Plus | TokenKind::Minus => 5,
             _ => -1,
         }
     }
@@ -50,8 +51,8 @@ impl<'a> Parser<'a> {
         span: Span,
     ) -> Result<(Span, ExprNode), ParseError> {
         let unary_op = match op.kind {
-            TokenVariants::Plus => UnaryOp::Pos,
-            TokenVariants::Minus => UnaryOp::Negate,
+            TokenKind::Plus => UnaryOp::Pos,
+            TokenKind::Minus => UnaryOp::Negate,
             _ => {
                 return Err(ParseError::GenericSyntaxError(GenericError {
                     expected: "an unary operator".to_string(),
@@ -87,20 +88,20 @@ impl<'a> Parser<'a> {
         let t = self.lexer.next_token()?;
 
         match &t.kind {
-            TokenVariants::F32(_) | TokenVariants::F64(_) | TokenVariants::Integer(_) => {
+            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) => {
                 Ok(self.make_literal_expr(t))
             }
 
-            TokenVariants::Ident(ident) => Ok(self.make_ident_expr(ident.clone(), t.span)),
+            TokenKind::Ident(ident) => Ok(self.make_ident_expr(ident.clone(), t.span)),
 
-            TokenVariants::Plus | TokenVariants::Minus => {
+            TokenKind::Plus | TokenKind::Minus => {
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
                 let span = t.span.start..span.end;
                 let unary = self.make_unary_expr(operand, t, span)?;
                 Ok(unary)
             }
-            TokenVariants::LParen => {
+            TokenKind::LParen => {
                 let (span, lhs) = self.parse_expr_chain(0)?;
 
                 let token_lparen_span = t.span.clone();
@@ -110,7 +111,7 @@ impl<'a> Parser<'a> {
                 let span = span.start..must_be_rparen.span.end;
 
                 match must_be_rparen.kind {
-                    TokenVariants::RParen => Ok((span, lhs)),
+                    TokenKind::RParen => Ok((span, lhs)),
                     _ => Err(ParseError::GenericSyntaxError(GenericError {
                         expected: "a closing parenthesis".to_string(),
                         found: format!("{:?}", must_be_rparen.kind),
@@ -150,10 +151,10 @@ impl<'a> Parser<'a> {
         span: Span,
     ) -> Result<(Span, ExprNode), ParseError> {
         let bin_op = match token.kind {
-            TokenVariants::Plus => BinOp::Add,
-            TokenVariants::Minus => BinOp::Subtract,
-            TokenVariants::Asterix => BinOp::Multiply,
-            TokenVariants::Slash => BinOp::Divide,
+            TokenKind::Plus => BinOp::Add,
+            TokenKind::Minus => BinOp::Subtract,
+            TokenKind::Asterix => BinOp::Multiply,
+            TokenKind::Slash => BinOp::Divide,
             _ => {
                 return Err(ParseError::GenericSyntaxError(GenericError {
                     expected: "a binary operator".to_string(),
@@ -200,11 +201,11 @@ impl<'a> Parser<'a> {
             let op = self.lexer.next_token()?;
 
             match &op.kind {
-                TokenVariants::Plus
-                | TokenVariants::Minus
-                | TokenVariants::Asterix
-                | TokenVariants::Slash => {
+                TokenKind::Plus | TokenKind::Minus | TokenKind::Asterix | TokenKind::Slash => {
                     lhs = self.parse_bin_expr(lhs.1, op, right_precedence)?;
+                }
+                TokenKind::LParen => {
+                    lhs = self.parse_func_call_expr(lhs.1, op, right_precedence)?;
                 }
                 _ => break,
             }
@@ -219,20 +220,20 @@ impl<'a> Parser<'a> {
     pub fn parse_type(&mut self) -> Result<TypeNode, ParseError> {
         let t = self.lexer.next_token()?;
         let out = match t.kind {
-            TokenVariants::I64Kw | TokenVariants::F32Kw | TokenVariants::F64Kw => (
+            TokenKind::I64Kw | TokenKind::F32Kw | TokenKind::F64Kw => (
                 t.span.clone(),
                 TypeNode::BuiltIn(BuiltInType {
                     span: t.span.clone(),
                     kind: match t.kind {
-                        TokenVariants::I64Kw => BuiltInTypeKind::I64,
-                        TokenVariants::F32Kw => BuiltInTypeKind::F32,
-                        TokenVariants::F64Kw => BuiltInTypeKind::F64,
+                        TokenKind::I64Kw => BuiltInTypeKind::I64,
+                        TokenKind::F32Kw => BuiltInTypeKind::F32,
+                        TokenKind::F64Kw => BuiltInTypeKind::F64,
                         _ => unreachable!(),
                     },
                     id: 0,
                 }),
             ),
-            TokenVariants::Ident(name) => {
+            TokenKind::Ident(name) => {
                 let span = t.span.clone();
                 let ty = TypeNode::Ident(IdentType {
                     span: span.clone(),
@@ -259,48 +260,50 @@ impl<'a> Parser<'a> {
         Ok((span, stmt))
     }
 
-    pub fn parse_let_stmt(&mut self) -> Result<(Span, StmtNode), ParseError> {
-        let let_tkn = self.lexer.expect(&[TokenVariants::Let], Vec::new())?;
-        let ident = self.lexer.next_token()?;
-        match &ident.kind {
-            TokenVariants::Ident(ident) => {
-                let la = self.lexer.peek()?;
-                let ty = if la.kind == TokenVariants::Colon {
-                    let out = self.parse_type()?;
-                    Some(out)
-                } else {
-                    None
-                };
-                let _ = self.lexer.expect(&[TokenVariants::Equal], Vec::new())?;
-                let (span, expr) = self.parse_expr()?;
-                let span = let_tkn.span.start..span.end;
-                let stmt = StmtNode::Let(LetStmt {
-                    span: span.clone(),
-                    name: ident.clone(),
-                    expr: Box::new(expr),
-                    ty,
-                });
-                Ok((span, stmt))
-            }
-            //TODO: Add specific error message for I64 ("an identifier cannot start with a number")
+    pub fn parse_pattern(&mut self) -> Result<PatternNode, ParseError> {
+        let t = self.lexer.next_token()?;
+        match t.kind {
+            TokenKind::Ident(ident) => Ok(PatternNode::Ident(IdentPattern {
+                span: t.span.clone(),
+                name: ident,
+                id: 0,
+            })),
             _ => Err(ParseError::GenericSyntaxError(GenericError {
-                expected: "an identifier".to_string(),
-                found: format!("{:?}", ident.kind),
-                span: ident.span.clone(),
-                note: vec![Note {
-                    message: "The let keyword is here, indicating a variable declaration"
-                        .to_string(),
-                    span: let_tkn.span.clone(),
-                }],
+                expected: "an pattern naming the binding".to_string(),
+                found: format!("{:?}", t.kind),
+                span: t.span.clone(),
+                note: vec![],
             })),
         }
-        // Parse semicolon
+    }
+
+    pub fn parse_let_stmt(&mut self) -> Result<(Span, StmtNode), ParseError> {
+        let let_tkn = self.lexer.expect(&[TokenKind::Let], Vec::new())?;
+        let pattern = self.parse_pattern()?;
+        let la = self.lexer.peek()?;
+        let ty = if la.kind == TokenKind::Colon {
+            let out = self.parse_type()?;
+            Some(out)
+        } else {
+            None
+        };
+        let _ = self.lexer.expect(&[TokenKind::Equal], Vec::new())?;
+        let (span, expr) = self.parse_expr()?;
+        let span = let_tkn.span.start..span.end;
+        let stmt = StmtNode::Let(LetStmt {
+            span: span.clone(),
+            pattern: Box::new(pattern),
+            expr: Box::new(expr),
+            ty,
+            id: 0,
+        });
+        Ok((span, stmt))
     }
 
     pub fn parse_ret_stmt(&mut self) -> Result<(Span, StmtNode), ParseError> {
         let ret_tkn = self
             .lexer
-            .expect(&[TokenVariants::Return, TokenVariants::Result], Vec::new())?;
+            .expect(&[TokenKind::Return, TokenKind::Result], Vec::new())?;
 
         let (span, expr) = self.parse_expr()?;
         let span = ret_tkn.span.start..span.end;
@@ -308,45 +311,41 @@ impl<'a> Parser<'a> {
             span: span.clone(),
             expr: Box::new(expr),
             ty: match &ret_tkn.kind {
-                TokenVariants::Return => ReturnStmtType::ReturnFromFunction,
-                TokenVariants::Result => ReturnStmtType::ReturnFromBlock,
+                TokenKind::Return => ReturnStmtType::ReturnFromFunction,
+                TokenKind::Result => ReturnStmtType::ReturnFromBlock,
                 _ => panic!("Expected return or result token"),
             },
+            id: 0,
         });
         Ok((span, stmt))
     }
 
-    pub fn parse_func_arg(&mut self) -> Result<(Span, (String, TypeNode)), ParseError> {
-        let var_name = self.lexer.next_token()?;
-        match &var_name.kind {
-            TokenVariants::Ident(ident) => {
-                let _ = self.lexer.expect(&[TokenVariants::Colon], Vec::new())?;
-                let ty = self.parse_type()?;
-                let span = var_name.span.start..ty.span().end;
-                Ok((span, (ident.clone(), ty)))
-            }
-            _ => Err(ParseError::GenericSyntaxError(GenericError {
-                expected: "an identifier".to_string(),
-                found: format!("{:?}", var_name.kind),
-                span: var_name.span.clone(),
-                note: vec![],
-            })),
-        }
+    pub fn parse_func_arg(&mut self) -> Result<FuncArg, ParseError> {
+        let pattern = self.parse_pattern()?;
+        let _ = self.lexer.expect(&[TokenKind::Colon], Vec::new())?;
+        let ty = self.parse_type()?;
+        let span = pattern.span().start..ty.span().end;
+        Ok(FuncArg {
+            span: span.clone(),
+            pattern,
+            ty,
+            id: 0,
+        })
     }
 
-    pub fn parse_func_args(&mut self) -> Result<Vec<TypeNode>, ParseError> {
+    pub fn parse_func_args(&mut self) -> Result<Vec<FuncArg>, ParseError> {
         let mut args = Vec::new();
         loop {
             let la = self.lexer.peek()?;
-            if la.kind == TokenVariants::RParen {
+            if la.kind == TokenKind::RParen {
                 return Ok(args);
             }
-            let ty = self.parse_type()?;
-            args.push(ty);
+            let arg = self.parse_func_arg()?;
+            args.push(arg);
             let la = self.lexer.peek()?;
-            if la.kind == TokenVariants::Comma {
+            if la.kind == TokenKind::Comma {
                 let _ = self.lexer.next_token()?;
-            } else if la.kind != TokenVariants::RParen {
+            } else if la.kind != TokenKind::RParen {
                 return Err(ParseError::GenericSyntaxError(GenericError {
                     expected: "a comma or a closing parenthesis".to_string(),
                     found: format!("{:?}", la.kind),
@@ -368,12 +367,39 @@ impl<'a> Parser<'a> {
         )
     }
 
+    pub fn parse_func_call_expr(
+        &mut self,
+        lhs: ExprNode,
+        _op_token: Token,
+        _min_precedence: i32,
+    ) -> Result<(Span, ExprNode), ParseError> {
+        let mut args = Vec::new();
+        loop {
+            let la = self.lexer.peek()?;
+            if la.kind == TokenKind::RParen {
+                let rparen = self.lexer.next_token()?;
+                let span = lhs.span().start..rparen.span.end;
+                let func_call = FuncCallExpr {
+                    lhs: Box::new(lhs),
+                    args,
+                    span: span.clone(),
+                    id: 0,
+                };
+                return Ok((span, ExprNode::FuncCall(func_call)));
+            } else if la.kind == TokenKind::Comma {
+                let _ = self.lexer.next_token()?;
+            }
+            let (_, arg) = self.parse_expr_chain(0)?;
+            args.push(arg);
+        }
+    }
+
     pub fn parse_block_expr(&mut self) -> Result<(Span, BlockExpr), ParseError> {
-        let lbrace = self.lexer.expect(&[TokenVariants::LBrace], Vec::new())?;
+        let lbrace = self.lexer.expect(&[TokenKind::LBrace], Vec::new())?;
         let mut stmts = Vec::new();
         loop {
             let tkn = self.lexer.peek()?;
-            if tkn.kind == TokenVariants::RBrace {
+            if tkn.kind == TokenKind::RBrace {
                 let rbrace = self.lexer.next_token()?;
                 let span = lbrace.span.start..rbrace.span.end;
                 let block_expr = self.make_block_expr(stmts, span);
@@ -389,7 +415,7 @@ impl<'a> Parser<'a> {
         &mut self,
         name: String,
         span: Span,
-        args: Vec<TypeNode>,
+        args: Vec<FuncArg>,
         ret_ty: Option<Box<TypeNode>>,
     ) -> (Span, FuncDeclStructural) {
         (
@@ -405,14 +431,14 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_func_decl(&mut self) -> Result<(Span, FuncDeclStructural), ParseError> {
-        let fn_tkn = self.lexer.expect(&[TokenVariants::Fn], Vec::new())?;
+        let fn_tkn = self.lexer.expect(&[TokenKind::Fn], Vec::new())?;
         let ident = self.lexer.next_token()?;
         match ident.kind {
-            TokenVariants::Ident(ident) => {
-                let _ = self.lexer.expect(&[TokenVariants::LParen], Vec::new())?;
+            TokenKind::Ident(ident) => {
+                let _ = self.lexer.expect(&[TokenKind::LParen], Vec::new())?;
                 let args = self.parse_func_args()?;
-                let rparen = self.lexer.expect(&[TokenVariants::RParen], Vec::new())?;
-                let ret_ty = if self.lexer.peek()?.kind == TokenVariants::Arrow {
+                let rparen = self.lexer.expect(&[TokenKind::RParen], Vec::new())?;
+                let ret_ty = if self.lexer.peek()?.kind == TokenKind::Arrow {
                     let _ = self.lexer.next_token()?;
                     Some(Box::new(self.parse_type()?))
                 } else {
@@ -463,7 +489,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_semicolon(&mut self, x: Span) -> Result<Span, ParseError> {
-        let smcln = self.lexer.expect(&[TokenVariants::Semicolon], Vec::new())?;
+        let smcln = self.lexer.expect(&[TokenKind::Semicolon], Vec::new())?;
         Ok(x.start..smcln.span.end)
     }
 
@@ -471,11 +497,11 @@ impl<'a> Parser<'a> {
         let t = self.lexer.peek()?;
 
         let x = match t.kind {
-            TokenVariants::Let => {
+            TokenKind::Let => {
                 let (span, stmt) = self.parse_let_stmt()?;
                 (self.parse_semicolon(span)?, stmt)
             }
-            TokenVariants::Return | TokenVariants::Result => {
+            TokenKind::Return | TokenKind::Result => {
                 let (span, stmt) = self.parse_ret_stmt()?;
                 (self.parse_semicolon(span)?, stmt)
             }
@@ -488,9 +514,21 @@ impl<'a> Parser<'a> {
         Ok(x)
     }
 
+    pub fn parse_structural(&mut self) -> Result<(Span, StructuralNode), ParseError> {
+        let t = self.lexer.peek()?;
+        let x = match t.kind {
+            TokenKind::Fn => {
+                let (span, func_def) = self.parse_func_def()?;
+                (span, StructuralNode::FuncDef(func_def))
+            }
+            _ => unreachable!("only fn is supported as structural node"),
+        };
+        Ok(x)
+    }
+
     pub fn parse(&mut self) -> Result<SourceCodeInfo, ParseError> {
-        let (_, expr) = self.parse_expr()?;
-        let root_node = Node::Expr(expr);
+        let (_, structural) = self.parse_structural()?;
+        let root_node = Node::Structural(structural);
         let source_code = ariadne::Source::from(self.code_info.code.to_string());
         let source_code_info = SourceCodeInfo {
             cache: Rc::new(RefCell::new((
@@ -523,7 +561,7 @@ mod tests {
             match expr {
                 ExprNode::Literal(lit) => assert_eq!(
                     lit.lit.kind,
-                    TokenVariants::Integer(yuu_shared::token::Integer::I64(42))
+                    TokenKind::Integer(yuu_shared::token::Integer::I64(42))
                 ),
                 _ => panic!("Expected a literal expression"),
             }
