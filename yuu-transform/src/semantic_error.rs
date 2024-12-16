@@ -1,9 +1,8 @@
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
-use std::{cell::RefCell, fmt::Display, ops::DerefMut, rc::Rc, sync::Arc};
+use ariadne::{Color, Fmt, Label, Report, ReportKind};
+use std::ops::DerefMut;
 
 use yuu_parse::{
-    lexer::UnprocessedCodeInfo,
-    parser::{SourceCodeInfo, SrcCache},
+    parser::SrcCache,
     Span,
 };
 
@@ -105,7 +104,7 @@ impl SemanticErrorMsg {
                         report = report.with_note(note.message.clone().fg(color));
                     }
                 }
-                let _ = drop(filename);
+                drop(filename);
                 let mut cache = msg.cache.borrow_mut();
                 report
                     .finish()

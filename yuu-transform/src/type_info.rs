@@ -9,6 +9,12 @@ pub struct TypeInfoTable {
     pub types: HashMap<NodeId, Rc<TypeInfo>>,
 }
 
+impl Default for TypeInfoTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeInfoTable {
     pub fn new() -> Self {
         Self {

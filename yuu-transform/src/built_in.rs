@@ -5,7 +5,7 @@ use std::{cell::RefCell, rc::Rc};
 use yuu_parse::Span;
 use yuu_shared::ast::NodeId;
 
-use crate::type_info::{BuiltInType, TypeInfo};
+use crate::type_info::BuiltInType;
 
 #[derive(Clone)]
 pub struct BindingInfo {
@@ -33,7 +33,7 @@ pub const ID_DIV_FUNC_I64: NodeId = -10;
 pub const ID_DIV_FUNC_F32: NodeId = -11;
 pub const ID_DIV_FUNC_F64: NodeId = -12;
 
-pub const OPERATOR_BINDINGS: [(&'static str, [BindingInfo; 3]); 4] = [
+pub const OPERATOR_BINDINGS: [(&str, [BindingInfo; 3]); 4] = [
     (
         "add",
         [
@@ -107,5 +107,5 @@ pub const OPERATOR_BINDINGS: [(&'static str, [BindingInfo; 3]); 4] = [
 pub const BUILTIN_TYPES: [BuiltInType; 3] = [BuiltInType::I64, BuiltInType::F32, BuiltInType::F64];
 
 pub fn is_prebuilt_node_id(id: NodeId) -> bool {
-    return id < 0;
+    id < 0
 }

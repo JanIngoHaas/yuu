@@ -2,10 +2,7 @@ use core::panic;
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
-    fmt::Display,
-    hash::Hash,
     rc::Rc,
-    sync::Arc,
 };
 
 use hashbrown::HashMap;
@@ -13,7 +10,7 @@ use yuu_parse::{parser::SrcCache, Span};
 use yuu_shared::{ast::*, Pass};
 
 use crate::{
-    built_in::{is_prebuilt_node_id, BindingInfo, BindingInfoKind, OPERATOR_BINDINGS},
+    built_in::{BindingInfo, BindingInfoKind},
     semantic_error::{GenericSemanticErrorMsg, Note, NoteType, SemanticErrorMsg, Severity},
     type_info::{BuiltInType, FunctionGroupKind, FunctionType, TypeInfo, TypeInfoTable},
 };
@@ -185,7 +182,7 @@ impl Block {
             BindingInfoKind::Unique(_) => {
                 // This is a redefinition of a variable as a function
                 // We can't have that
-                return Err(FunctionInsertError::FunctionRedefinition);
+                Err(FunctionInsertError::FunctionRedefinition)
             }
         }
     }
@@ -203,7 +200,7 @@ impl Block {
             Some(BindingInfoKind::Ambiguous(_)) => {
                 // This is a redefinition of a function as a variable
                 // We can't have that
-                return false;
+                false
             }
             _ => true, // This also explicitly handles shadowing by just allowing it
         }
@@ -220,7 +217,8 @@ impl Block {
         T: Fn(&BindingInfo, &FunctionType) -> Rc<TypeInfo>,
     {
         let overload = self.get_binding(name);
-        let out = overload.map(|binding| match binding {
+
+        overload.map(|binding| match binding {
             BindingInfoKind::Ambiguous(f) => {
                 for binding in f.as_ref().borrow().iter() {
                     let func_type = type_info_table.types.get(&binding.id).expect(
@@ -248,12 +246,10 @@ impl Block {
                         _ => unreachable!("Compiler Bug: Function binding is not a function type"),
                     }
                 }
-                return Err(FunctionOverloadError::NoOverloadFound);
+                Err(FunctionOverloadError::NoOverloadFound)
             }
-            BindingInfoKind::Unique(_) => return Err(FunctionOverloadError::NotAFunction),
-        }).ok_or(FunctionOverloadError::BindingNotFound)?;
-
-        out
+            BindingInfoKind::Unique(_) => Err(FunctionOverloadError::NotAFunction),
+        }).ok_or(FunctionOverloadError::BindingNotFound)?
     }
 }
 
@@ -284,6 +280,12 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
 pub struct BindingTable {
     pub bindings: HashMap<NodeId, BindingInfo>,
+}
+
+impl Default for BindingTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BindingTable {
@@ -535,28 +537,24 @@ impl PassTypeInference {
             ExprNode::Block(block_expr) => {
                 let block_scope = Block::from_parent(block.clone());
 
-                // Process all statements except the last one
-                for stmt in &block_expr.body[..block_expr.body.len().saturating_sub(1)] {
-                    self.infer_stmt(stmt, &block_scope)?;
-                }
+                let mut last_stmt_type = Rc::new(TypeInfo::BuiltIn(BuiltInType::Nil));
 
-                // The type of a block is the type of its last expression
-                let block_type = if let Some(last_stmt) = block_expr.body.last() {
-                    match last_stmt {
-                        StmtNode::Atomic(expr) => self.infer_expr(expr, &block_scope)?,
-                        StmtNode::Return(_) | StmtNode::Let(_) => {
-                            Rc::new(TypeInfo::BuiltIn(BuiltInType::Nil))
+                for stmt in &block_expr.body {
+                    match stmt {
+                        StmtNode::Return(ret) => {
+                            last_stmt_type = self.infer_expr(&ret.expr, &block_scope)?;
+                            break; // Early return
+                        }
+                        _ => {
+                            self.infer_stmt(stmt, &block_scope)?;
                         }
                     }
-                } else {
-                    // Empty block returns Nil
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::Nil))
-                };
+                }
 
                 self.type_info_table
                     .types
-                    .insert(block_expr.id, block_type.clone());
-                block_type
+                    .insert(block_expr.id, last_stmt_type.clone());
+                last_stmt_type
             }
 
             ExprNode::FuncCall(func_call_expr) => {
@@ -570,7 +568,7 @@ impl PassTypeInference {
                     .map(|arg| self.infer_expr(arg, block))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let (resolved_ret_type, resolved_func) = match &*actual_func_ident.as_ref() {
+                let (resolved_ret_type, resolved_func) = match actual_func_ident.as_ref() {
                     TypeInfo::FunctionGroup(func_candidates) => {
                         match &*func_candidates.borrow() {
                             FunctionGroupKind::Resolved(resolved_func_type) => {
@@ -604,11 +602,10 @@ impl PassTypeInference {
                             }
                             FunctionGroupKind::Unresolved(func_candidates) => {
                                 let (_, resolved_generic_ty, resolved_func_type) = resolve_function_group(
-                                    &func_candidates,
+                                    func_candidates,
                                     &self.type_info_table,
-                                    &actual_func_ident,
                                     actual_arg_types.as_slice(),
-                                );
+                                ).map_err(|x| x.to_semantic_error_msg())?;
                                 Ok((resolved_func_type.ret.clone(), resolved_generic_ty))
                             }
                         }
@@ -641,6 +638,7 @@ impl PassTypeInference {
         &mut self,
         name: &str,
         args: &[FuncArg],
+        ret_ty: Option<&TypeNode>, // Add return type parameter
         id: NodeId,
         span: Span,
         block: &Rc<RefCell<Block>>,
@@ -676,9 +674,15 @@ impl PassTypeInference {
             })
             .collect::<Result<Rc<[_]>, _>>()?;
 
+        let ret_type = if let Some(ty) = ret_ty {
+            self.infer_type(ty, block)?
+        } else {
+            Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
+        };
+
         let func = Rc::new(TypeInfo::Function(FunctionType {
-            args: func_arg_types.into(),
-            ret: Rc::new(TypeInfo::BuiltIn(BuiltInType::I64)),
+            args: func_arg_types,
+            ret: ret_type,
         }));
 
         self.type_info_table.types.insert(id, func.clone());
@@ -692,13 +696,19 @@ impl PassTypeInference {
         block: &Rc<RefCell<Block>>,
     ) -> Result<(), SemanticErrorMsg> {
         match structural {
-            StructuralNode::FuncDecl(decl) => {
-                self.declare_function(&decl.name, &decl.args, decl.id, decl.span.clone(), block)
-            }
+            StructuralNode::FuncDecl(decl) => self.declare_function(
+                &decl.name,
+                &decl.args,
+                decl.ret_ty.as_deref(),
+                decl.id,
+                decl.span.clone(),
+                block,
+            ),
             StructuralNode::FuncDef(def) => {
                 self.declare_function(
                     &def.decl.name,
                     &def.decl.args,
+                    def.decl.ret_ty.as_deref(),
                     def.id,
                     def.span.clone(),
                     block,
@@ -707,19 +717,18 @@ impl PassTypeInference {
                 let func_block = Block::from_parent(block.clone());
 
                 for arg in &def.decl.args {
-                    match &arg.binding {
-                        BindingNode::Ident(ident) => {
-                            func_block.as_ref().borrow_mut().insert_variable(
-                                ident.name.clone(),
-                                ident.id,
-                                ident.span.clone(),
-                            );
-                        }
+                    if let BindingNode::Ident(ident) = &arg.binding {
+                        func_block.as_ref().borrow_mut().insert_variable(
+                            ident.name.clone(),
+                            ident.id,
+                            ident.span.clone(),
+                        );
                     }
+                }
 
-                    for stmt in &def.body.body {
-                        self.infer_stmt(stmt, &func_block);
-                    }
+                // Process function body separately
+                for stmt in &def.body.body {
+                    self.infer_stmt(stmt, &func_block)?;
                 }
                 Ok(())
             }
@@ -727,12 +736,11 @@ impl PassTypeInference {
     }
 }
 
-fn resolve_function_group<'a>(
+fn resolve_function_group(
     candidate_funcs: &RefCell<Vec<BindingInfo>>,
-    type_info_table: &'a TypeInfoTable,
-    actual_func_ident: &Rc<TypeInfo>,
+    type_info_table: &TypeInfoTable,
     actual_args: &[Rc<TypeInfo>],
-) -> (BindingInfo, Rc<TypeInfo>, FunctionType) {
+) -> Result<(BindingInfo, Rc<TypeInfo>, FunctionType), FunctionOverloadError> {
     let candidates = candidate_funcs.borrow();
 
     for candidate in candidates.iter() {
@@ -753,13 +761,13 @@ fn resolve_function_group<'a>(
                 }
 
                 if all_args_match {
-                    return (candidate.clone(), func_type.clone(), func.clone());
+                    return Ok((candidate.clone(), func_type.clone(), func.clone()));
                 }
             }
         }
     }
 
-    panic!("No matching function found in function group");
+    Err(FunctionOverloadError::NoOverloadFound)
 }
 
 impl Pass for PassTypeInference {
