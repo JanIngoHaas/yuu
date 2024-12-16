@@ -597,7 +597,7 @@ impl PassTypeInference {
                                         }
                                     }
 
-                                    (func.ret.clone(), resolved_func_type.clone())
+                                    Ok((func.ret.clone(), resolved_func_type.clone()))
                                 } else {
                                     unreachable!("Compiler Bug: Resolved function group contains non-function type")
                                 }
@@ -609,19 +609,19 @@ impl PassTypeInference {
                                     &actual_func_ident,
                                     actual_arg_types.as_slice(),
                                 );
-                                (resolved_func_type.ret.clone(), resolved_generic_ty)
+                                Ok((resolved_func_type.ret.clone(), resolved_generic_ty))
                             }
                         }
-                    },
-                TypeInfo::BuiltIn(_) => Err(SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                    self.src_cache.clone(),
-                    "Cannot call a built-in type as a function".to_string(),
-                    func_call_expr.span.clone(),
-                    vec![],
-                    Severity::Error,
-                ))),
-                TypeInfo::Function(_) => unreachable!("Compiler Bug: Function type should be a function group - overloading is allowed."),
-            }?;
+                    }
+                    TypeInfo::BuiltIn(_) => Err(SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
+                        self.src_cache.clone(),
+                        "Cannot call a built-in type as a function".to_string(),
+                        func_call_expr.span.clone(),
+                        vec![],
+                        Severity::Error,
+                    ))),
+                    TypeInfo::Function(_) => unreachable!("Compiler Bug: Function type should be a function group - overloading is allowed."),
+                }?;
 
                 self.type_info_table
                     .types

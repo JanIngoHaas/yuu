@@ -1,4 +1,4 @@
-use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use logos::{Logos, Span};
 use thiserror::Error;
 use yuu_shared::token::{Token, TokenKind};

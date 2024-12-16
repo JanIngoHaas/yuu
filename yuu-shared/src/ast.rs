@@ -1,7 +1,7 @@
 use logos::Span;
 use serde::{Deserialize, Serialize};
 
-use crate::token::{Integer, Token, TokenKind};
+use crate::token::Token;
 use std::fmt::{self, Display, Formatter};
 
 /// Binary operators for arithmetic expressions
