@@ -24,11 +24,31 @@ impl Display for BinOp {
     }
 }
 
+impl BinOp {
+    pub fn static_name(&self) -> &'static str {
+        match self {
+            BinOp::Add => "add",
+            BinOp::Subtract => "sub",
+            BinOp::Multiply => "mul",
+            BinOp::Divide => "div",
+        }
+    }
+}
+
 /// Unary operators for expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     Pos, // Meaningless, but included for completeness
     Negate,
+}
+
+impl UnaryOp {
+    pub fn static_name(&self) -> &'static str {
+        match self {
+            UnaryOp::Pos => "pos",
+            UnaryOp::Negate => "neg",
+        }
+    }
 }
 
 impl Display for UnaryOp {
@@ -44,7 +64,7 @@ impl Display for UnaryOp {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LiteralExpr {
     pub lit: Token,
-    pub id: usize,
+    pub id: NodeId,
 }
 
 /// Represents a binary expression (e.g., a + b)
@@ -54,7 +74,7 @@ pub struct BinaryExpr {
     pub right: Box<ExprNode>,
     pub op: BinOp,
     pub span: Span,
-    pub id: usize,
+    pub id: NodeId,
 }
 
 /// Represents a unary expression (e.g., -a, !b)
@@ -63,14 +83,14 @@ pub struct UnaryExpr {
     pub operand: Box<ExprNode>,
     pub op: UnaryOp,
     pub span: Span,
-    pub id: usize,
+    pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IdentExpr {
     pub ident: String,
     pub span: Span,
-    pub id: usize,
+    pub id: NodeId,
 }
 
 /// Represents an expression in the AST
@@ -87,10 +107,10 @@ pub enum ExprNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LetStmt {
     pub span: Span,
-    pub id: usize,
+    pub id: NodeId,
     pub expr: Box<ExprNode>,
     pub ty: Option<TypeNode>,
-    pub pattern: Box<PatternNode>,
+    pub binding: Box<BindingNode>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -104,32 +124,32 @@ pub struct ReturnStmt {
     pub span: Span,
     pub expr: Box<ExprNode>,
     pub ty: ReturnStmtType,
-    pub id: usize, // Add this field
+    pub id: NodeId, // Add this field
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct IdentPattern {
-    pub id: usize,
+pub struct IdentBinding {
+    pub id: NodeId,
     pub span: Span,
     pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum PatternNode {
-    Ident(IdentPattern),
+pub enum BindingNode {
+    Ident(IdentBinding),
 }
 
-impl Display for PatternNode {
+impl Display for BindingNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            PatternNode::Ident(ident) => write!(f, "{}", ident.name),
+            BindingNode::Ident(ident) => write!(f, "{}", ident.name),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IdentType {
-    pub id: usize,
+    pub id: NodeId,
     pub span: Span,
     pub name: String,
 }
@@ -141,9 +161,19 @@ pub enum BuiltInTypeKind {
     F64,
 }
 
+impl Display for BuiltInTypeKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BuiltInTypeKind::I64 => write!(f, "i64"),
+            BuiltInTypeKind::F32 => write!(f, "f32"),
+            BuiltInTypeKind::F64 => write!(f, "f64"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BuiltInType {
-    pub id: usize,
+    pub id: NodeId,
     pub span: Span,
     pub kind: BuiltInTypeKind,
 }
@@ -157,14 +187,14 @@ pub enum TypeNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FuncArg {
     pub ty: TypeNode,
-    pub pattern: PatternNode,
+    pub binding: BindingNode,
     pub span: Span,
-    pub id: usize,
+    pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FuncDeclStructural {
-    pub id: usize,
+    pub id: NodeId,
     pub span: Span,
     pub name: String,
     pub args: Vec<FuncArg>,
@@ -173,14 +203,14 @@ pub struct FuncDeclStructural {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BlockExpr {
-    pub id: usize,
+    pub id: NodeId,
     pub span: Span,
     pub body: Vec<StmtNode>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FuncCallExpr {
-    pub id: usize,
+    pub id: NodeId,
     pub span: Span,
     pub lhs: Box<ExprNode>,
     pub args: Vec<ExprNode>,
@@ -188,7 +218,7 @@ pub struct FuncCallExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FuncDefStructural {
-    pub id: usize,
+    pub id: NodeId,
     pub decl: FuncDeclStructural,
     pub body: BlockExpr,
     pub span: Span,
@@ -214,7 +244,7 @@ pub enum Node {
     Stmt(StmtNode),
     Type(TypeNode),
     Structural(StructuralNode),
-    Pattern(PatternNode),
+    Binding(BindingNode),
 }
 
 impl Display for Node {
@@ -234,8 +264,8 @@ impl Spanned for Node {
             Node::Stmt(stmt_node) => stmt_node.span(),
             Node::Type(type_node) => type_node.span(),
             Node::Structural(structural_node) => structural_node.span(),
-            Node::Pattern(pattern_node) => match pattern_node {
-                PatternNode::Ident(ident) => ident.span.clone(),
+            Node::Binding(pattern_node) => match pattern_node {
+                BindingNode::Ident(ident) => ident.span.clone(),
             },
         }
     }
@@ -282,10 +312,12 @@ impl Spanned for StructuralNode {
     }
 }
 
-impl Spanned for PatternNode {
+impl Spanned for BindingNode {
     fn span(&self) -> Span {
         match self {
-            PatternNode::Ident(ident) => ident.span.clone(),
+            BindingNode::Ident(ident) => ident.span.clone(),
         }
     }
 }
+
+pub type NodeId = i64;

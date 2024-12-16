@@ -260,10 +260,10 @@ impl<'a> Parser<'a> {
         Ok((span, stmt))
     }
 
-    pub fn parse_pattern(&mut self) -> Result<PatternNode, ParseError> {
+    pub fn parse_pattern(&mut self) -> Result<BindingNode, ParseError> {
         let t = self.lexer.next_token()?;
         match t.kind {
-            TokenKind::Ident(ident) => Ok(PatternNode::Ident(IdentPattern {
+            TokenKind::Ident(ident) => Ok(BindingNode::Ident(IdentBinding {
                 span: t.span.clone(),
                 name: ident,
                 id: 0,
@@ -292,7 +292,7 @@ impl<'a> Parser<'a> {
         let span = let_tkn.span.start..span.end;
         let stmt = StmtNode::Let(LetStmt {
             span: span.clone(),
-            pattern: Box::new(pattern),
+            binding: Box::new(pattern),
             expr: Box::new(expr),
             ty,
             id: 0,
@@ -327,7 +327,7 @@ impl<'a> Parser<'a> {
         let span = pattern.span().start..ty.span().end;
         Ok(FuncArg {
             span: span.clone(),
-            pattern,
+            binding: pattern,
             ty,
             id: 0,
         })

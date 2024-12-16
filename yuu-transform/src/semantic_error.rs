@@ -36,7 +36,7 @@ impl Default for Note {
     }
 }
 
-pub struct GenericSemanticMsg {
+pub struct GenericSemanticErrorMsg {
     pub cache: SrcCache,
     pub message: String,
     pub span: Span,
@@ -44,11 +44,17 @@ pub struct GenericSemanticMsg {
     pub severity: Severity,
 }
 
-pub enum SemanticMsg {
-    Generic(GenericSemanticMsg),
+pub enum SemanticErrorMsg {
+    Generic(GenericSemanticErrorMsg),
+    FunctionArgTypeMismatch {
+        cache: SrcCache,
+        span: Span,
+        expected: String,
+        got: String,
+    },
 }
 
-impl GenericSemanticMsg {
+impl GenericSemanticErrorMsg {
     pub fn new(
         cache: SrcCache,
         message: String,
@@ -66,10 +72,10 @@ impl GenericSemanticMsg {
     }
 }
 
-impl SemanticMsg {
+impl SemanticErrorMsg {
     pub fn eprint(&self) {
         match self {
-            SemanticMsg::Generic(msg) => {
+            SemanticErrorMsg::Generic(msg) => {
                 let severity = match msg.severity {
                     Severity::Error => ReportKind::Error,
                     Severity::Warning => ReportKind::Warning,
@@ -106,6 +112,12 @@ impl SemanticMsg {
                     .eprint(cache.deref_mut())
                     .expect("Failed to print");
             }
+            SemanticErrorMsg::FunctionArgTypeMismatch {
+                cache,
+                span,
+                expected,
+                got,
+            } => todo!(),
         }
     }
 }

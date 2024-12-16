@@ -1,7 +1,7 @@
 use yuu_shared::ast::*;
 
 pub struct IdGenerator {
-    next_id: usize,
+    next_id: NodeId,
 }
 
 impl IdGenerator {
@@ -9,7 +9,7 @@ impl IdGenerator {
         Self { next_id: 0 }
     }
 
-    fn next(&mut self) -> usize {
+    fn next(&mut self) -> NodeId {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -27,7 +27,7 @@ impl AddId for Node {
             Node::Stmt(stmt) => stmt.add_id(gen),
             Node::Type(ty) => ty.add_id(gen),
             Node::Structural(s) => s.add_id(gen),
-            Node::Pattern(pn) => pn.add_id(gen),
+            Node::Binding(pn) => pn.add_id(gen),
         }
     }
 }
@@ -68,7 +68,7 @@ impl AddId for StmtNode {
         match self {
             StmtNode::Let(let_stmt) => {
                 let_stmt.id = gen.next();
-                let_stmt.pattern.add_id(gen);
+                let_stmt.binding.add_id(gen);
                 let_stmt.expr.add_id(gen);
                 if let Some(ty) = &mut let_stmt.ty {
                     ty.add_id(gen);
@@ -96,10 +96,10 @@ impl AddId for TypeNode {
     }
 }
 
-impl AddId for PatternNode {
+impl AddId for BindingNode {
     fn add_id(&mut self, gen: &mut IdGenerator) {
         match self {
-            PatternNode::Ident(i) => {
+            BindingNode::Ident(i) => {
                 i.id = gen.next();
             }
         }
@@ -108,7 +108,7 @@ impl AddId for PatternNode {
 
 impl AddId for FuncArg {
     fn add_id(&mut self, gen: &mut IdGenerator) {
-        self.pattern.add_id(gen);
+        self.binding.add_id(gen);
         self.ty.add_id(gen);
         self.id = gen.next();
     }

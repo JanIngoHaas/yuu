@@ -2,34 +2,34 @@ use crate::ast::*;
 
 // This trait is implemented by Claude 3.5 Sonnet
 pub trait ToGraphviz {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>);
-    fn node_id(&self) -> usize;
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>);
+    fn node_id(&self) -> NodeId;
 }
 
 impl ToGraphviz for Node {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         match self {
             Node::Expr(expr) => expr.to_graphviz(graph, parent_id),
             Node::Stmt(stmt) => stmt.to_graphviz(graph, parent_id),
             Node::Type(ty) => ty.to_graphviz(graph, parent_id),
             Node::Structural(s) => s.to_graphviz(graph, parent_id),
-            Node::Pattern(pattern_node) => pattern_node.to_graphviz(graph, parent_id),
+            Node::Binding(pattern_node) => pattern_node.to_graphviz(graph, parent_id),
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
             Node::Expr(expr) => expr.node_id(),
             Node::Stmt(stmt) => stmt.node_id(),
             Node::Type(ty) => ty.node_id(),
             Node::Structural(s) => s.node_id(),
-            Node::Pattern(pattern_node) => pattern_node.node_id(),
+            Node::Binding(pattern_node) => pattern_node.node_id(),
         }
     }
 }
 
 impl ToGraphviz for ExprNode {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         let my_id = self.node_id();
         match self {
             ExprNode::Literal(lit) => {
@@ -75,7 +75,7 @@ impl ToGraphviz for ExprNode {
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
             ExprNode::Literal(lit) => lit.id,
             ExprNode::Binary(bin) => bin.id,
@@ -88,14 +88,14 @@ impl ToGraphviz for ExprNode {
 }
 
 impl ToGraphviz for StmtNode {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         match self {
             StmtNode::Let(let_stmt) => {
                 let stmt_id = let_stmt.id;
                 // Create the Let node
                 graph.push_str(&format!("    node{} [label=\"Let\"]\n", stmt_id));
                 // Add pattern and expression as children
-                let_stmt.pattern.to_graphviz(graph, Some(stmt_id));
+                let_stmt.binding.to_graphviz(graph, Some(stmt_id));
                 let_stmt.expr.to_graphviz(graph, Some(stmt_id));
                 // Connect to parent if it exists
                 if let Some(parent) = parent_id {
@@ -116,7 +116,7 @@ impl ToGraphviz for StmtNode {
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
             StmtNode::Let(let_stmt) => let_stmt.id,
             StmtNode::Atomic(expr) => expr.node_id(),
@@ -126,7 +126,7 @@ impl ToGraphviz for StmtNode {
 }
 
 impl ToGraphviz for TypeNode {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         match self {
             TypeNode::Ident(id) => {
                 let my_id = self.node_id();
@@ -151,7 +151,7 @@ impl ToGraphviz for TypeNode {
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
             TypeNode::Ident(id) => id.id,
             TypeNode::BuiltIn(built_in_type) => built_in_type.id,
@@ -160,7 +160,7 @@ impl ToGraphviz for TypeNode {
 }
 
 impl ToGraphviz for StructuralNode {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         match self {
             StructuralNode::FuncDecl(decl) => {
                 let my_id = self.node_id();
@@ -188,18 +188,18 @@ impl ToGraphviz for StructuralNode {
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
-            StructuralNode::FuncDecl(decl) => decl.span.start,
+            StructuralNode::FuncDecl(decl) => decl.span.start as NodeId,
             StructuralNode::FuncDef(def) => def.id,
         }
     }
 }
 
-impl ToGraphviz for PatternNode {
-    fn to_graphviz(&self, graph: &mut String, parent_id: Option<usize>) {
+impl ToGraphviz for BindingNode {
+    fn to_graphviz(&self, graph: &mut String, parent_id: Option<NodeId>) {
         match self {
-            PatternNode::Ident(ident) => {
+            BindingNode::Ident(ident) => {
                 // Use pattern's own ID, not parent's
                 let my_id = self.node_id();
                 graph.push_str(&format!(
@@ -213,9 +213,9 @@ impl ToGraphviz for PatternNode {
         }
     }
 
-    fn node_id(&self) -> usize {
+    fn node_id(&self) -> NodeId {
         match self {
-            PatternNode::Ident(ident) => ident.id,
+            BindingNode::Ident(ident) => ident.id,
         }
     }
 }

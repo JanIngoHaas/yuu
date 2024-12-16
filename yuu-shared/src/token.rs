@@ -12,7 +12,7 @@ fn parse_integer(s: &str) -> Option<Integer> {
     }
 }
 
-#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Copy, Clone)]
 pub enum Integer {
     I64(i64),
     // CannotParseI64_TooManyDigits,
