@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
@@ -11,32 +10,12 @@ use yuu_shared::{ast::*, Pass};
 
 use crate::{
     built_in::{BindingInfo, BindingInfoKind},
-    semantic_error::{GenericSemanticErrorMsg, Note, NoteType, SemanticErrorMsg, Severity},
+    semantic_error::SemanticError,
     type_info::{BuiltInType, FunctionGroupKind, FunctionType, TypeInfo, TypeInfoTable},
 };
 
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
-
-pub enum FunctionInsertError {
-    FunctionRedefinition,
-}
-
-impl FunctionInsertError {
-    pub fn to_semantic_error_msg(&self) -> SemanticErrorMsg {
-        match self {
-            FunctionInsertError::FunctionRedefinition => {
-                SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                    todo!("Need src_cache here - should probably pass it in"),
-                    "Cannot redefine variable as function".to_string(),
-                    todo!("Need span here - should probably pass it in"),
-                    vec![],
-                    Severity::Error,
-                ))
-            }
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct Block {
@@ -48,40 +27,6 @@ pub enum FunctionOverloadError {
     NotAFunction,
     NoOverloadFound,
     BindingNotFound,
-}
-
-impl FunctionOverloadError {
-    pub fn to_semantic_error_msg(&self) -> SemanticErrorMsg {
-        match self {
-            FunctionOverloadError::NotAFunction => {
-                SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                    todo!("Need src_cache"),
-                    "Cannot call non-function value".to_string(),
-                    todo!("Need span"),
-                    vec![],
-                    Severity::Error,
-                ))
-            }
-            FunctionOverloadError::NoOverloadFound => {
-                SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                    todo!("Need src_cache"),
-                    "No matching function overload found".to_string(),
-                    todo!("Need span"),
-                    vec![],
-                    Severity::Error,
-                ))
-            }
-            FunctionOverloadError::BindingNotFound => {
-                SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                    todo!("Need src_cache"),
-                    "Function not found".to_string(),
-                    todo!("Need span"),
-                    vec![],
-                    Severity::Error,
-                ))
-            }
-        }
-    }
 }
 
 impl Block {
@@ -163,7 +108,7 @@ impl Block {
         name: String,
         id: NodeId,
         span: Span,
-    ) -> Result<(), FunctionInsertError> {
+    ) -> Result<(), SemanticError> {
         let functions = self
             .bindings
             .entry(name)
@@ -182,7 +127,7 @@ impl Block {
             BindingInfoKind::Unique(_) => {
                 // This is a redefinition of a variable as a function
                 // We can't have that
-                Err(FunctionInsertError::FunctionRedefinition)
+                panic!("User bug: Cannot redefine a variable as a function");
             }
         }
     }
@@ -319,13 +264,9 @@ impl PassTypeInference {
         binding: &BindingNode,
         ty: &Rc<TypeInfo>,
         mut match_resolver: T,
-    ) -> Result<(), SemanticErrorMsg>
+    ) -> Result<(), SemanticError>
     where
-        T: FnMut(
-            &IdentBinding,
-            &Rc<TypeInfo>,
-            &'a mut TypeInfoTable,
-        ) -> Result<(), SemanticErrorMsg>,
+        T: FnMut(&IdentBinding, &Rc<TypeInfo>, &'a mut TypeInfoTable) -> Result<(), SemanticError>,
     {
         match binding {
             BindingNode::Ident(ident) => {
@@ -339,7 +280,7 @@ impl PassTypeInference {
         &mut self,
         ty: &yuu_shared::ast::TypeNode,
         block: &Rc<RefCell<Block>>,
-    ) -> Result<Rc<TypeInfo>, SemanticErrorMsg> {
+    ) -> Result<Rc<TypeInfo>, SemanticError> {
         let semantic_type = match ty {
             TypeNode::BuiltIn(built_in) => match built_in.kind {
                 yuu_shared::ast::BuiltInTypeKind::I64 => {
@@ -363,7 +304,6 @@ impl PassTypeInference {
                         .expect("Compiler Bug: Variable binding not found in type table"),
                     Some(BindingInfoKind::Ambiguous(funcs)) => Rc::new(TypeInfo::FunctionGroup(
                         RefCell::new(FunctionGroupKind::Unresolved(funcs.clone())),
-                        // TODO: I think this is how it should be done, but I'm not 100% sure -> Copilot: Check this
                     )),
                     None => {
                         let similar_names = block.as_ref().borrow().get_similar_names(
@@ -371,22 +311,8 @@ impl PassTypeInference {
                             MAX_SIMILAR_NAMES,
                             MIN_DST_SIMILAR_NAMES,
                         );
-                        let smessages = SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                            self.src_cache.clone(),
-                            format!("Cannot find identifier `{}`", ident.name),
-                            ident.span.clone(),
-                            if !similar_names.is_empty() {
-                                vec![Note {
-                                    message: format!("Did you mean: {}", similar_names.join(", ")),
-                                    span: None,
-                                    note_type: NoteType::Help,
-                                }]
-                            } else {
-                                vec![]
-                            },
-                            Severity::Error,
-                        ));
-                        return Err(smessages);
+                        panic!("User bug: Cannot find identifier `{}`", ident.name);
+                        //return Err(smessages);
                     }
                 }
             }
@@ -398,14 +324,14 @@ impl PassTypeInference {
         &mut self,
         stmt: &StmtNode,
         block: &Rc<RefCell<Block>>,
-    ) -> Result<(), SemanticErrorMsg> {
+    ) -> Result<(), SemanticError> {
         match stmt {
             StmtNode::Let(let_stmt) => {
                 let ty_expr = self.infer_expr(&let_stmt.expr, block)?;
                 let match_resolver = move |ident_binding: &IdentBinding,
                                            ty: &Rc<TypeInfo>,
                                            ty_info_table: &mut TypeInfoTable|
-                      -> Result<(), SemanticErrorMsg> {
+                      -> Result<(), SemanticError> {
                     block.as_ref().borrow_mut().insert_variable(
                         ident_binding.name.clone(),
                         ident_binding.id,
@@ -432,7 +358,7 @@ impl PassTypeInference {
         &mut self,
         expr: &ExprNode,
         block: &Rc<RefCell<Block>>,
-    ) -> Result<Rc<TypeInfo>, SemanticErrorMsg> {
+    ) -> Result<Rc<TypeInfo>, SemanticError> {
         let out = match expr {
             ExprNode::Literal(lit) => match lit.lit.kind {
                 yuu_shared::token::TokenKind::Integer(_) => {
@@ -461,7 +387,7 @@ impl PassTypeInference {
                         &[&lhs, &rhs],
                         |binding, func| func.ret.clone(),
                     )
-                    .map_err(|err| err.to_semantic_error_msg())?;
+                    .map_err(|err| panic!("User bug: Function overload error"))?;
 
                 self.type_info_table
                     .types
@@ -479,7 +405,7 @@ impl PassTypeInference {
                     .resolve_function(op_name, &self.type_info_table, &[&ty], |binding, func| {
                         func.ret.clone()
                     })
-                    .map_err(|err| err.to_semantic_error_msg())?;
+                    .map_err(|err| panic!("User bug: Function overload error"))?;
 
                 self.type_info_table
                     .types
@@ -498,21 +424,24 @@ impl PassTypeInference {
                             MAX_SIMILAR_NAMES,
                             MIN_DST_SIMILAR_NAMES,
                         );
-                        SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                            self.src_cache.clone(),
-                            format!("Cannot find identifier `{}`", ident_expr.ident),
-                            ident_expr.span.clone(),
-                            if !similar_names.is_empty() {
-                                vec![Note {
-                                    message: format!("Did you mean: {}", similar_names.join(", ")),
-                                    span: None,
-                                    note_type: NoteType::Help,
-                                }]
-                            } else {
-                                vec![]
-                            },
-                            Severity::Error,
-                        ))
+
+                        panic!("User bug: Cannot find identifier `{}`", ident_expr.ident);
+
+                        // SemanticError::Generic(GenericSemanticErrorMsg::new(
+                        //     self.src_cache.clone(),
+                        //     format!("Cannot find identifier `{}`", ident_expr.ident),
+                        //     ident_expr.span.clone(),
+                        //     if !similar_names.is_empty() {
+                        //         vec![Note {
+                        //             message: format!("Did you mean: {}", similar_names.join(", ")),
+                        //             span: None,
+                        //             note_type: NoteType::Help,
+                        //         }]
+                        //     } else {
+                        //         vec![],
+                        //     },
+                        //     Severity::Error,
+                        // ))
                     })?;
 
                 let out = match binding {
@@ -575,23 +504,19 @@ impl PassTypeInference {
                                 // If we already resolved this function group, we can just use that type
                                 if let TypeInfo::Function(func) = &**resolved_func_type {
                                     if func.args.len() != actual_arg_types.len() {
-                                        return Err(SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                                            self.src_cache.clone(),
-                                            format!("Expected {} arguments, got {}", func.args.len(), actual_arg_types.len()),
-                                            func_call_expr.span.clone(),
-                                            vec![],
-                                            Severity::Error,
-                                        )));
+                                        panic!("User bug: Expected {} arguments, got {}", func.args.len(), actual_arg_types.len());
+                                        // return Err(SemanticError::Generic(GenericSemanticErrorMsg::new(
+                                        //     self.src_cache.clone(),
+                                        //     format!("Expected {} arguments, got {}", func.args.len(), actual_arg_types.len()),
+                                        //     func_call_expr.span.clone(),
+                                        //     vec![],
+                                        //     Severity::Error,
+                                        // )));
                                     }
 
                                     for (expected, got) in func.args.iter().zip(actual_arg_types.iter()) {
                                         if !got.does_coerce_to_same_type(expected) {
-                                            return Err(SemanticErrorMsg::FunctionArgTypeMismatch {
-                                                cache: self.src_cache.clone(),
-                                                span: func_call_expr.span.clone(),
-                                                expected: format!("{}", expected),
-                                                got: format!("{}", got),
-                                            });
+                                            panic!("User bug: Argument type does not match expected type");
                                         }
                                     }
 
@@ -605,18 +530,19 @@ impl PassTypeInference {
                                     func_candidates,
                                     &self.type_info_table,
                                     actual_arg_types.as_slice(),
-                                ).map_err(|x| x.to_semantic_error_msg())?;
+                                ).map_err(|x| panic!("User bug: Function overload error"))?;
                                 Ok((resolved_func_type.ret.clone(), resolved_generic_ty))
                             }
                         }
                     }
-                    TypeInfo::BuiltIn(_) => Err(SemanticErrorMsg::Generic(GenericSemanticErrorMsg::new(
-                        self.src_cache.clone(),
-                        "Cannot call a built-in type as a function".to_string(),
-                        func_call_expr.span.clone(),
-                        vec![],
-                        Severity::Error,
-                    ))),
+                    TypeInfo::BuiltIn(_) => panic!("User bug: Cannot call a built-in type as a function"), 
+                    // Err(SemanticError::Generic(GenericSemanticErrorMsg::new(
+                    //     self.src_cache.clone(),
+                    //     "Cannot call a built-in type as a function".to_string(),
+                    //     func_call_expr.span.clone(),
+                    //     vec![],
+                    //     Severity::Error,
+                    // ))),
                     TypeInfo::Function(_) => unreachable!("Compiler Bug: Function type should be a function group - overloading is allowed."),
                 }?;
 
@@ -638,16 +564,16 @@ impl PassTypeInference {
         &mut self,
         name: &str,
         args: &[FuncArg],
-        ret_ty: Option<&TypeNode>, // Add return type parameter
+        ret_ty: Option<&TypeNode>, // TODO: This should not be an Option!
         id: NodeId,
         span: Span,
         block: &Rc<RefCell<Block>>,
-    ) -> Result<(), SemanticErrorMsg> {
+    ) -> Result<(), SemanticError> {
         block
             .as_ref()
             .borrow_mut()
             .declare_function(name.to_string(), id, span.clone())
-            .map_err(|err| err.to_semantic_error_msg())?;
+            .map_err(|err| panic!("_"))?;
 
         let func_arg_types = args
             .iter()
@@ -670,7 +596,7 @@ impl PassTypeInference {
                     },
                 )?;
 
-                Ok::<_, SemanticErrorMsg>(semantic_arg_type)
+                Ok::<_, SemanticError>(semantic_arg_type)
             })
             .collect::<Result<Rc<[_]>, _>>()?;
 
@@ -694,7 +620,7 @@ impl PassTypeInference {
         &mut self,
         structural: &StructuralNode,
         block: &Rc<RefCell<Block>>,
-    ) -> Result<(), SemanticErrorMsg> {
+    ) -> Result<(), SemanticError> {
         match structural {
             StructuralNode::FuncDecl(decl) => self.declare_function(
                 &decl.name,
@@ -786,11 +712,43 @@ impl Pass for PassTypeInference {
 
         context.add_pass_data(self.type_info_table);
 
-        if let Err(err) = out {
-            err.eprint();
-            false
-        } else {
-            true
+        out.is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yuu_shared::Context;
+
+    fn create_test_context() -> Context {
+        Context::new()
+    }
+
+    #[test]
+    fn test_basic_literal_inference() {
+        let mut context = create_test_context();
+        let src_cache = SrcCache::new();
+        let pass = PassTypeInference::new(src_cache);
+
+        // Create a literal expression node
+        let literal = Node::Expr(ExprNode::Literal(LiteralExpr {
+            lit: yuu_shared::token::Token {
+                kind: yuu_shared::token::TokenKind::Integer(42),
+                span: 0..1,
+            },
+            id: 1,
+        }));
+
+        assert!(pass.run(&literal, &mut context));
+
+        let type_info_table = context.get_pass_data::<TypeInfoTable>().unwrap();
+        match type_info_table.types.get(&1) {
+            Some(ty) => match ty.as_ref() {
+                TypeInfo::BuiltIn(BuiltInType::I64) => (),
+                _ => panic!("Expected i64 type"),
+            },
+            None => panic!("No type information found for literal"),
         }
     }
 }
