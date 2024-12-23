@@ -367,7 +367,7 @@ impl PassTypeInference {
 
                 resolved_ret_type
             }
-            ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data)?,
+            ExprNode::If(if_expr) => Self::infer_if_expr(if_expr, block, data)?,
         };
         Ok(out)
     }
@@ -379,8 +379,42 @@ impl PassTypeInference {
     ) -> Result<Rc<TypeInfo>, SemanticError> {
         let cond_ty = Self::infer_expr(&expr.if_block.condition, block, data)?;
         // TODO: Check if the condition type is a boolean
+        if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(BuiltInType::Bool)) {
+            panic!("User bug: Condition of if expr must be of type bool");
+        }
 
         let then_ty = Self::infer_expr(&expr.if_block.body, block, data)?;
+        let if_types = expr.else_if_blocks.iter().map(|x| {
+            // First check if we have a bool - if not -> error!
+
+            if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(BuiltInType::Bool)) {
+                panic!("User bug: Condition of if expr must be of type bool");
+            }
+
+            let ty = Self::infer_expr(&x.body, block, data)?;
+            Ok::<_, SemanticError>(ty)
+        });
+
+        let out_ty = if_types.into_iter()
+            .try_fold(then_ty, |acc, ty| {
+                // Check if acc and ty coerce to same type
+                let ty = ty?;
+                if !acc.does_coerce_to_same_type(&ty) {
+                    panic!("User bug: Types of if expr branches don't coerce to same type");
+                }
+                Ok::<_, SemanticError>(ty)
+            })?;
+
+        if let Some(else_body) = expr.else_block.as_ref() {
+            let ty = Self::infer_expr(&else_body, block, data)?;
+            if !out_ty.does_coerce_to_same_type(&ty) {
+                panic!("User bug: Types of if expr branches don't coerce to same type");
+            }
+        };
+
+        Ok(out_ty)
+
+        // Do all the other branches:
     }
 
     fn declare_function(

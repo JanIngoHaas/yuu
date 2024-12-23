@@ -30,6 +30,7 @@ pub enum BuiltInType {
     F64,
     Nil,
     Error,
+    Bool,
 }
 
 impl Display for BuiltInType {
@@ -40,6 +41,7 @@ impl Display for BuiltInType {
             BuiltInType::F64 => write!(f, "f64"),
             BuiltInType::Error => write!(f, "<error>"),
             BuiltInType::Nil => write!(f, "nil"),
+            BuiltInType::Bool => write!(f, "bool"),
         }
     }
 }
