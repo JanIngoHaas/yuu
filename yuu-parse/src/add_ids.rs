@@ -59,6 +59,15 @@ impl AddId for ExprNode {
                 }
                 func_call_expr.id = gen.next();
             }
+            ExprNode::If(if_expr) => {
+                if_expr.id = gen.next();
+                if_expr.if_block.condition.add_id(gen);
+                if_expr.if_block.body.add_id(gen);
+                if let Some(else_expr) = &mut if_expr.else_block {
+                    else_expr.add_id(gen);
+                }
+                if_expr.else_block.as_mut().map(|e| e.add_id(gen));
+            }
         }
     }
 }

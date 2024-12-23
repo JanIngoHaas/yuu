@@ -3,7 +3,7 @@ use std::{cell::RefCell, fmt::Display, rc::Rc};
 use hashbrown::HashMap;
 use yuu_shared::ast::*;
 
-use crate::built_in::BindingInfo;
+use crate::binding_info::BindingInfo;
 
 pub struct TypeInfoTable {
     pub types: HashMap<NodeId, Rc<TypeInfo>>,
@@ -78,25 +78,11 @@ pub enum TypeInfo {
     // pub align: usize,
 }
 
-impl From<TypeNode> for TypeInfo {
-    fn from(ty: TypeNode) -> Self {
-        match ty {
-            TypeNode::BuiltIn(built_in) => match built_in.kind {
-                yuu_shared::ast::BuiltInTypeKind::I64 => TypeInfo::BuiltIn(BuiltInType::I64),
-                yuu_shared::ast::BuiltInTypeKind::F32 => TypeInfo::BuiltIn(BuiltInType::F32),
-                yuu_shared::ast::BuiltInTypeKind::F64 => TypeInfo::BuiltIn(BuiltInType::F64),
-            },
-            TypeNode::Ident(_ident) => todo!(),
-        }
-    }
-}
-
 impl TypeInfo {
     pub fn does_coerce_to_same_type(&self, other: &Self) -> bool {
         match (self, other) {
             (TypeInfo::BuiltIn(a), TypeInfo::BuiltIn(b)) => {
                 // For now, we only allow exact type matches
-                // Later we could add numeric coercion rules here
                 a == b
             }
             (TypeInfo::Function(a), TypeInfo::Function(b)) => {

@@ -67,6 +67,22 @@ pub struct LiteralExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ConditionWithBody {
+    pub condition: Box<ExprNode>,
+    pub body: Box<ExprNode>,
+}
+
+/// Represents an if expression in the AST
+#[derive(Serialize, Deserialize, Clone)]
+pub struct IfExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub if_block: ConditionWithBody,
+    pub else_if_blocks: Vec<ConditionWithBody>,
+    pub else_block: Option<Box<ExprNode>>,
+}
+
 /// Represents a binary expression (e.g., a + b)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BinaryExpr {
@@ -102,6 +118,7 @@ pub enum ExprNode {
     Ident(IdentExpr),
     Block(BlockExpr),
     FuncCall(FuncCallExpr),
+    If(IfExpr),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -280,6 +297,7 @@ impl Spanned for ExprNode {
             ExprNode::Ident(id) => id.span.clone(),
             ExprNode::Block(block_expr) => block_expr.span.clone(),
             ExprNode::FuncCall(func_call_expr) => func_call_expr.span.clone(),
+            ExprNode::If(if_expr) => if_expr.span.clone(),
         }
     }
 }

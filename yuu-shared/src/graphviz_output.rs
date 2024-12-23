@@ -69,6 +69,19 @@ impl ToGraphviz for ExprNode {
                     arg.to_graphviz(graph, Some(my_id));
                 }
             }
+            ExprNode::If(if_expr) => {
+                graph.push_str(&format!("    node{} [label=\"If\"]\n", my_id));
+                if_expr.if_block.condition.to_graphviz(graph, Some(my_id));
+                if_expr.if_block.body.to_graphviz(graph, Some(my_id));
+                if let Some(else_expr) = &if_expr.else_block {
+                    else_expr.to_graphviz(graph, Some(my_id));
+                }
+                // else if blocks too:
+                for else_if in &if_expr.else_if_blocks {
+                    else_if.condition.to_graphviz(graph, Some(my_id));
+                    else_if.body.to_graphviz(graph, Some(my_id));
+                }
+            }
         }
         if let Some(parent) = parent_id {
             graph.push_str(&format!("    node{} -> node{}\n", parent, my_id));
@@ -83,6 +96,7 @@ impl ToGraphviz for ExprNode {
             ExprNode::Ident(id) => id.id,
             ExprNode::Block(block) => block.id,
             ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
+            ExprNode::If(if_expr) => if_expr.id,
         }
     }
 }

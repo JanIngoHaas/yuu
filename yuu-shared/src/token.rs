@@ -60,6 +60,12 @@ pub enum TokenKind {
     #[token("i64")]
     I64Kw,
 
+    #[token("if")]
+    IfKw,
+
+    #[token("else")]
+    ElseKw,
+
     #[token("f32")]
     F32Kw,
 
@@ -84,8 +90,8 @@ pub enum TokenKind {
     #[token("=>")]
     FatArrow,
 
-    #[token("result")]
-    Result,
+    #[token("out")]
+    OutKw,
 
     #[token(":")]
     Colon,

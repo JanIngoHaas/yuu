@@ -1,11 +1,15 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::lexer::{GenericError, Lexer, Note, ParseError, UnprocessedCodeInfo};
+use crate::{
+    add_ids::add_ids,
+    lexer::{GenericError, Lexer, Note, ParseError, UnprocessedCodeInfo},
+};
 use ariadne::Source;
 use logos::Span;
 use yuu_shared::{
     ast::*,
     token::{Token, TokenKind},
+    Context, Pass, Pipeline,
 };
 
 pub struct Parser<'a> {
@@ -14,6 +18,10 @@ pub struct Parser<'a> {
 }
 
 pub type SrcCache = Rc<RefCell<(String, Source)>>;
+
+pub fn default_src_cache() -> SrcCache {
+    Rc::new(RefCell::new((String::new(), Source::from("".to_string()))))
+}
 
 pub struct SourceCodeInfo {
     pub cache: Rc<RefCell<(String, Source)>>,
@@ -30,16 +38,17 @@ impl<'a> Parser<'a> {
 
     fn get_infix_precedence(op: &TokenKind) -> (i32, i32) {
         match op {
-            TokenKind::Plus | TokenKind::Minus => (1, 1),
-            TokenKind::Asterix | TokenKind::Slash => (2, 2),
-            TokenKind::LParen => (7, 0),
+            TokenKind::LParen => (8, 0), // Function calls highest
+            TokenKind::Asterix | TokenKind::Slash => (6, 6), // Multiplication/division
+            TokenKind::Plus | TokenKind::Minus => (5, 5), // Addition/subtraction
+            TokenKind::IfKw => (2, 1),   // If expressions lowest
             _ => (-1, -1),
         }
     }
 
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
-            TokenKind::Plus | TokenKind::Minus => 5,
+            TokenKind::Plus | TokenKind::Minus => 7, // Unary operators higher than binary
             _ => -1,
         }
     }
@@ -175,7 +184,7 @@ impl<'a> Parser<'a> {
         Ok((span_copy, ExprNode::Binary(binary)))
     }
 
-    fn parse_bin_expr(
+    pub fn parse_bin_expr(
         &mut self,
         lhs: ExprNode,
         op_token: Token,
@@ -187,7 +196,79 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_expr_chain(&mut self, min_precedence: i32) -> Result<(Span, ExprNode), ParseError> {
+    pub fn parse_else_if_block(&mut self) -> Result<(Span, BlockExpr), ParseError> {
+        todo!()
+    }
+
+    pub fn parse_condition_with_body(&mut self) -> Result<(Span, ConditionWithBody), ParseError> {
+        let (_, condition) = self.parse_expr_chain(0)?;
+        let (block_span, block) = self.parse_block_expr()?;
+
+        Ok((
+            block_span,
+            ConditionWithBody {
+                condition: Box::new(condition),
+                body: Box::new(ExprNode::Block(block)),
+            },
+        ))
+    }
+
+    pub fn parse_if_expr(
+        &mut self,
+        lhs: ExprNode,
+        _op_token: Token,
+        _min_precedence: i32,
+    ) -> Result<(Span, ExprNode), ParseError> {
+        let (body_span, cond_with_body) = self.parse_condition_with_body()?;
+
+        // Parse possible else if block -> peek for else if token
+
+        let mut elifs = Vec::new();
+        let mut last_body_span = body_span;
+        loop {
+            let peeked_tokens = self.lexer.peek_n::<2>()?;
+            if let [Ok(maybe_else), Ok(maybe_if)] = &peeked_tokens[..] {
+                if maybe_else.kind == TokenKind::ElseKw && maybe_if.kind == TokenKind::IfKw {
+                    let _ = self.lexer.next_token()?;
+                    let _ = self.lexer.next_token()?;
+                    let (body_span, elif_cond_body) = self.parse_condition_with_body()?;
+                    elifs.push(elif_cond_body);
+                    last_body_span = body_span;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            };
+        }
+
+        let maybe_else = self.lexer.peek()?;
+
+        let else_ = if maybe_else.kind == TokenKind::ElseKw {
+            let (body_span, block) = self.parse_block_expr()?;
+            last_body_span = body_span;
+            Some(Box::new(ExprNode::Block(block)))
+        } else {
+            None
+        };
+
+        let overall_span = lhs.span().start..last_body_span.end;
+
+        let if_expr = IfExpr {
+            id: 0,
+            span: overall_span.clone(),
+            if_block: cond_with_body,
+            else_if_blocks: elifs,
+            else_block: else_,
+        };
+
+        Ok((overall_span, ExprNode::If(if_expr)))
+    }
+
+    pub fn parse_expr_chain(
+        &mut self,
+        min_precedence: i32,
+    ) -> Result<(Span, ExprNode), ParseError> {
         let mut lhs = self.parse_primary_expr()?;
         loop {
             let op = self.lexer.peek()?;
@@ -207,13 +288,16 @@ impl<'a> Parser<'a> {
                 TokenKind::LParen => {
                     lhs = self.parse_func_call_expr(lhs.1, op, right_precedence)?;
                 }
+                TokenKind::IfKw => {
+                    lhs = self.parse_if_expr(lhs.1, op, right_precedence)?;
+                }
                 _ => break,
             }
         }
         Ok(lhs)
     }
 
-    fn parse_expr(&mut self) -> Result<(Span, ExprNode), ParseError> {
+    pub fn parse_expr(&mut self) -> Result<(Span, ExprNode), ParseError> {
         self.parse_expr_chain(0)
     }
 
@@ -260,7 +344,7 @@ impl<'a> Parser<'a> {
         Ok((span, stmt))
     }
 
-    pub fn parse_pattern(&mut self) -> Result<BindingNode, ParseError> {
+    pub fn parse_binding(&mut self) -> Result<BindingNode, ParseError> {
         let t = self.lexer.next_token()?;
         match t.kind {
             TokenKind::Ident(ident) => Ok(BindingNode::Ident(IdentBinding {
@@ -279,7 +363,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse_let_stmt(&mut self) -> Result<(Span, StmtNode), ParseError> {
         let let_tkn = self.lexer.expect(&[TokenKind::Let], Vec::new())?;
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_binding()?;
         let la = self.lexer.peek()?;
         let ty = if la.kind == TokenKind::Colon {
             let out = self.parse_type()?;
@@ -303,7 +387,7 @@ impl<'a> Parser<'a> {
     pub fn parse_ret_stmt(&mut self) -> Result<(Span, StmtNode), ParseError> {
         let ret_tkn = self
             .lexer
-            .expect(&[TokenKind::Return, TokenKind::Result], Vec::new())?;
+            .expect(&[TokenKind::Return, TokenKind::OutKw], Vec::new())?;
 
         let (span, expr) = self.parse_expr()?;
         let span = ret_tkn.span.start..span.end;
@@ -312,8 +396,8 @@ impl<'a> Parser<'a> {
             expr: Box::new(expr),
             ty: match &ret_tkn.kind {
                 TokenKind::Return => ReturnStmtType::ReturnFromFunction,
-                TokenKind::Result => ReturnStmtType::ReturnFromBlock,
-                _ => panic!("Expected return or result token"),
+                TokenKind::OutKw => ReturnStmtType::ReturnFromBlock,
+                _ => panic!("Expected 'return' or 'out' token"),
             },
             id: 0,
         });
@@ -321,7 +405,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_func_arg(&mut self) -> Result<FuncArg, ParseError> {
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_binding()?;
         let _ = self.lexer.expect(&[TokenKind::Colon], Vec::new())?;
         let ty = self.parse_type()?;
         let span = pattern.span().start..ty.span().end;
@@ -437,19 +521,11 @@ impl<'a> Parser<'a> {
             TokenKind::Ident(ident) => {
                 let _ = self.lexer.expect(&[TokenKind::LParen], Vec::new())?;
                 let args = self.parse_func_args()?;
-                let rparen = self.lexer.expect(&[TokenKind::RParen], Vec::new())?;
-                let ret_ty = if self.lexer.peek()?.kind == TokenKind::Arrow {
-                    let _ = self.lexer.next_token()?;
-                    Some(Box::new(self.parse_type()?))
-                } else {
-                    None
-                };
-                let span = fn_tkn.span.start..if let Some(ty) = &ret_ty {
-                    ty.span().end
-                } else {
-                    rparen.span.end
-                };
-                Ok(self.make_func_decl(ident, span, args, ret_ty))
+                let _rparen = self.lexer.expect(&[TokenKind::RParen], Vec::new())?;
+                let _arrow = self.lexer.expect(&[TokenKind::Arrow], Vec::new())?;
+                let ret_ty = Box::new(self.parse_type()?);
+                let span = fn_tkn.span.start..ret_ty.span().end;
+                Ok(self.make_func_decl(ident, span, args, Some(ret_ty)))
             }
             _ => Err(ParseError::GenericSyntaxError(GenericError {
                 expected: "an identifier naming the function".to_string(),
@@ -501,7 +577,7 @@ impl<'a> Parser<'a> {
                 let (span, stmt) = self.parse_let_stmt()?;
                 (self.parse_semicolon(span)?, stmt)
             }
-            TokenKind::Return | TokenKind::Result => {
+            TokenKind::Return | TokenKind::OutKw => {
                 let (span, stmt) = self.parse_ret_stmt()?;
                 (self.parse_semicolon(span)?, stmt)
             }
@@ -521,7 +597,7 @@ impl<'a> Parser<'a> {
                 let (span, func_def) = self.parse_func_def()?;
                 (span, StructuralNode::FuncDef(func_def))
             }
-            _ => unreachable!("only fn is supported as structural node"),
+            _ => unreachable!("User bug: only fn is (currently) supported as structural node"),
         };
         Ok(x)
     }
@@ -538,6 +614,19 @@ impl<'a> Parser<'a> {
             root_node,
         };
         Ok(source_code_info)
+    }
+
+    pub fn parse_and_add_ids(&mut self) -> Result<SourceCodeInfo, ParseError> {
+        let mut source_code_info = self.parse()?;
+        add_ids(&mut source_code_info.root_node);
+        Ok(source_code_info)
+    }
+
+    pub fn parse_and_create_context(&mut self) -> Result<Context, ParseError> {
+        let source_code_info = self.parse_and_add_ids()?;
+        let mut context = Context::new();
+        context.add_pass_data(source_code_info);
+        Ok(context)
     }
 }
 

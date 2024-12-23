@@ -1,227 +1,26 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
+    ops::Deref,
     rc::Rc,
 };
 
 use hashbrown::HashMap;
-use yuu_parse::{parser::SrcCache, Span};
+use yuu_parse::{
+    parser::{default_src_cache, SourceCodeInfo, SrcCache},
+    Span,
+};
 use yuu_shared::{ast::*, Pass};
 
 use crate::{
-    built_in::{BindingInfo, BindingInfoKind},
+    binding_info::{BindingInfo, BindingInfoKind},
+    block::{Block, FunctionOverloadError},
     semantic_error::SemanticError,
     type_info::{BuiltInType, FunctionGroupKind, FunctionType, TypeInfo, TypeInfoTable},
 };
 
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
-
-#[derive(Clone)]
-pub struct Block {
-    pub bindings: HashMap<String, BindingInfoKind>, // This means: A name (identifier) refers to a definition, potentially multiple definitions, which have to be resolved during type inference
-    pub parent: Option<Rc<RefCell<Block>>>,
-}
-
-pub enum FunctionOverloadError {
-    NotAFunction,
-    NoOverloadFound,
-    BindingNotFound,
-}
-
-impl Block {
-    pub fn root() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
-            bindings: HashMap::new(),
-            parent: None,
-        }))
-    }
-
-    pub fn get_binding(&self, name: &str) -> Option<BindingInfoKind> {
-        if let Some(k) = self.bindings.get(name) {
-            return Some(k.clone());
-        }
-
-        if let Some(parent) = &self.parent {
-            return parent.as_ref().borrow().get_binding(name);
-        }
-
-        None
-    }
-
-    pub fn from_parent(parent: Rc<RefCell<Block>>) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
-            bindings: HashMap::new(),
-            parent: Some(parent),
-        }))
-    }
-
-    pub fn get_similar_names(&self, name: &str, amount: u64, min_dst: u64) -> Vec<String> {
-        let mut similar_names = Vec::new();
-
-        for key in self.bindings.keys() {
-            let distance = levenshtein_distance(name, key);
-            if distance > 0 && distance <= min_dst as usize {
-                similar_names.push((key.clone(), distance));
-            }
-        }
-
-        similar_names.sort_by_key(|x| x.1);
-        let mut result: Vec<_> = similar_names
-            .into_iter()
-            .map(|(name, _)| name)
-            .take(amount as usize)
-            .collect();
-
-        // Check parent scope if we need more suggestions
-        if let Some(parent) = &self.parent {
-            let remaining = amount - result.len() as u64;
-            if remaining > 0 {
-                let mut parent_similar = parent
-                    .as_ref()
-                    .borrow()
-                    .get_similar_names(name, remaining, min_dst);
-                result.append(&mut parent_similar);
-            }
-        }
-
-        result
-    }
-
-    // pub fn amortized_find(&mut self, name: &str) -> Option<NodeId> {
-    //     if let Some(id) = self.bindings.get(name) {
-    //         return Some(*id);
-    //     }
-
-    //     if let Some(parent) = &self.parent {
-    //         for (key, value) in parent.borrow().bindings.iter() {
-    //             self.bindings.insert(key.clone(), *value);
-    //         }
-    //         return parent.borrow_mut().amortized_find(name);
-    //     }
-
-    //     None
-    // }
-
-    pub fn declare_function(
-        &mut self,
-        name: String,
-        id: NodeId,
-        span: Span,
-    ) -> Result<(), SemanticError> {
-        let functions = self
-            .bindings
-            .entry(name)
-            .or_insert(BindingInfoKind::Ambiguous(Rc::new(
-                RefCell::new(Vec::new()),
-            )));
-
-        match functions {
-            BindingInfoKind::Ambiguous(f) => {
-                f.as_ref().borrow_mut().push(BindingInfo {
-                    id,
-                    src_location: Some(span),
-                });
-                Ok(())
-            }
-            BindingInfoKind::Unique(_) => {
-                // This is a redefinition of a variable as a function
-                // We can't have that
-                panic!("User bug: Cannot redefine a variable as a function");
-            }
-        }
-    }
-
-    pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span) -> bool {
-        let variables = self.bindings.insert(
-            name,
-            BindingInfoKind::Unique(BindingInfo {
-                id,
-                src_location: Some(span),
-            }),
-        );
-
-        match variables {
-            Some(BindingInfoKind::Ambiguous(_)) => {
-                // This is a redefinition of a function as a variable
-                // We can't have that
-                false
-            }
-            _ => true, // This also explicitly handles shadowing by just allowing it
-        }
-    }
-
-    pub fn resolve_function<'a, T>(
-        &self,
-        name: &str,
-        type_info_table: &'a TypeInfoTable,
-        args: &'a [&'a Rc<TypeInfo>],
-        resolver: T,
-    ) -> Result<Rc<TypeInfo>, FunctionOverloadError>
-    where
-        T: Fn(&BindingInfo, &FunctionType) -> Rc<TypeInfo>,
-    {
-        let overload = self.get_binding(name);
-
-        overload.map(|binding| match binding {
-            BindingInfoKind::Ambiguous(f) => {
-                for binding in f.as_ref().borrow().iter() {
-                    let func_type = type_info_table.types.get(&binding.id).expect(
-                        "Compiler Bug: Block has a function binding, but can't find the associated type info",
-                    );
-
-                    match func_type.as_ref() {
-                        TypeInfo::Function(func) => {
-                            if func.args.len() != args.len() {
-                                continue;
-                            }
-
-                            let mut found = true;
-                            for (arg, expected) in args.iter().zip(func.args.iter()) {
-                                if !arg.does_coerce_to_same_type(expected) {
-                                    found = false;
-                                    break;
-                                }
-                            }
-
-                            if found {
-                                return Ok(resolver(binding, func));
-                            }
-                        }
-                        _ => unreachable!("Compiler Bug: Function binding is not a function type"),
-                    }
-                }
-                Err(FunctionOverloadError::NoOverloadFound)
-            }
-            BindingInfoKind::Unique(_) => Err(FunctionOverloadError::NotAFunction),
-        }).ok_or(FunctionOverloadError::BindingNotFound)?
-    }
-}
-
-// This was generated by Claude Sonnet
-fn levenshtein_distance(s1: &str, s2: &str) -> usize {
-    let len1 = s1.chars().count();
-    let len2 = s2.chars().count();
-    let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
-
-    for i in 0..=len1 {
-        matrix[i][0] = i;
-    }
-    for j in 0..=len2 {
-        matrix[0][j] = j;
-    }
-
-    for (i, c1) in s1.chars().enumerate() {
-        for (j, c2) in s2.chars().enumerate() {
-            let substitution = if c1 == c2 { 0 } else { 1 };
-            matrix[i + 1][j + 1] = (matrix[i][j + 1] + 1)
-                .min(matrix[i + 1][j] + 1)
-                .min(matrix[i][j] + substitution);
-        }
-    }
-
-    matrix[len1][len2]
-}
 
 pub struct BindingTable {
     pub bindings: HashMap<NodeId, BindingInfo>,
@@ -241,45 +40,39 @@ impl BindingTable {
     }
 }
 
-pub struct PassTypeInference {
-    src_cache: SrcCache,
-    type_info_table: TypeInfoTable,
+pub struct TransientData {
+    pub src_cache: SrcCache,
+    pub type_info_table: TypeInfoTable,
 }
 
+pub struct PassTypeInference {}
+
 impl PassTypeInference {
-    pub fn new(src_cache: SrcCache) -> Self {
-        Self {
-            src_cache,
-            type_info_table: TypeInfoTable::new(),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
-    //TODO: This should probably go into its own pass - or at least into a separate file (Not now though)
-    // As the binding node and the type are basically graphs, we can descend both in lockstep checking if they match.
-    // As soon as we reach a leaf node of the binding node, we know that the leaf node is of the same type as the current type node.
-    // If we reach a leaf node (== identifier) of the type node => error
-    // TODO: Here is the bigger problem: How do we handle binding the correct expression (i.e. later the value) to the binding node?
     pub fn match_binding_node_to_type<'a, T>(
-        &'a mut self,
         binding: &BindingNode,
         ty: &Rc<TypeInfo>,
         mut match_resolver: T,
+        data: &'a mut TransientData,
     ) -> Result<(), SemanticError>
     where
         T: FnMut(&IdentBinding, &Rc<TypeInfo>, &'a mut TypeInfoTable) -> Result<(), SemanticError>,
     {
         match binding {
             BindingNode::Ident(ident) => {
-                match_resolver(ident, ty, &mut self.type_info_table)?;
+                match_resolver(ident, ty, &mut data.type_info_table)?;
             }
         };
         Ok(())
     }
 
     pub fn infer_type(
-        &mut self,
         ty: &yuu_shared::ast::TypeNode,
         block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
     ) -> Result<Rc<TypeInfo>, SemanticError> {
         let semantic_type = match ty {
             TypeNode::BuiltIn(built_in) => match built_in.kind {
@@ -296,7 +89,7 @@ impl PassTypeInference {
             TypeNode::Ident(ident) => {
                 let binding = block.as_ref().borrow().get_binding(&ident.name);
                 match binding {
-                    Some(BindingInfoKind::Unique(var)) => self
+                    Some(BindingInfoKind::Unique(var)) => data
                         .type_info_table
                         .types
                         .get(&var.id)
@@ -321,13 +114,13 @@ impl PassTypeInference {
     }
 
     pub fn infer_stmt(
-        &mut self,
         stmt: &StmtNode,
         block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
     ) -> Result<(), SemanticError> {
         match stmt {
             StmtNode::Let(let_stmt) => {
-                let ty_expr = self.infer_expr(&let_stmt.expr, block)?;
+                let ty_expr = Self::infer_expr(&let_stmt.expr, block, data)?;
                 let match_resolver = move |ident_binding: &IdentBinding,
                                            ty: &Rc<TypeInfo>,
                                            ty_info_table: &mut TypeInfoTable|
@@ -343,38 +136,49 @@ impl PassTypeInference {
                     Ok(())
                 };
 
-                self.match_binding_node_to_type(&let_stmt.binding, &ty_expr, match_resolver)?;
+                Self::match_binding_node_to_type(
+                    &let_stmt.binding,
+                    &ty_expr,
+                    match_resolver,
+                    data,
+                )?;
                 Ok(())
             }
             StmtNode::Atomic(expr) => {
-                self.infer_expr(expr, block).map(|_| ())
+                Self::infer_expr(expr, block, data).map(|_| ())
                 // TODO: We should probably check if the type of the expression is not nil - then we should return an error
             }
-            StmtNode::Return(return_stmt) => self.infer_expr(&return_stmt.expr, block).map(|_| ()),
+            StmtNode::Return(return_stmt) => {
+                Self::infer_expr(&return_stmt.expr, block, data).map(|_| ())
+            }
         }
     }
 
     pub fn infer_expr(
-        &mut self,
         expr: &ExprNode,
         block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
     ) -> Result<Rc<TypeInfo>, SemanticError> {
         let out = match expr {
-            ExprNode::Literal(lit) => match lit.lit.kind {
-                yuu_shared::token::TokenKind::Integer(_) => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
-                }
-                yuu_shared::token::TokenKind::F32(_) => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::F32))
-                }
-                yuu_shared::token::TokenKind::F64(_) => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::F64))
-                }
-                _ => unreachable!("Compiler bug: Literal not implemented"),
-            },
+            ExprNode::Literal(lit) => {
+                let out = match lit.lit.kind {
+                    yuu_shared::token::TokenKind::Integer(_) => {
+                        Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
+                    }
+                    yuu_shared::token::TokenKind::F32(_) => {
+                        Rc::new(TypeInfo::BuiltIn(BuiltInType::F32))
+                    }
+                    yuu_shared::token::TokenKind::F64(_) => {
+                        Rc::new(TypeInfo::BuiltIn(BuiltInType::F64))
+                    }
+                    _ => unreachable!("Compiler bug: Literal not implemented"),
+                };
+                data.type_info_table.types.insert(lit.id, out.clone());
+                out
+            }
             ExprNode::Binary(binary_expr) => {
-                let lhs = self.infer_expr(&binary_expr.left, block)?;
-                let rhs = self.infer_expr(&binary_expr.right, block)?;
+                let lhs = Self::infer_expr(&binary_expr.left, block, data)?;
+                let rhs = Self::infer_expr(&binary_expr.right, block, data)?;
 
                 let op_name = binary_expr.op.static_name();
 
@@ -383,31 +187,31 @@ impl PassTypeInference {
                     .borrow()
                     .resolve_function(
                         op_name,
-                        &self.type_info_table,
+                        &data.type_info_table,
                         &[&lhs, &rhs],
                         |binding, func| func.ret.clone(),
                     )
-                    .map_err(|err| panic!("User bug: Function overload error"))?;
+                    .map_err(|err| panic!("User bug: Function overload error: {:?}", err))?;
 
-                self.type_info_table
+                data.type_info_table
                     .types
                     .insert(binary_expr.id, ty.clone());
 
                 ty
             }
             ExprNode::Unary(unary_expr) => {
-                let ty = self.infer_expr(&unary_expr.operand, block)?;
+                let ty = Self::infer_expr(&unary_expr.operand, block, data)?;
                 let op_name = unary_expr.op.static_name();
 
                 let result_ty = block
                     .as_ref()
                     .borrow()
-                    .resolve_function(op_name, &self.type_info_table, &[&ty], |binding, func| {
+                    .resolve_function(op_name, &data.type_info_table, &[&ty], |binding, func| {
                         func.ret.clone()
                     })
                     .map_err(|err| panic!("User bug: Function overload error"))?;
 
-                self.type_info_table
+                data.type_info_table
                     .types
                     .insert(unary_expr.id, result_ty.clone());
 
@@ -437,6 +241,7 @@ impl PassTypeInference {
                         //             span: None,
                         //             note_type: NoteType::Help,
                         //         }]
+
                         //     } else {
                         //         vec![],
                         //     },
@@ -447,7 +252,7 @@ impl PassTypeInference {
                 let out = match binding {
                     BindingInfoKind::Unique(var) => {
                         // For variables, just look up and return their type
-                        self.type_info_table
+                        data.type_info_table
                             .types
                             .get(&var.id)
                             .cloned()
@@ -461,6 +266,12 @@ impl PassTypeInference {
                         )))
                     }
                 };
+
+                // Insert the type into the type table
+                data.type_info_table
+                    .types
+                    .insert(ident_expr.id, out.clone());
+
                 out
             }
             ExprNode::Block(block_expr) => {
@@ -471,16 +282,16 @@ impl PassTypeInference {
                 for stmt in &block_expr.body {
                     match stmt {
                         StmtNode::Return(ret) => {
-                            last_stmt_type = self.infer_expr(&ret.expr, &block_scope)?;
+                            last_stmt_type = Self::infer_expr(&ret.expr, &block_scope, data)?;
                             break; // Early return
                         }
                         _ => {
-                            self.infer_stmt(stmt, &block_scope)?;
+                            Self::infer_stmt(stmt, &block_scope, data)?;
                         }
                     }
                 }
 
-                self.type_info_table
+                data.type_info_table
                     .types
                     .insert(block_expr.id, last_stmt_type.clone());
                 last_stmt_type
@@ -489,12 +300,12 @@ impl PassTypeInference {
             ExprNode::FuncCall(func_call_expr) => {
                 // Here, we have to resolve the overloaded function
 
-                let mut actual_func_ident = self.infer_expr(&func_call_expr.lhs, block)?;
+                let mut actual_func_ident = Self::infer_expr(&func_call_expr.lhs, block, data)?;
 
                 let actual_arg_types = func_call_expr
                     .args
                     .iter()
-                    .map(|arg| self.infer_expr(arg, block))
+                    .map(|arg| Self::infer_expr(arg, block, data))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let (resolved_ret_type, resolved_func) = match actual_func_ident.as_ref() {
@@ -528,7 +339,7 @@ impl PassTypeInference {
                             FunctionGroupKind::Unresolved(func_candidates) => {
                                 let (_, resolved_generic_ty, resolved_func_type) = resolve_function_group(
                                     func_candidates,
-                                    &self.type_info_table,
+                                    &data.type_info_table,
                                     actual_arg_types.as_slice(),
                                 ).map_err(|x| panic!("User bug: Function overload error"))?;
                                 Ok((resolved_func_type.ret.clone(), resolved_generic_ty))
@@ -546,7 +357,7 @@ impl PassTypeInference {
                     TypeInfo::Function(_) => unreachable!("Compiler Bug: Function type should be a function group - overloading is allowed."),
                 }?;
 
-                self.type_info_table
+                data.type_info_table
                     .types
                     .insert(func_call_expr.id, resolved_ret_type.clone());
 
@@ -556,18 +367,30 @@ impl PassTypeInference {
 
                 resolved_ret_type
             }
+            ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data)?,
         };
         Ok(out)
     }
 
+    pub fn infer_if_expr(
+        expr: &IfExpr,
+        block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
+    ) -> Result<Rc<TypeInfo>, SemanticError> {
+        let cond_ty = Self::infer_expr(&expr.if_block.condition, block, data)?;
+        // TODO: Check if the condition type is a boolean
+
+        let then_ty = Self::infer_expr(&expr.if_block.body, block, data)?;
+    }
+
     fn declare_function(
-        &mut self,
         name: &str,
         args: &[FuncArg],
         ret_ty: Option<&TypeNode>, // TODO: This should not be an Option!
         id: NodeId,
         span: Span,
         block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
     ) -> Result<(), SemanticError> {
         block
             .as_ref()
@@ -578,9 +401,9 @@ impl PassTypeInference {
         let func_arg_types = args
             .iter()
             .map(|arg| {
-                let semantic_arg_type = self.infer_type(&arg.ty, block)?;
+                let semantic_arg_type = Self::infer_type(&arg.ty, block, data)?;
 
-                self.match_binding_node_to_type(
+                Self::match_binding_node_to_type(
                     &arg.binding,
                     &semantic_arg_type,
                     |ident_binding, ty, ty_info_table| {
@@ -594,6 +417,7 @@ impl PassTypeInference {
 
                         Ok(())
                     },
+                    data,
                 )?;
 
                 Ok::<_, SemanticError>(semantic_arg_type)
@@ -601,7 +425,7 @@ impl PassTypeInference {
             .collect::<Result<Rc<[_]>, _>>()?;
 
         let ret_type = if let Some(ty) = ret_ty {
-            self.infer_type(ty, block)?
+            Self::infer_type(ty, block, data)?
         } else {
             Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
         };
@@ -611,33 +435,35 @@ impl PassTypeInference {
             ret: ret_type,
         }));
 
-        self.type_info_table.types.insert(id, func.clone());
+        data.type_info_table.types.insert(id, func.clone());
 
         Ok(())
     }
 
     pub fn infer_structural(
-        &mut self,
         structural: &StructuralNode,
         block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
     ) -> Result<(), SemanticError> {
         match structural {
-            StructuralNode::FuncDecl(decl) => self.declare_function(
+            StructuralNode::FuncDecl(decl) => Self::declare_function(
                 &decl.name,
                 &decl.args,
                 decl.ret_ty.as_deref(),
                 decl.id,
                 decl.span.clone(),
                 block,
+                data,
             ),
             StructuralNode::FuncDef(def) => {
-                self.declare_function(
+                Self::declare_function(
                     &def.decl.name,
                     &def.decl.args,
                     def.decl.ret_ty.as_deref(),
                     def.id,
                     def.span.clone(),
                     block,
+                    data,
                 )?;
 
                 let func_block = Block::from_parent(block.clone());
@@ -654,8 +480,30 @@ impl PassTypeInference {
 
                 // Process function body separately
                 for stmt in &def.body.body {
-                    self.infer_stmt(stmt, &func_block)?;
+                    Self::infer_stmt(stmt, &func_block, data)?;
                 }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn infer(
+        ast: &Node,
+        block: &Rc<RefCell<Block>>,
+        data: &mut TransientData,
+    ) -> Result<(), SemanticError> {
+        match ast {
+            Node::Structural(structural) => Self::infer_structural(structural, block, data),
+            Node::Stmt(stmt) => Self::infer_stmt(stmt, block, data),
+            Node::Expr(expr) => {
+                let _ = Self::infer_expr(expr, block, data)?;
+                Ok(())
+            }
+            Node::Binding(_) => {
+                unreachable!("Compiler Bug: Cannot infer a binding without a type")
+            }
+            Node::Type(ty) => {
+                let _ = Self::infer_type(ty, block, data)?;
                 Ok(())
             }
         }
@@ -697,58 +545,91 @@ fn resolve_function_group(
 }
 
 impl Pass for PassTypeInference {
-    fn run(mut self, ast: &Node, context: &mut yuu_shared::Context) -> bool {
-        let root = Block::root();
+    fn run(&mut self, context: &mut yuu_shared::Context) -> bool {
+        let src_info = context.require_pass_data::<SourceCodeInfo>("TypeInference");
 
-        let out = match ast {
-            Node::Structural(structural) => self.infer_structural(structural, &root),
-            Node::Stmt(stmt) => self.infer_stmt(stmt, &root),
-            Node::Expr(expr) => self.infer_expr(expr, &root).map(|_| ()),
-            Node::Binding(_) => {
-                unreachable!("Compiler Bug: Cannot infer a binding without a type")
-            }
-            Node::Type(ty) => self.infer_type(ty, &root).map(|_| ()),
+        let mut data = TransientData {
+            src_cache: src_info.cache.clone(),
+            type_info_table: TypeInfoTable::new(),
         };
 
-        context.add_pass_data(self.type_info_table);
+        let root = Block::root(&mut data.type_info_table);
+        let out = Self::infer(&src_info.root_node, &root, &mut data);
+
+        // Store the type info table as pass data
+        context.add_pass_data(data.type_info_table);
 
         out.is_ok()
+    }
+
+    fn install(self, pipeline: &mut yuu_shared::Pipeline) {
+        pipeline.add_pass(self);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yuu_shared::Context;
+    use yuu_parse::{lexer::UnprocessedCodeInfo, parser::Parser};
+    use yuu_shared::{Context, Pipeline};
 
     fn create_test_context() -> Context {
         Context::new()
     }
 
     #[test]
-    fn test_basic_literal_inference() {
-        let mut context = create_test_context();
-        let src_cache = SrcCache::new();
-        let pass = PassTypeInference::new(src_cache);
+    fn test_basic() {
+        let code_info = UnprocessedCodeInfo {
+            code: "fn test() {out 1 + 2;}",
+            file_name: "test.yuu",
+        };
+        let mut parser = Parser::new(&code_info);
+        let mut ctxt = parser.parse_and_create_context().expect("Parser error");
 
-        // Create a literal expression node
-        let literal = Node::Expr(ExprNode::Literal(LiteralExpr {
-            lit: yuu_shared::token::Token {
-                kind: yuu_shared::token::TokenKind::Integer(42),
-                span: 0..1,
-            },
-            id: 1,
-        }));
+        let mut pipeline = Pipeline::new();
+        let pass_type_inference = PassTypeInference::new();
+        pass_type_inference.install(&mut pipeline);
 
-        assert!(pass.run(&literal, &mut context));
+        pipeline.run(&mut ctxt);
 
-        let type_info_table = context.get_pass_data::<TypeInfoTable>().unwrap();
-        match type_info_table.types.get(&1) {
-            Some(ty) => match ty.as_ref() {
-                TypeInfo::BuiltIn(BuiltInType::I64) => (),
-                _ => panic!("Expected i64 type"),
-            },
-            None => panic!("No type information found for literal"),
+        let tit = ctxt.require_pass_data::<TypeInfoTable>("Test");
+
+        for (idx, ty) in tit.types.iter() {
+            println!("Node with Idx={idx}: {ty}");
+        }
+    }
+
+    #[test]
+    fn test_fac() {
+        let code_info = UnprocessedCodeInfo {
+            code: r#"fn fac(n: i64) -> i64 {
+            out if n == 0 {
+                out 1; 
+            }            
+            else {
+                let n_out = n * fac(n - 1.0);
+                out n_out; 
+            };
+        }"#,
+            file_name: "test.yuu",
+        };
+
+        let mut parser = Parser::new(&code_info);
+        let mut ctxt = parser.parse_and_create_context().expect("Parser error");
+
+        let mut pipeline = Pipeline::new();
+        let pass_type_inference = PassTypeInference::new();
+        pass_type_inference.install(&mut pipeline);
+
+        pipeline.run(&mut ctxt);
+
+        let tit = ctxt.require_pass_data::<TypeInfoTable>("Test");
+        let ast = ctxt.require_pass_data::<SourceCodeInfo>("Test");
+
+        println!("{}", serde_json::to_string_pretty(&ast.root_node).unwrap());
+
+        for (idx, ty) in tit.types.iter() {
+            println!("Node with Idx={idx}: {ty}");
         }
     }
 }
