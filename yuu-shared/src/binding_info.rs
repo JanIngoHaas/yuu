@@ -2,8 +2,9 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use yuu_parse::Span;
-use yuu_shared::ast::NodeId;
+use logos::Span;
+
+use crate::ast::NodeId;
 
 #[derive(Clone)]
 pub struct BindingInfo {

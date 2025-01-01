@@ -10,13 +10,12 @@ use yuu_parse::{
     parser::{default_src_cache, SourceCodeInfo, SrcCache},
     Span,
 };
-use yuu_shared::{ast::*, Pass};
+use yuu_shared::type_info::{PrimitiveType, FunctionType};
+use yuu_shared::{ast::*, binding_info::{BindingInfo, BindingInfoKind}, type_info::{FunctionGroupKind, TypeInfo, TypeInfoTable}, Pass};
 
 use crate::{
-    binding_info::{BindingInfo, BindingInfoKind},
     block::{Block, FunctionOverloadError},
     semantic_error::SemanticError,
-    type_info::{BuiltInType, FunctionGroupKind, FunctionType, TypeInfo, TypeInfoTable},
 };
 
 const MAX_SIMILAR_NAMES: u64 = 3;
@@ -77,13 +76,16 @@ impl PassTypeInference {
         let semantic_type = match ty {
             TypeNode::BuiltIn(built_in) => match built_in.kind {
                 yuu_shared::ast::BuiltInTypeKind::I64 => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
+                    Rc::new(TypeInfo::BuiltIn(PrimitiveType::I64))
                 }
                 yuu_shared::ast::BuiltInTypeKind::F32 => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::F32))
+                    Rc::new(TypeInfo::BuiltIn(PrimitiveType::F32))
                 }
                 yuu_shared::ast::BuiltInTypeKind::F64 => {
-                    Rc::new(TypeInfo::BuiltIn(BuiltInType::F64))
+                    Rc::new(TypeInfo::BuiltIn(PrimitiveType::F64))
+                }
+                yuu_shared::ast::BuiltInTypeKind::Bool => {
+                    Rc::new(TypeInfo::BuiltIn(PrimitiveType::Bool))
                 }
             },
             TypeNode::Ident(ident) => {
@@ -163,13 +165,13 @@ impl PassTypeInference {
             ExprNode::Literal(lit) => {
                 let out = match lit.lit.kind {
                     yuu_shared::token::TokenKind::Integer(_) => {
-                        Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
+                        Rc::new(TypeInfo::BuiltIn(PrimitiveType::I64))
                     }
                     yuu_shared::token::TokenKind::F32(_) => {
-                        Rc::new(TypeInfo::BuiltIn(BuiltInType::F32))
+                        Rc::new(TypeInfo::BuiltIn(PrimitiveType::F32))
                     }
                     yuu_shared::token::TokenKind::F64(_) => {
-                        Rc::new(TypeInfo::BuiltIn(BuiltInType::F64))
+                        Rc::new(TypeInfo::BuiltIn(PrimitiveType::F64))
                     }
                     _ => unreachable!("Compiler bug: Literal not implemented"),
                 };
@@ -277,7 +279,7 @@ impl PassTypeInference {
             ExprNode::Block(block_expr) => {
                 let block_scope = Block::from_parent(block.clone());
 
-                let mut last_stmt_type = Rc::new(TypeInfo::BuiltIn(BuiltInType::Nil));
+                let mut last_stmt_type = Rc::new(TypeInfo::BuiltIn(PrimitiveType::Nil));
 
                 for stmt in &block_expr.body {
                     match stmt {
@@ -379,7 +381,7 @@ impl PassTypeInference {
     ) -> Result<Rc<TypeInfo>, SemanticError> {
         let cond_ty = Self::infer_expr(&expr.if_block.condition, block, data)?;
         // TODO: Check if the condition type is a boolean
-        if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(BuiltInType::Bool)) {
+        if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(PrimitiveType::Bool)) {
             panic!("User bug: Condition of if expr must be of type bool");
         }
 
@@ -387,7 +389,7 @@ impl PassTypeInference {
         let if_types = expr.else_if_blocks.iter().map(|x| {
             // First check if we have a bool - if not -> error!
 
-            if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(BuiltInType::Bool)) {
+            if !cond_ty.does_coerce_to_same_type(&TypeInfo::BuiltIn(PrimitiveType::Bool)) {
                 panic!("User bug: Condition of if expr must be of type bool");
             }
 
@@ -412,9 +414,9 @@ impl PassTypeInference {
             }
         };
 
+        // Put that thing into the type info table
+        data.type_info_table.types.insert(expr.id, out_ty.clone());
         Ok(out_ty)
-
-        // Do all the other branches:
     }
 
     fn declare_function(
@@ -461,7 +463,7 @@ impl PassTypeInference {
         let ret_type = if let Some(ty) = ret_ty {
             Self::infer_type(ty, block, data)?
         } else {
-            Rc::new(TypeInfo::BuiltIn(BuiltInType::I64))
+            Rc::new(TypeInfo::BuiltIn(PrimitiveType::I64))
         };
 
         let func = Rc::new(TypeInfo::Function(FunctionType {
@@ -641,7 +643,7 @@ mod tests {
                 out 1; 
             }            
             else {
-                let n_out = n * fac(n - 1.0);
+                let n_out = n * fac(n - 1);
                 out n_out; 
             };
         }"#,

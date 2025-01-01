@@ -1,9 +1,7 @@
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 use hashbrown::HashMap;
-use yuu_shared::ast::*;
-
-use crate::binding_info::BindingInfo;
+use crate::{ast::*, binding_info::BindingInfo};
 
 pub struct TypeInfoTable {
     pub types: HashMap<NodeId, Rc<TypeInfo>>,
@@ -23,25 +21,23 @@ impl TypeInfoTable {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum BuiltInType {
+#[derive(Clone, PartialEq, Eq, Copy)]
+pub enum PrimitiveType {
     I64,
     F32,
     F64,
     Nil,
-    Error,
     Bool,
 }
 
-impl Display for BuiltInType {
+impl Display for PrimitiveType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BuiltInType::I64 => write!(f, "i64"),
-            BuiltInType::F32 => write!(f, "f32"),
-            BuiltInType::F64 => write!(f, "f64"),
-            BuiltInType::Error => write!(f, "<error>"),
-            BuiltInType::Nil => write!(f, "nil"),
-            BuiltInType::Bool => write!(f, "bool"),
+            PrimitiveType::I64 => write!(f, "i64"),
+            PrimitiveType::F32 => write!(f, "f32"),
+            PrimitiveType::F64 => write!(f, "f64"),
+            PrimitiveType::Nil => write!(f, "nil"),
+            PrimitiveType::Bool => write!(f, "bool"),
         }
     }
 }
@@ -73,7 +69,7 @@ pub enum FunctionGroupKind {
 #[derive(Clone)]
 pub enum TypeInfo {
     //Custom(String),
-    BuiltIn(BuiltInType),
+    BuiltIn(PrimitiveType),
     Function(FunctionType),
     FunctionGroup(RefCell<FunctionGroupKind>),
     // pub size: usize,
@@ -81,6 +77,14 @@ pub enum TypeInfo {
 }
 
 impl TypeInfo {
+
+    pub fn is_primitive(&self) -> bool {
+        match self {
+            TypeInfo::BuiltIn(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn does_coerce_to_same_type(&self, other: &Self) -> bool {
         match (self, other) {
             (TypeInfo::BuiltIn(a), TypeInfo::BuiltIn(b)) => {

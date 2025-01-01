@@ -99,11 +99,20 @@ pub enum TokenKind {
     #[token("=")]
     Equal,
 
+    #[token("==")]
+    EqEq,
+
     #[token(",")]
     Comma,
 
     #[token(";")]
     Semicolon,
+
+    #[token("true")]
+    TrueKw,
+
+    #[token("false")]
+    FalseKw,
 
     // Basic operators
     #[token("+")]

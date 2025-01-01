@@ -41,7 +41,7 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => (8, 0), // Function calls highest
             TokenKind::Asterix | TokenKind::Slash => (6, 6), // Multiplication/division
             TokenKind::Plus | TokenKind::Minus => (5, 5), // Addition/subtraction
-            TokenKind::IfKw => (2, 1),   // If expressions lowest
+            TokenKind::EqEq => (4, 4), // Equality
             _ => (-1, -1),
         }
     }
@@ -95,7 +95,6 @@ impl<'a> Parser<'a> {
 
     fn parse_primary_expr(&mut self) -> Result<(Span, ExprNode), ParseError> {
         let t = self.lexer.next_token()?;
-
         match &t.kind {
             TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) => {
                 Ok(self.make_literal_expr(t))
@@ -138,6 +137,7 @@ impl<'a> Parser<'a> {
                     })),
                 }
             }
+            TokenKind::IfKw => self.parse_if_expr(),
             _ => Err(ParseError::GenericSyntaxError({
                 let expected = "a primary expression".to_string();
                 let found = format!("{:?}", t.kind);
@@ -164,6 +164,7 @@ impl<'a> Parser<'a> {
             TokenKind::Minus => BinOp::Subtract,
             TokenKind::Asterix => BinOp::Multiply,
             TokenKind::Slash => BinOp::Divide,
+            TokenKind::EqEq => BinOp::Eq,
             _ => {
                 return Err(ParseError::GenericSyntaxError(GenericError {
                     expected: "a binary operator".to_string(),
@@ -196,10 +197,6 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    pub fn parse_else_if_block(&mut self) -> Result<(Span, BlockExpr), ParseError> {
-        todo!()
-    }
-
     pub fn parse_condition_with_body(&mut self) -> Result<(Span, ConditionWithBody), ParseError> {
         let (_, condition) = self.parse_expr_chain(0)?;
         let (block_span, block) = self.parse_block_expr()?;
@@ -215,16 +212,14 @@ impl<'a> Parser<'a> {
 
     pub fn parse_if_expr(
         &mut self,
-        lhs: ExprNode,
-        _op_token: Token,
-        _min_precedence: i32,
     ) -> Result<(Span, ExprNode), ParseError> {
         let (body_span, cond_with_body) = self.parse_condition_with_body()?;
+        let start_span = body_span;
 
         // Parse possible else if block -> peek for else if token
 
         let mut elifs = Vec::new();
-        let mut last_body_span = body_span;
+        let mut last_body_span = start_span.clone();
         loop {
             let peeked_tokens = self.lexer.peek_n::<2>()?;
             if let [Ok(maybe_else), Ok(maybe_if)] = &peeked_tokens[..] {
@@ -245,6 +240,7 @@ impl<'a> Parser<'a> {
         let maybe_else = self.lexer.peek()?;
 
         let else_ = if maybe_else.kind == TokenKind::ElseKw {
+            let _ = self.lexer.next_token()?; 
             let (body_span, block) = self.parse_block_expr()?;
             last_body_span = body_span;
             Some(Box::new(ExprNode::Block(block)))
@@ -252,7 +248,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let overall_span = lhs.span().start..last_body_span.end;
+        let overall_span = start_span.start..last_body_span.end; // Use stored start span
 
         let if_expr = IfExpr {
             id: 0,
@@ -282,14 +278,11 @@ impl<'a> Parser<'a> {
             let op = self.lexer.next_token()?;
 
             match &op.kind {
-                TokenKind::Plus | TokenKind::Minus | TokenKind::Asterix | TokenKind::Slash => {
+                TokenKind::Plus | TokenKind::Minus | TokenKind::Asterix | TokenKind::Slash | TokenKind::EqEq => {
                     lhs = self.parse_bin_expr(lhs.1, op, right_precedence)?;
                 }
                 TokenKind::LParen => {
                     lhs = self.parse_func_call_expr(lhs.1, op, right_precedence)?;
-                }
-                TokenKind::IfKw => {
-                    lhs = self.parse_if_expr(lhs.1, op, right_precedence)?;
                 }
                 _ => break,
             }
@@ -730,8 +723,13 @@ mod tests {
     fn test_function_definition() {
         let code_info = UnprocessedCodeInfo {
             code: "fn fac(n: i64) -> i64 {
-            let n_out = n * fac(n - 1);
-            return n_out;
+            out if n == 0 {
+                out 1; 
+            }            
+            else {
+                let n_out = n * fac(n - 1.0);
+                out n_out; 
+            };
         }",
             file_name: "test.yuu",
         };

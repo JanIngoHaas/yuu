@@ -11,6 +11,7 @@ pub enum BinOp {
     Subtract,
     Multiply,
     Divide,
+    Eq,
 }
 
 impl Display for BinOp {
@@ -20,6 +21,7 @@ impl Display for BinOp {
             BinOp::Subtract => write!(f, "-"),
             BinOp::Multiply => write!(f, "*"),
             BinOp::Divide => write!(f, "/"),
+            BinOp::Eq => write!(f, "=="),
         }
     }
 }
@@ -31,6 +33,7 @@ impl BinOp {
             BinOp::Subtract => "sub",
             BinOp::Multiply => "mul",
             BinOp::Divide => "div",
+            BinOp::Eq => "eq",
         }
     }
 }
@@ -118,7 +121,7 @@ pub enum ExprNode {
     Ident(IdentExpr),
     Block(BlockExpr),
     FuncCall(FuncCallExpr),
-    If(IfExpr),
+    If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -176,6 +179,7 @@ pub enum BuiltInTypeKind {
     I64,
     F32,
     F64,
+    Bool
 }
 
 impl Display for BuiltInTypeKind {
@@ -184,6 +188,7 @@ impl Display for BuiltInTypeKind {
             BuiltInTypeKind::I64 => write!(f, "i64"),
             BuiltInTypeKind::F32 => write!(f, "f32"),
             BuiltInTypeKind::F64 => write!(f, "f64"),
+            BuiltInTypeKind::Bool => write!(f, "bool"),
         }
     }
 }

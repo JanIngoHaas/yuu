@@ -6,12 +6,10 @@ use std::{
 
 use hashbrown::HashMap;
 use yuu_parse::Span;
-use yuu_shared::ast::NodeId;
+use yuu_shared::{ast::NodeId, binding_info::{BindingInfo, BindingInfoKind}, type_info::{PrimitiveType, FunctionType, TypeInfo, TypeInfoTable}};
 
 use crate::{
-    binding_info::{BindingInfo, BindingInfoKind},
     semantic_error::SemanticError,
-    type_info::{BuiltInType, FunctionType, TypeInfo, TypeInfoTable},
 };
 
 const MAX_SIMILAR_NAMES: u64 = 3;
@@ -167,6 +165,7 @@ impl Block {
     where
         T: Fn(&BindingInfo, &FunctionType) -> Rc<TypeInfo>,
     {
+        println!("Resolving function: {}", name);
         let overload = self.get_binding_from_root(name);
 
         overload.map(|binding| match binding {
@@ -208,16 +207,17 @@ impl Block {
         type_info_table: &mut TypeInfoTable,
         op_name: &str,
         id: NodeId,
-        type_: BuiltInType,
+        arg_type: PrimitiveType,
+        ret_type: PrimitiveType,
     ) {
         type_info_table.types.insert(
             id,
             Rc::new(TypeInfo::Function(FunctionType {
                 args: Rc::new([
-                    Rc::new(TypeInfo::BuiltIn(type_.clone())),
-                    Rc::new(TypeInfo::BuiltIn(type_.clone())),
+                    Rc::new(TypeInfo::BuiltIn(arg_type.clone())),
+                    Rc::new(TypeInfo::BuiltIn(arg_type.clone())),
                 ]),
-                ret: Rc::new(TypeInfo::BuiltIn(type_)),
+                ret: Rc::new(TypeInfo::BuiltIn(ret_type)),
             })),
         );
         let _ = self.declare_function(op_name.to_string(), id, Span { start: 0, end: 0 });
@@ -225,22 +225,25 @@ impl Block {
 
     pub fn predefine_builtins(&mut self, type_info_table: &mut TypeInfoTable) {
         // F32 operations
-        self.register_binary_op(type_info_table, "add", -13, BuiltInType::F32);
-        self.register_binary_op(type_info_table, "sub", -14, BuiltInType::F32);
-        self.register_binary_op(type_info_table, "mul", -15, BuiltInType::F32);
-        self.register_binary_op(type_info_table, "div", -16, BuiltInType::F32);
-
+        self.register_binary_op(type_info_table, "add", -13, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(type_info_table, "sub", -14, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(type_info_table, "mul", -15, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(type_info_table, "div", -16, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(type_info_table, "eq", -17, PrimitiveType::F32, PrimitiveType::Bool);
+        
         // I64 operations
-        self.register_binary_op(type_info_table, "add", -1, BuiltInType::I64);
-        self.register_binary_op(type_info_table, "sub", -3, BuiltInType::I64);
-        self.register_binary_op(type_info_table, "mul", -5, BuiltInType::I64);
-        self.register_binary_op(type_info_table, "div", -7, BuiltInType::I64);
+        self.register_binary_op(type_info_table, "add", -1, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(type_info_table, "sub", -3, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(type_info_table, "mul", -5, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(type_info_table, "div", -7, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(type_info_table, "eq", -20, PrimitiveType::I64, PrimitiveType::Bool);
 
         // F64 operations
-        self.register_binary_op(type_info_table, "add", -2, BuiltInType::F64);
-        self.register_binary_op(type_info_table, "sub", -4, BuiltInType::F64);
-        self.register_binary_op(type_info_table, "mul", -6, BuiltInType::F64);
-        self.register_binary_op(type_info_table, "div", -8, BuiltInType::F64);
+        self.register_binary_op(type_info_table, "add", -2, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(type_info_table, "sub", -4, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(type_info_table, "mul", -6, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(type_info_table, "div", -8, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(type_info_table, "eq", -9, PrimitiveType::F64, PrimitiveType::Bool);
     }
 }
 

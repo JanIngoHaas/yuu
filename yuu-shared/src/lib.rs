@@ -1,6 +1,11 @@
 pub mod ast;
 pub mod graphviz_output;
 pub mod token;
+pub mod yir;
+pub mod type_info;
+pub mod binding_info;
+pub type Range = logos::Span;
+
 use ast::Node;
 use hashbrown::HashMap;
 
