@@ -134,7 +134,7 @@ pub struct LetStmt {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum ReturnStmtType {
+pub enum ReturnStmtKind {
     ReturnFromBlock,
     ReturnFromFunction,
 }
@@ -143,7 +143,7 @@ pub enum ReturnStmtType {
 pub struct ReturnStmt {
     pub span: Span,
     pub expr: Box<ExprNode>,
-    pub ty: ReturnStmtType,
+    pub kind: ReturnStmtKind,
     pub id: NodeId, // Add this field
 }
 
@@ -179,7 +179,7 @@ pub enum BuiltInTypeKind {
     I64,
     F32,
     F64,
-    Bool
+    Bool,
 }
 
 impl Display for BuiltInTypeKind {
@@ -267,6 +267,10 @@ pub enum Node {
     Type(TypeNode),
     Structural(StructuralNode),
     Binding(BindingNode),
+}
+
+pub struct AST {
+    pub structurals: Vec<Box<StructuralNode>>,
 }
 
 impl Display for Node {

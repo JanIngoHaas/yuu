@@ -153,7 +153,8 @@ impl AddId for StructuralNode {
     }
 }
 
-pub fn add_ids(node: &mut Node) {
-    let mut gen = IdGenerator::new();
-    node.add_id(&mut gen);
+pub fn add_ids(root: &mut AST) {
+    for node in root.structurals.iter_mut() {
+        node.add_id(&mut IdGenerator::new());
+    }
 }

@@ -1,2 +1,2 @@
 pub mod pass_gen_cranelift_ir;
-pub mod pass_ssa_to_c;
+pub mod pass_yir_to_c;

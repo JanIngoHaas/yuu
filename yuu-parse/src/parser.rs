@@ -25,7 +25,7 @@ pub fn default_src_cache() -> SrcCache {
 
 pub struct SourceCodeInfo {
     pub cache: Rc<RefCell<(String, Source)>>,
-    pub root_node: Node,
+    pub root_node: AST,
 }
 
 impl<'a> Parser<'a> {
@@ -41,7 +41,7 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => (8, 0), // Function calls highest
             TokenKind::Asterix | TokenKind::Slash => (6, 6), // Multiplication/division
             TokenKind::Plus | TokenKind::Minus => (5, 5), // Addition/subtraction
-            TokenKind::EqEq => (4, 4), // Equality
+            TokenKind::EqEq => (4, 4),   // Equality
             _ => (-1, -1),
         }
     }
@@ -210,9 +210,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_if_expr(
-        &mut self,
-    ) -> Result<(Span, ExprNode), ParseError> {
+    pub fn parse_if_expr(&mut self) -> Result<(Span, ExprNode), ParseError> {
         let (body_span, cond_with_body) = self.parse_condition_with_body()?;
         let start_span = body_span;
 
@@ -240,7 +238,7 @@ impl<'a> Parser<'a> {
         let maybe_else = self.lexer.peek()?;
 
         let else_ = if maybe_else.kind == TokenKind::ElseKw {
-            let _ = self.lexer.next_token()?; 
+            let _ = self.lexer.next_token()?;
             let (body_span, block) = self.parse_block_expr()?;
             last_body_span = body_span;
             Some(Box::new(ExprNode::Block(block)))
@@ -278,7 +276,11 @@ impl<'a> Parser<'a> {
             let op = self.lexer.next_token()?;
 
             match &op.kind {
-                TokenKind::Plus | TokenKind::Minus | TokenKind::Asterix | TokenKind::Slash | TokenKind::EqEq => {
+                TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Asterix
+                | TokenKind::Slash
+                | TokenKind::EqEq => {
                     lhs = self.parse_bin_expr(lhs.1, op, right_precedence)?;
                 }
                 TokenKind::LParen => {
@@ -387,9 +389,9 @@ impl<'a> Parser<'a> {
         let stmt = StmtNode::Return(ReturnStmt {
             span: span.clone(),
             expr: Box::new(expr),
-            ty: match &ret_tkn.kind {
-                TokenKind::Return => ReturnStmtType::ReturnFromFunction,
-                TokenKind::OutKw => ReturnStmtType::ReturnFromBlock,
+            kind: match &ret_tkn.kind {
+                TokenKind::Return => ReturnStmtKind::ReturnFromFunction,
+                TokenKind::OutKw => ReturnStmtKind::ReturnFromBlock,
                 _ => panic!("Expected 'return' or 'out' token"),
             },
             id: 0,
@@ -596,15 +598,27 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<SourceCodeInfo, ParseError> {
-        let (_, structural) = self.parse_structural()?;
-        let root_node = Node::Structural(structural);
+        // Parse structural nodes as often as possible, until EOF
+        let mut structural_nodes = Vec::new();
+        loop {
+            let t = self.lexer.peek()?;
+            if t.kind == TokenKind::EOF {
+                break;
+            }
+            structural_nodes.push(Box::new(self.parse_structural()?.1));
+        }
+
+        let ast = AST {
+            structurals: structural_nodes,
+        };
+
         let source_code = ariadne::Source::from(self.code_info.code.to_string());
         let source_code_info = SourceCodeInfo {
             cache: Rc::new(RefCell::new((
                 self.code_info.file_name.to_string(),
                 source_code,
             ))),
-            root_node,
+            root_node: ast,
         };
         Ok(source_code_info)
     }
@@ -631,96 +645,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_literal_expression() {
-        let code_info = UnprocessedCodeInfo {
-            code: "42",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        assert!(result.is_ok());
-        if let Ok(Node::Expr(expr)) = result.as_ref().map(|x| &x.root_node) {
-            match expr {
-                ExprNode::Literal(lit) => assert_eq!(
-                    lit.lit.kind,
-                    TokenKind::Integer(yuu_shared::token::Integer::I64(42))
-                ),
-                _ => panic!("Expected a literal expression"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_unary_expression() {
-        let code_info = UnprocessedCodeInfo {
-            code: "-42",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_binary_expression() {
-        let code_info = UnprocessedCodeInfo {
-            code: "1 + 2",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_complex_expression() {
-        let code_info = UnprocessedCodeInfo {
-            code: "--1 + 2 + 3 * --4 * +-5 + 6",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        assert!(result.is_ok()); // Fixed assertion
-        let mut result = result.unwrap();
-        add_ids::add_ids(&mut result.root_node);
-        let ron = result.root_node.to_graphviz_string();
-        println!("{}", ron);
-    }
-
-    // Syntax error tests
-    #[test]
-    fn test_syntax_error() {
-        let code_info = UnprocessedCodeInfo {
-            code: "1 + 2 - * 4",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-
-        assert!(result.is_err()); // Changed to assert error
-
-        if let Err(err) = result {
-            err.print(&code_info);
-        }
-    }
-
-    #[test]
-    fn test_syntax_error_parentesis() {
-        let code_info = UnprocessedCodeInfo {
-            code: "1 +2 + 3+ 4+ (1 + (2 - 4 + 5)",
-            file_name: "test.yuu",
-        };
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            err.print(&code_info);
-        }
-    }
-
-    #[test]
-    fn test_function_definition() {
+    fn test_parse_fac() {
         let code_info = UnprocessedCodeInfo {
             code: "fn fac(n: i64) -> i64 {
             out if n == 0 {

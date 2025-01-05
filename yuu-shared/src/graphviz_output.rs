@@ -120,7 +120,7 @@ impl ToGraphviz for StmtNode {
             StmtNode::Return(ret) => {
                 graph.push_str(&format!(
                     "    node{} [label=\"Return({:?})\"]\n",
-                    ret.id, ret.ty
+                    ret.id, ret.kind
                 ));
                 ret.expr.to_graphviz(graph, Some(ret.id));
                 if let Some(parent) = parent_id {
@@ -239,6 +239,21 @@ impl Node {
     pub fn to_graphviz_string(&self) -> String {
         let mut graph = String::from("digraph AST {\n");
         self.to_graphviz(&mut graph, None);
+        graph.push_str("}\n");
+        graph
+    }
+}
+
+impl AST {
+    pub fn to_graphviz_string(&self) -> String {
+        let mut graph = String::from("digraph AST {\n");
+        let root_id = 0;
+        graph.push_str(&format!("    node{} [label=\"AST\"]\n", root_id));
+
+        for structural in &self.structurals {
+            structural.to_graphviz(&mut graph, Some(root_id));
+        }
+
         graph.push_str("}\n");
         graph
     }

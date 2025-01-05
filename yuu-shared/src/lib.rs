@@ -1,16 +1,24 @@
 pub mod ast;
+pub mod binding_info;
 pub mod graphviz_output;
 pub mod token;
-pub mod yir;
 pub mod type_info;
-pub mod binding_info;
-pub type Range = logos::Span;
+pub mod yir;
+pub type Span = logos::Span;
+pub type Range = Span;
+pub mod block;
+pub mod print_yir;
+pub mod semantic_error;
+
+use std::any::Any;
+use std::ops::Deref;
+use std::{cell::RefCell, rc::Rc};
 
 use ast::Node;
 use hashbrown::HashMap;
 
 pub struct Context {
-    passes_data: HashMap<String, Box<dyn std::any::Any>>,
+    passes_data: HashMap<String, Rc<dyn Any>>,
 }
 
 impl Context {
@@ -25,33 +33,43 @@ impl Context {
         if self.passes_data.contains_key(&key) {
             return false;
         }
-        self.passes_data.insert(key, Box::new(pass_data));
+        self.passes_data
+            .insert(key, Rc::new(RefCell::new(pass_data)));
         true
     }
 
-    pub fn get_pass_data<T: 'static>(&self) -> Option<&T> {
-        self.passes_data
-            .get(std::any::type_name::<T>())
-            .map(|x| x.downcast_ref().unwrap())
+    pub fn get_pass_data<T: 'static>(&self) -> Option<Rc<RefCell<T>>> {
+        let key = std::any::type_name::<T>().to_string();
+        self.passes_data.get(&key).map(|rc| {
+            rc.clone()
+                .downcast::<RefCell<T>>()
+                .expect("Type mismatch in pass data")
+        })
     }
 
     pub fn replace_pass_data<T: 'static>(&mut self, pass_data: T) {
-        self.passes_data
-            .insert(std::any::type_name::<T>().to_string(), Box::new(pass_data));
+        self.passes_data.insert(
+            std::any::type_name::<T>().to_string(),
+            Rc::new(RefCell::new(pass_data)),
+        );
     }
 
-    pub fn require_pass_data<T: 'static>(&self, pass_name: &'static str) -> &T {
+    pub fn require_pass_data<T: 'static>(&self, pass_name: &'static str) -> Rc<RefCell<T>> {
+        let key = std::any::type_name::<T>();
         self.passes_data
-            .get(std::any::type_name::<T>())
-            .map(|x| x.downcast_ref().unwrap())
-            .expect(
-                format!(
+            .get(key)
+            .map(|rc| {
+                rc.clone()
+                    .downcast::<RefCell<T>>()
+                    .expect("Type mismatch in pass data")
+            })
+            .unwrap_or_else(|| {
+                panic!(
                     "Pass {} requires pass data of type {}",
                     pass_name,
                     std::any::type_name::<T>()
                 )
-                .as_str(),
-            )
+            })
     }
 }
 

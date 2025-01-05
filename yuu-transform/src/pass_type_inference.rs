@@ -1,7 +1,7 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     rc::Rc,
 };
 
@@ -10,13 +10,19 @@ use yuu_parse::{
     parser::{default_src_cache, SourceCodeInfo, SrcCache},
     Span,
 };
-use yuu_shared::type_info::{PrimitiveType, FunctionType};
-use yuu_shared::{ast::*, binding_info::{BindingInfo, BindingInfoKind}, type_info::{FunctionGroupKind, TypeInfo, TypeInfoTable}, Pass};
-
-use crate::{
-    block::{Block, FunctionOverloadError},
-    semantic_error::SemanticError,
+use yuu_shared::{
+    ast::*,
+    binding_info::{BindingInfo, BindingInfoKind},
+    block::{FunctionOverloadError, RootBlock},
+    type_info::{self, FunctionGroupKind, TypeInfo, TypeInfoTable},
+    Pass,
 };
+use yuu_shared::{
+    block::Block,
+    type_info::{FunctionType, PrimitiveType},
+};
+
+use yuu_shared::semantic_error::SemanticError;
 
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
@@ -39,9 +45,9 @@ impl BindingTable {
     }
 }
 
-pub struct TransientData {
+pub struct TransientData<'a> {
     pub src_cache: SrcCache,
-    pub type_info_table: TypeInfoTable,
+    pub type_info_table: &'a mut TypeInfoTable,
 }
 
 pub struct PassTypeInference {}
@@ -397,15 +403,14 @@ impl PassTypeInference {
             Ok::<_, SemanticError>(ty)
         });
 
-        let out_ty = if_types.into_iter()
-            .try_fold(then_ty, |acc, ty| {
-                // Check if acc and ty coerce to same type
-                let ty = ty?;
-                if !acc.does_coerce_to_same_type(&ty) {
-                    panic!("User bug: Types of if expr branches don't coerce to same type");
-                }
-                Ok::<_, SemanticError>(ty)
-            })?;
+        let out_ty = if_types.into_iter().try_fold(then_ty, |acc, ty| {
+            // Check if acc and ty coerce to same type
+            let ty = ty?;
+            if !acc.does_coerce_to_same_type(&ty) {
+                panic!("User bug: Types of if expr branches don't coerce to same type");
+            }
+            Ok::<_, SemanticError>(ty)
+        })?;
 
         if let Some(else_body) = expr.else_block.as_ref() {
             let ty = Self::infer_expr(&else_body, block, data)?;
@@ -582,20 +587,32 @@ fn resolve_function_group(
 
 impl Pass for PassTypeInference {
     fn run(&mut self, context: &mut yuu_shared::Context) -> bool {
-        let src_info = context.require_pass_data::<SourceCodeInfo>("TypeInference");
+        let src_info: Rc<RefCell<SourceCodeInfo>> =
+            context.require_pass_data::<SourceCodeInfo>("TypeInference");
+        let root = context.require_pass_data::<RootBlock>("TypeInference");
+        let type_info_table = context.require_pass_data::<TypeInfoTable>("TypeInference");
+
+        let src_info = src_info.as_ref().borrow();
+        let src_cache = src_info.cache.clone();
+        let mut type_info_table = type_info_table.as_ref().borrow_mut();
+        let type_info_table = type_info_table.deref_mut();
 
         let mut data = TransientData {
-            src_cache: src_info.cache.clone(),
-            type_info_table: TypeInfoTable::new(),
+            src_cache,
+            type_info_table,
         };
 
-        let root = Block::root(&mut data.type_info_table);
-        let out = Self::infer(&src_info.root_node, &root, &mut data);
+        let mut out;
+        let root = root.as_ref().borrow();
 
-        // Store the type info table as pass data
-        context.add_pass_data(data.type_info_table);
+        for node in &src_info.root_node.structurals {
+            out = Self::infer_structural(node, &root, &mut data);
+            if let Err(_) = out {
+                return false;
+            }
+        }
 
-        out.is_ok()
+        return true;
     }
 
     fn install(self, pipeline: &mut yuu_shared::Pipeline) {
@@ -629,6 +646,7 @@ mod tests {
         pipeline.run(&mut ctxt);
 
         let tit = ctxt.require_pass_data::<TypeInfoTable>("Test");
+        let tit = tit.as_ref().borrow();
 
         for (idx, ty) in tit.types.iter() {
             println!("Node with Idx={idx}: {ty}");
@@ -660,9 +678,10 @@ mod tests {
         pipeline.run(&mut ctxt);
 
         let tit = ctxt.require_pass_data::<TypeInfoTable>("Test");
-        let ast = ctxt.require_pass_data::<SourceCodeInfo>("Test");
+        //let ast = ctxt.require_pass_data::<SourceCodeInfo>("Test");
 
-        println!("{}", serde_json::to_string_pretty(&ast.root_node).unwrap());
+        let tit = tit.as_ref().borrow();
+        //let ast = ast.as_ref().borrow();
 
         for (idx, ty) in tit.types.iter() {
             println!("Node with Idx={idx}: {ty}");

@@ -4,13 +4,15 @@ use std::{
     rc::Rc,
 };
 
-use hashbrown::HashMap;
-use yuu_parse::Span;
-use yuu_shared::{ast::NodeId, binding_info::{BindingInfo, BindingInfoKind}, type_info::{PrimitiveType, FunctionType, TypeInfo, TypeInfoTable}};
-
+use crate::Span;
 use crate::{
-    semantic_error::SemanticError,
+    ast::NodeId,
+    binding_info::{BindingInfo, BindingInfoKind},
+    type_info::{FunctionType, PrimitiveType, TypeInfo, TypeInfoTable},
 };
+use hashbrown::HashMap;
+
+use crate::semantic_error::SemanticError;
 
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
@@ -225,25 +227,115 @@ impl Block {
 
     pub fn predefine_builtins(&mut self, type_info_table: &mut TypeInfoTable) {
         // F32 operations
-        self.register_binary_op(type_info_table, "add", -13, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(type_info_table, "sub", -14, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(type_info_table, "mul", -15, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(type_info_table, "div", -16, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(type_info_table, "eq", -17, PrimitiveType::F32, PrimitiveType::Bool);
-        
+        self.register_binary_op(
+            type_info_table,
+            "add",
+            -13,
+            PrimitiveType::F32,
+            PrimitiveType::F32,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "sub",
+            -14,
+            PrimitiveType::F32,
+            PrimitiveType::F32,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "mul",
+            -15,
+            PrimitiveType::F32,
+            PrimitiveType::F32,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "div",
+            -16,
+            PrimitiveType::F32,
+            PrimitiveType::F32,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "eq",
+            -17,
+            PrimitiveType::F32,
+            PrimitiveType::Bool,
+        );
+
         // I64 operations
-        self.register_binary_op(type_info_table, "add", -1, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(type_info_table, "sub", -3, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(type_info_table, "mul", -5, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(type_info_table, "div", -7, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(type_info_table, "eq", -20, PrimitiveType::I64, PrimitiveType::Bool);
+        self.register_binary_op(
+            type_info_table,
+            "add",
+            -1,
+            PrimitiveType::I64,
+            PrimitiveType::I64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "sub",
+            -3,
+            PrimitiveType::I64,
+            PrimitiveType::I64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "mul",
+            -5,
+            PrimitiveType::I64,
+            PrimitiveType::I64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "div",
+            -7,
+            PrimitiveType::I64,
+            PrimitiveType::I64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "eq",
+            -20,
+            PrimitiveType::I64,
+            PrimitiveType::Bool,
+        );
 
         // F64 operations
-        self.register_binary_op(type_info_table, "add", -2, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(type_info_table, "sub", -4, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(type_info_table, "mul", -6, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(type_info_table, "div", -8, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(type_info_table, "eq", -9, PrimitiveType::F64, PrimitiveType::Bool);
+        self.register_binary_op(
+            type_info_table,
+            "add",
+            -2,
+            PrimitiveType::F64,
+            PrimitiveType::F64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "sub",
+            -4,
+            PrimitiveType::F64,
+            PrimitiveType::F64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "mul",
+            -6,
+            PrimitiveType::F64,
+            PrimitiveType::F64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "div",
+            -8,
+            PrimitiveType::F64,
+            PrimitiveType::F64,
+        );
+        self.register_binary_op(
+            type_info_table,
+            "eq",
+            -9,
+            PrimitiveType::F64,
+            PrimitiveType::Bool,
+        );
     }
 }
 
@@ -270,3 +362,5 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
     matrix[len1][len2]
 }
+
+pub type RootBlock = Rc<RefCell<Block>>;

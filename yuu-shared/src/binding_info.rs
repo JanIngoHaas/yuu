@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use logos::Span;
+use super::Span;
 
 use crate::ast::NodeId;
 

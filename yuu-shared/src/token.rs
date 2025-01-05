@@ -114,6 +114,9 @@ pub enum TokenKind {
     #[token("false")]
     FalseKw,
 
+    #[token("nil")]
+    NilKw,
+
     // Basic operators
     #[token("+")]
     Plus,

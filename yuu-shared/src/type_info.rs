@@ -1,7 +1,7 @@
 use std::{cell::RefCell, fmt::Display, rc::Rc};
 
-use hashbrown::HashMap;
 use crate::{ast::*, binding_info::BindingInfo};
+use hashbrown::HashMap;
 
 pub struct TypeInfoTable {
     pub types: HashMap<NodeId, Rc<TypeInfo>>,
@@ -77,10 +77,16 @@ pub enum TypeInfo {
 }
 
 impl TypeInfo {
-
     pub fn is_primitive(&self) -> bool {
         match self {
             TypeInfo::BuiltIn(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_nil(&self) -> bool {
+        match self {
+            TypeInfo::BuiltIn(PrimitiveType::Nil) => true,
             _ => false,
         }
     }
