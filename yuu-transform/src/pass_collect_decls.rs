@@ -1,5 +1,5 @@
 use yuu_shared::{
-    ast::{FuncDeclStructural, Node, StructuralNode, AST},
+    ast::{FuncDeclStructural, StructuralNode, AST},
     block::{Block, RootBlock},
     context::Context,
     scheduler::Pass,
@@ -8,6 +8,12 @@ use yuu_shared::{
 };
 
 pub struct PassCollectDecls {}
+
+impl Default for PassCollectDecls {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PassCollectDecls {
     pub fn new() -> Self {

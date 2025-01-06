@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use hashbrown::HashMap;
 use yuu_shared::{
     ast::*,
@@ -44,6 +42,12 @@ pub struct TransientData<'a> {
 
 pub struct PassTypeInference {}
 
+impl Default for PassTypeInference {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PassTypeInference {
     pub fn new() -> Self {
         Self {}
@@ -64,7 +68,7 @@ impl PassTypeInference {
     {
         match binding {
             BindingNode::Ident(ident) => {
-                match_resolver(ident, ty, &mut data.type_info_table)?;
+                match_resolver(ident, ty, data.type_info_table)?;
             }
         };
         Ok(())
@@ -119,9 +123,9 @@ impl PassTypeInference {
         match stmt {
             StmtNode::Let(let_stmt) => {
                 let ty_expr = Self::infer_expr(&let_stmt.expr, block, data, None)?;
-                let mut match_resolver = move |ident_binding: &IdentBinding,
-                                               ty: &'static TypeInfo,
-                                               ty_info_table: &mut TypeInfoTable|
+                let match_resolver = move |ident_binding: &IdentBinding,
+                                           ty: &'static TypeInfo,
+                                           ty_info_table: &mut TypeInfoTable|
                       -> Result<(), SemanticError> {
                     block.insert_variable(
                         ident_binding.name.clone(),
@@ -134,12 +138,7 @@ impl PassTypeInference {
                     Ok(())
                 };
 
-                Self::match_binding_node_to_type(
-                    &let_stmt.binding,
-                    &ty_expr,
-                    match_resolver,
-                    data,
-                )?;
+                Self::match_binding_node_to_type(&let_stmt.binding, ty_expr, match_resolver, data)?;
                 Ok(())
             }
             StmtNode::Atomic(expr) => {
@@ -178,7 +177,7 @@ impl PassTypeInference {
                 let op_name = binary_expr.op.static_name();
 
                 let ty = block
-                    .resolve_function(op_name, &data.type_info_table, &[lhs, rhs], |_, func| {
+                    .resolve_function(op_name, data.type_info_table, &[lhs, rhs], |_, func| {
                         func.ret
                     })
                     .map_err(|err| panic!("User bug: Function overload error: {:?}", err))?;
@@ -192,7 +191,7 @@ impl PassTypeInference {
                 let op_name = unary_expr.op.static_name();
 
                 let result_ty = block
-                    .resolve_function(op_name, &data.type_info_table, &[ty], |_, func| func.ret)
+                    .resolve_function(op_name, data.type_info_table, &[ty], |_, func| func.ret)
                     .map_err(|err| panic!("User bug: Function overload error"))?;
 
                 data.type_info_table.types.insert(unary_expr.id, result_ty);
@@ -207,7 +206,10 @@ impl PassTypeInference {
                         MIN_DST_SIMILAR_NAMES,
                     );
 
-                    panic!("User bug: Cannot find identifier `{}`", ident_expr.ident);
+                    panic!(
+                        "User bug: Cannot find identifier `{}`, similar names: {:?}",
+                        ident_expr.ident, similar_names
+                    );
                 })?;
 
                 let out = match binding {
@@ -220,7 +222,7 @@ impl PassTypeInference {
                     BindingInfoKind::Ambiguous(funcs) => {
                         let binding_info = resolve_function_overload(
                             &funcs,
-                            &data.type_info_table,
+                            data.type_info_table,
                             function_args.unwrap_or_default(),
                         )
                         .expect("User bug: Function overload error");
@@ -280,12 +282,13 @@ impl PassTypeInference {
                     Self::infer_expr(&func_call_expr.lhs, block, data, Some(&actual_arg_types))?;
 
                 let resolved_ret_type = match actual_func_ident {
-                    TypeInfo::Function(func) => {
-                        func.ret
+                    TypeInfo::Function(func) => func.ret,
+                    TypeInfo::BuiltIn(_) => {
+                        panic!("User bug: Cannot call a built-in type as a function")
                     }
-                    TypeInfo::BuiltIn(_) => panic!("User bug: Cannot call a built-in type as a function"), 
-                    TypeInfo::Function(_) => unreachable!("Compiler Bug: Function type should be a function group - overloading is allowed."),
-                    TypeInfo::Pointer(_) => panic!("User bug: Cannot call a pointer type as a function"),
+                    TypeInfo::Pointer(_) => {
+                        panic!("User bug: Cannot call a pointer type as a function")
+                    }
                 };
 
                 data.type_info_table
@@ -325,15 +328,15 @@ impl PassTypeInference {
         let out_ty = if_types.into_iter().try_fold(then_ty, |acc, ty| {
             // Check if acc and ty coerce to same type
             let ty = ty?;
-            if !acc.does_coerce_to_same_type(&ty) {
+            if !acc.does_coerce_to_same_type(ty) {
                 panic!("User bug: Types of if expr branches don't coerce to same type");
             }
             Ok::<_, SemanticError>(ty)
         })?;
 
         if let Some(else_body) = expr.else_block.as_ref() {
-            let ty = Self::infer_expr(&else_body, block, data, None)?;
-            if !out_ty.does_coerce_to_same_type(&ty) {
+            let ty = Self::infer_expr(else_body, block, data, None)?;
+            if !out_ty.does_coerce_to_same_type(ty) {
                 panic!("User bug: Types of if expr branches don't coerce to same type");
             }
         };
@@ -354,7 +357,7 @@ impl PassTypeInference {
     ) -> Result<(), SemanticError> {
         block
             .declare_function(name.to_string(), id, span.clone())
-            .map_err(|err| panic!("_"))?;
+            .map_err(|_err| panic!("_"))?;
 
         let func_arg_types = args
             .iter()
@@ -363,7 +366,7 @@ impl PassTypeInference {
 
                 Self::match_binding_node_to_type(
                     &arg.binding,
-                    &semantic_arg_type,
+                    semantic_arg_type,
                     |ident_binding, ty, ty_info_table| {
                         block.insert_variable(
                             ident_binding.name.clone(),
@@ -383,7 +386,7 @@ impl PassTypeInference {
             .collect::<Result<Vec<_>, _>>()?;
 
         let ret_type = if let Some(ty) = ret_ty {
-            Self::infer_type(&ty, block, data)?
+            Self::infer_type(ty, block, data)?
         } else {
             primitive_nil()
         };
@@ -428,13 +431,8 @@ impl PassTypeInference {
                 let func_block = block.make_child();
 
                 for arg in &def.decl.args {
-                    if let BindingNode::Ident(ident) = &arg.binding {
-                        func_block.insert_variable(
-                            ident.name.clone(),
-                            ident.id,
-                            ident.span.clone(),
-                        );
-                    }
+                    let BindingNode::Ident(ident) = &arg.binding;
+                    func_block.insert_variable(ident.name.clone(), ident.id, ident.span.clone());
                 }
 
                 // Process function body separately
@@ -475,25 +473,23 @@ pub fn resolve_function_overload(
     actual_args: &[&'static TypeInfo],
 ) -> Result<BindingInfo, FunctionOverloadError> {
     for candidate in candidate_funcs {
-        if let Some(func_type) = type_info_table.types.get(&candidate.id) {
-            if let TypeInfo::Function(func) = func_type {
-                // Check if argument lengths match
-                if func.args.len() != actual_args.len() {
-                    continue;
-                }
+        if let TypeInfo::Function(func) = type_info_table.types[&candidate.id] {
+            // Check if argument lengths match
+            if func.args.len() != actual_args.len() {
+                continue;
+            }
 
-                // Check if all arguments coerce
-                let mut all_args_match = true;
-                for (expected, actual) in func.args.iter().zip(actual_args.iter()) {
-                    if !actual.does_coerce_to_same_type(expected) {
-                        all_args_match = false;
-                        break;
-                    }
+            // Check if all arguments coerce
+            let mut all_args_match = true;
+            for (expected, actual) in func.args.iter().zip(actual_args.iter()) {
+                if !actual.does_coerce_to_same_type(expected) {
+                    all_args_match = false;
+                    break;
                 }
+            }
 
-                if all_args_match {
-                    return Ok(candidate.clone());
-                }
+            if all_args_match {
+                return Ok(candidate.clone());
             }
         }
     }
@@ -552,7 +548,7 @@ impl Pass for PassTypeInference {
         };
 
         for node in &ast.structurals {
-            Self::infer_structural(node, root_block.root_mut(), &mut data);
+            let _ = Self::infer_structural(node, root_block.root_mut(), &mut data);
         }
 
         Ok(())

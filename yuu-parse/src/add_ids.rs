@@ -16,6 +16,12 @@ impl IdGenerator {
     }
 }
 
+impl Default for IdGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait AddId {
     fn add_id(&mut self, gen: &mut IdGenerator);
 }
@@ -66,7 +72,9 @@ impl AddId for ExprNode {
                 if let Some(else_expr) = &mut if_expr.else_block {
                     else_expr.add_id(gen);
                 }
-                if_expr.else_block.as_mut().map(|e| e.add_id(gen));
+                if let Some(e) = if_expr.else_block.as_mut() {
+                    e.add_id(gen);
+                }
             }
         }
     }

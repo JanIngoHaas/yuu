@@ -1,7 +1,6 @@
 use yuu_shared::{
     ast::{
-        BinOp, BindingNode, BlockExpr, ExprNode, Node, NodeId, StmtNode, StructuralNode, UnaryOp,
-        AST,
+        BinOp, BindingNode, BlockExpr, ExprNode, NodeId, StmtNode, StructuralNode, UnaryOp, AST,
     },
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
@@ -13,7 +12,7 @@ pub struct TransientData<'a> {
     type_table: &'a TypeInfoTable,
 }
 
-impl<'a> TransientData<'a> {
+impl TransientData<'_> {
     fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
         self.type_table.types.get(&node_id).unwrap()
     }
@@ -190,6 +189,12 @@ impl<'a> TransientData<'a> {
 
 pub struct AstToYirPass;
 
+impl Default for AstToYirPass {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AstToYirPass {
     pub fn new() -> Self {
         Self
@@ -202,11 +207,11 @@ impl AstToYirPass {
         for node in &ast.structurals {
             match node.as_ref() {
                 StructuralNode::FuncDecl(func_decl) => {
-                    let ty = tit.types.get(&func_decl.id).unwrap().clone();
+                    let ty = tit.types[&func_decl.id];
                     module.declare_function(func_decl.name.clone(), ty);
                 }
                 StructuralNode::FuncDef(func_def) => {
-                    let ty = tit.types.get(&func_def.id).unwrap().clone();
+                    let ty = tit.types[&func_def.id];
                     module.declare_function(func_def.decl.name.clone(), ty);
                 }
             }
@@ -217,7 +222,7 @@ impl AstToYirPass {
             StructuralNode::FuncDef(def) => Some(def),
             _ => None,
         }) {
-            let return_type = match tit.types.get(&func.id).unwrap() {
+            let return_type = match tit.types[&func.id] {
                 TypeInfo::Function(ft) => ft.ret,
                 _ => panic!("Expected function type"),
             };
@@ -229,7 +234,7 @@ impl AstToYirPass {
 
             // Add parameters
             for arg in &func.decl.args {
-                let ty = tit.types.get(&arg.id).unwrap().clone();
+                let ty = tit.types[&arg.id];
                 data.function.params.push((
                     match &arg.binding {
                         BindingNode::Ident(id) => id.name.clone(),
@@ -254,7 +259,7 @@ impl Pass for AstToYirPass {
         let type_info_table = context.require_pass_data::<TypeInfoTable>(self);
         let type_info_table = type_info_table.lock().unwrap();
         let type_info_table = &*type_info_table;
-        let module = self.lower_ast(&ast, &type_info_table);
+        let module = self.lower_ast(ast, type_info_table);
         context.add_pass_data(module);
         Ok(())
     }

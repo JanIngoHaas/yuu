@@ -1,9 +1,3 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
-
 use crate::{
     add_ids::add_ids,
     lexer::{GenericError, Lexer, Note, ParseError, UnprocessedCodeInfo},
@@ -16,14 +10,12 @@ use yuu_shared::{
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
-    code_info: &'a UnprocessedCodeInfo,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(code_info: &'a UnprocessedCodeInfo) -> Self {
         Self {
             lexer: Lexer::new(&code_info),
-            code_info: code_info,
         }
     }
 
@@ -66,7 +58,7 @@ impl<'a> Parser<'a> {
         let unary = UnaryExpr {
             operand: Box::new(operand),
             op: unary_op,
-            span: span,
+            span,
             id: 0,
         };
         Ok((span_copy, ExprNode::Unary(unary)))
@@ -211,7 +203,7 @@ impl<'a> Parser<'a> {
         let mut last_body_span = start_span.clone();
         loop {
             let peeked_tokens = self.lexer.peek_n::<2>()?;
-            if let [Ok(maybe_else), Ok(maybe_if)] = &peeked_tokens[..] {
+            if let [Ok(maybe_else), Ok(maybe_if)] = &peeked_tokens {
                 if maybe_else.kind == TokenKind::ElseKw && maybe_if.kind == TokenKind::IfKw {
                     let _ = self.lexer.next_token()?;
                     let _ = self.lexer.next_token()?;

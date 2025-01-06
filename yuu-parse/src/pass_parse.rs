@@ -1,7 +1,6 @@
 use yuu_shared::{ast::AST, context::Context, scheduler::Pass};
 
 use crate::{lexer::UnprocessedCodeInfo, parser::Parser};
-use anyhow::Result;
 
 pub struct ParsePass;
 
@@ -10,7 +9,7 @@ impl Pass for ParsePass {
         let code_info = context.require_pass_data::<UnprocessedCodeInfo>(self);
         let code_info = code_info.lock().unwrap();
         let code_info = &*code_info;
-        let mut parser = Parser::new(&code_info);
+        let mut parser = Parser::new(code_info);
         let ast = parser.parse_and_add_ids()?;
         context.add_pass_data(ast);
         Ok(())

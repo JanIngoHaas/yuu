@@ -6,6 +6,12 @@ use yuu_shared::{
 
 pub struct YirToStringPass;
 
+impl Default for YirToStringPass {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YirToStringPass {
     pub fn new() -> Self {
         Self
