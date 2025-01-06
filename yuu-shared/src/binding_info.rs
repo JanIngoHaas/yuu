@@ -1,6 +1,6 @@
 // Here, we define the built-in functions etc. that are already present in the language.
 
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use super::Span;
 
@@ -14,7 +14,7 @@ pub struct BindingInfo {
 
 #[derive(Clone)]
 pub enum BindingInfoKind {
-    Ambiguous(Rc<RefCell<Vec<BindingInfo>>>), // Probably function overloading
+    Ambiguous(Vec<BindingInfo>), // Probably function overloading
     Unique(BindingInfo),
 }
 

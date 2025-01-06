@@ -1,11 +1,21 @@
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use std::sync::Arc;
+
 use logos::{Logos, Span};
 use thiserror::Error;
-use yuu_shared::token::{Token, TokenKind};
+use yuu_shared::{
+    scheduler::ResourceId,
+    token::{Token, TokenKind},
+};
 
-pub struct UnprocessedCodeInfo<'a> {
-    pub code: &'a str,
-    pub file_name: &'a str,
+pub struct UnprocessedCodeInfo {
+    pub code: Arc<str>,
+    pub file_name: Arc<str>,
+}
+
+impl ResourceId for UnprocessedCodeInfo {
+    fn resource_name() -> &'static str {
+        "UnprocessedCodeInfo"
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -34,61 +44,75 @@ pub enum ParseError {
 }
 
 impl ParseError {
-    pub fn print(&self, code_info: &UnprocessedCodeInfo) {
-        match self {
-            ParseError::UnexpectedToken(span) => {
-                Report::build(ReportKind::Error, (code_info.file_name, span.clone()))
-                    .with_label(
-                        Label::new((code_info.file_name, span.clone()))
-                            .with_message("Unexpected token")
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-                    .print((code_info.file_name, Source::from(code_info.code)))
-                    .unwrap();
-            }
-            ParseError::UnexpectedEOF => {
-                Report::build(
-                    ReportKind::Error,
-                    (
-                        code_info.file_name,
-                        code_info.code.len()..code_info.code.len(),
-                    ),
-                )
-                .with_message("Unexpected end of file")
-                .finish()
-                .print((code_info.file_name, Source::from(code_info.code)))
-                .unwrap();
-            }
-            ParseError::GenericSyntaxError(error) => {
-                let mut report =
-                    Report::build(ReportKind::Error, (code_info.file_name, error.span.clone()))
-                        .with_message("Syntax error")
-                        .with_label(
-                            Label::new((code_info.file_name, error.span.clone()))
-                                .with_message(format!(
-                                    "Expected {}, but found '{}'",
-                                    error.expected, error.found
-                                ))
-                                .with_color(Color::Red),
-                        );
+    // pub fn print(&self, code_info: &UnprocessedCodeInfo) {
+    //     match self {
+    //         ParseError::UnexpectedToken(span) => {
+    //             Report::build(
+    //                 ReportKind::Error,
+    //                 (code_info.file_name.clone(), span.clone()),
+    //             )
+    //             .with_label(
+    //                 Label::new((code_info.file_name.clone(), span.clone()))
+    //                     .with_message("Unexpected token")
+    //                     .with_color(Color::Red),
+    //             )
+    //             .finish()
+    //             .print((
+    //                 code_info.file_name.clone(),
+    //                 Source::from(code_info.code.clone()),
+    //             ))
+    //             .unwrap();
+    //         }
+    //         ParseError::UnexpectedEOF => {
+    //             Report::build(
+    //                 ReportKind::Error,
+    //                 (
+    //                     code_info.file_name.clone(),
+    //                     code_info.code.len()..code_info.code.len(),
+    //                 ),
+    //             )
+    //             .with_message("Unexpected end of file")
+    //             .finish()
+    //             .print((
+    //                 code_info.file_name.clone(),
+    //                 Source::from(code_info.code.clone()),
+    //             ))
+    //             .unwrap();
+    //         }
+    //         ParseError::GenericSyntaxError(error) => {
+    //             let mut report = Report::build(
+    //                 ReportKind::Error,
+    //                 (code_info.file_name.clone(), error.span.clone()),
+    //             )
+    //             .with_message("Syntax error")
+    //             .with_label(
+    //                 Label::new((code_info.file_name.clone(), error.span.clone()))
+    //                     .with_message(format!(
+    //                         "Expected {}, but found '{}'",
+    //                         error.expected, error.found
+    //                     ))
+    //                     .with_color(Color::Red),
+    //             );
 
-                // Add all notes with their respective spans
-                for note in &error.note {
-                    report = report.with_label(
-                        Label::new((code_info.file_name, note.span.clone()))
-                            .with_message(&note.message)
-                            .with_color(Color::Blue),
-                    );
-                }
+    //             // Add all notes with their respective spans
+    //             for note in &error.note {
+    //                 report = report.with_label(
+    //                     Label::new((code_info.file_name.clone(), note.span.clone()))
+    //                         .with_message(&note.message)
+    //                         .with_color(Color::Blue),
+    //                 );
+    //             }
 
-                report
-                    .finish()
-                    .print((code_info.file_name, Source::from(code_info.code)))
-                    .unwrap();
-            }
-        }
-    }
+    //             report
+    //                 .finish()
+    //                 .print((
+    //                     code_info.file_name.clone(),
+    //                     Source::from(code_info.code.clone()),
+    //                 ))
+    //                 .unwrap();
+    //         }
+    //     }
+    // }
 }
 
 pub struct Lexer<'a> {
@@ -98,8 +122,8 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(code_info: &UnprocessedCodeInfo<'a>) -> Self {
-        let mut lexer = TokenKind::lexer(code_info.code);
+    pub fn new(code_info: &'a UnprocessedCodeInfo) -> Self {
+        let mut lexer = TokenKind::lexer(code_info.code.as_ref());
         let mut lookahead = Vec::new();
 
         // Initialize with one token by default

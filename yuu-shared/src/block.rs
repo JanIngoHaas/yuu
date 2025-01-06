@@ -1,9 +1,4 @@
-use std::{
-    borrow::{Borrow, BorrowMut},
-    cell::RefCell,
-    rc::Rc,
-};
-
+use crate::scheduler::ResourceId;
 use crate::Span;
 use crate::{
     ast::NodeId,
@@ -11,16 +6,27 @@ use crate::{
     type_info::{FunctionType, PrimitiveType, TypeInfo, TypeInfoTable},
 };
 use hashbrown::HashMap;
+use std::borrow::{Borrow, BorrowMut};
+use std::cell::Cell;
+use std::marker::PhantomData;
+use std::ops::DerefMut;
 
 use crate::semantic_error::SemanticError;
-
-const MAX_SIMILAR_NAMES: u64 = 3;
-const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
 #[derive(Clone)]
 pub struct Block {
     pub bindings: HashMap<String, BindingInfoKind>,
-    pub parent: Option<Rc<RefCell<Block>>>,
+    pub parent: Option<usize>,
+    pub root_block: *mut RootBlock,
+    pub id: usize,
+}
+
+unsafe impl Send for RootBlock {}
+
+impl ResourceId for RootBlock {
+    fn resource_name() -> &'static str {
+        "RootBlock"
+    }
 }
 
 #[derive(Debug)]
@@ -30,58 +36,230 @@ pub enum FunctionOverloadError {
     BindingNotFound,
 }
 
-impl Block {
-    pub fn root(tyt: &mut TypeInfoTable) -> Rc<RefCell<Self>> {
-        let mut block = Self {
+pub struct RootBlock {
+    arena: Vec<Block>,
+    root: usize,
+}
+
+impl RootBlock {
+    pub fn new(tyt: &mut TypeInfoTable) -> Self {
+        let mut arena = Vec::new();
+
+        let mut root = Block {
             bindings: HashMap::new(),
             parent: None,
+            root_block: std::ptr::null_mut(),
+            id: 0,
         };
 
-        block.predefine_builtins(tyt);
+        root.predefine_builtins(tyt);
 
-        Rc::new(RefCell::new(block))
+        arena.push(root);
+
+        let mut out = Self {
+            root: arena.len() - 1,
+            arena,
+        };
+
+        out.arena[0].root_block = &mut out;
+        out
     }
 
-    pub fn get_binding_from_root(&self, name: &str) -> Option<BindingInfoKind> {
-        if let Some(parent) = &self.parent {
-            let mut current = parent.clone();
+    pub fn root(&self) -> &Block {
+        self.arena.get(self.root).unwrap()
+    }
 
-            loop {
-                let next_parent = {
-                    let borrow = current.as_ref().borrow();
-                    borrow.parent.clone()
-                };
+    pub fn root_mut(&mut self) -> &mut Block {
+        self.arena.get_mut(self.root).unwrap()
+    }
+}
 
-                match next_parent {
-                    Some(p) => current = p,
-                    None => break,
-                }
-            }
+impl Block {
+    fn get_root_block(&self) -> &RootBlock {
+        unsafe { &*self.root_block }
+    }
 
-            let binding = current.as_ref().borrow().bindings.get(name).cloned();
-            return binding;
-        } else {
-            self.get_binding(name)
-        }
+    fn get_root_block_mut(&mut self) -> &mut RootBlock {
+        unsafe { &mut *self.root_block }
+    }
+
+    pub fn get_parent(&self) -> Option<&Block> {
+        self.parent.and_then(|p| self.get_root_block().arena.get(p))
+    }
+
+    pub fn get_parent_mut(&mut self) -> Option<&mut Block> {
+        self.parent
+            .and_then(|p| self.get_root_block_mut().arena.get_mut(p))
     }
 
     pub fn get_binding(&self, name: &str) -> Option<BindingInfoKind> {
-        if let Some(k) = self.bindings.get(name) {
-            return Some(k.clone());
+        if let Some(binding) = self.bindings.get(name) {
+            return Some(binding.clone());
         }
 
-        if let Some(parent) = &self.parent {
-            return parent.as_ref().borrow().get_binding(name);
-        }
-
-        None
+        self.get_parent().and_then(|p| p.get_binding(name))
     }
 
-    pub fn from_parent(parent: Rc<RefCell<Block>>) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
+    pub fn make_child(&mut self) -> &mut Block {
+        let id = self.id;
+        let len = self.get_root_block().arena.len();
+        let root_block = self.get_root_block_mut();
+
+        let child = Block {
             bindings: HashMap::new(),
-            parent: Some(parent),
-        }))
+            parent: Some(id),
+            root_block: root_block,
+            id: len,
+        };
+        root_block.arena.push(child);
+        &mut root_block.arena[len]
+    }
+
+    pub fn declare_function(
+        &mut self,
+        name: String,
+        id: NodeId,
+        span: Span,
+    ) -> Result<(), SemanticError> {
+        match self.bindings.get_mut(&name) {
+            Some(BindingInfoKind::Unique(_)) => {
+                panic!("User bug: Function {} already declared", name)
+            }
+            Some(BindingInfoKind::Ambiguous(funcs)) => {
+                funcs.push(BindingInfo {
+                    id,
+                    src_location: Some(span),
+                });
+                Ok(())
+            }
+            None => {
+                let funcs = vec![BindingInfo {
+                    id,
+                    src_location: Some(span),
+                }];
+                self.bindings
+                    .insert(name, BindingInfoKind::Ambiguous(funcs));
+                Ok(())
+            }
+        }
+    }
+
+    pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span) {
+        self.bindings.insert(
+            name,
+            BindingInfoKind::Unique(BindingInfo {
+                id,
+                src_location: Some(span),
+            }),
+        );
+    }
+
+    fn register_binary_op(
+        &mut self,
+        type_info_table: &mut TypeInfoTable,
+        op_name: &str,
+        id: NodeId,
+        arg_type: PrimitiveType,
+        ret_type: PrimitiveType,
+    ) {
+        let func_type = (
+            [arg_type.into(), arg_type.into()].as_slice(),
+            ret_type.into(),
+        )
+            .into();
+
+        type_info_table.types.insert(id, func_type);
+        let _ = self.declare_function(op_name.to_string(), id, Span { start: 0, end: 0 });
+    }
+
+    pub fn predefine_builtins(&mut self, tyt: &mut TypeInfoTable) {
+        // F32 operations
+        self.register_binary_op(tyt, "add", -13, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "sub", -14, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "mul", -15, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "div", -16, PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "eq", -17, PrimitiveType::F32, PrimitiveType::Bool);
+
+        // I64 operations
+        self.register_binary_op(tyt, "add", -1, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "sub", -3, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "mul", -5, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "div", -7, PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "eq", -20, PrimitiveType::I64, PrimitiveType::Bool);
+
+        // F64 operations
+        self.register_binary_op(tyt, "add", -2, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "sub", -4, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "mul", -6, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "div", -8, PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "eq", -9, PrimitiveType::F64, PrimitiveType::Bool);
+    }
+
+    pub fn resolve_function<'a, T>(
+        &self,
+        name: &str,
+        type_info_table: &TypeInfoTable,
+        args: &'a [&'static TypeInfo],
+        resolve_ret_type: T,
+    ) -> Result<&'static TypeInfo, FunctionOverloadError>
+    where
+        T: Fn(&BindingInfo, &FunctionType) -> &'static TypeInfo,
+    {
+        let binding = self
+            .get_binding(name)
+            .ok_or(FunctionOverloadError::BindingNotFound)?;
+
+        match binding {
+            BindingInfoKind::Unique(binding_info) => {
+                let func_type = type_info_table
+                    .types
+                    .get(&binding_info.id)
+                    .ok_or(FunctionOverloadError::NotAFunction)?;
+
+                if let TypeInfo::Function(func) = &**func_type {
+                    if func.args.len() != args.len() {
+                        return Err(FunctionOverloadError::NoOverloadFound);
+                    }
+
+                    for (expected, actual) in func.args.iter().zip(args.iter()) {
+                        if !actual.does_coerce_to_same_type(expected) {
+                            return Err(FunctionOverloadError::NoOverloadFound);
+                        }
+                    }
+
+                    Ok(resolve_ret_type(&binding_info, func))
+                } else {
+                    Err(FunctionOverloadError::NotAFunction)
+                }
+            }
+            BindingInfoKind::Ambiguous(funcs) => {
+                for func in funcs.iter() {
+                    let func_type = type_info_table
+                        .types
+                        .get(&func.id)
+                        .ok_or(FunctionOverloadError::NotAFunction)?;
+
+                    if let TypeInfo::Function(func_type) = &**func_type {
+                        if func_type.args.len() != args.len() {
+                            continue;
+                        }
+
+                        let mut all_args_match = true;
+                        for (expected, actual) in func_type.args.iter().zip(args.iter()) {
+                            if !actual.does_coerce_to_same_type(expected) {
+                                all_args_match = false;
+                                break;
+                            }
+                        }
+
+                        if all_args_match {
+                            return Ok(resolve_ret_type(func, func_type));
+                        }
+                    }
+                }
+                Err(FunctionOverloadError::NoOverloadFound)
+            }
+        }
     }
 
     pub fn get_similar_names(&self, name: &str, amount: u64, min_dst: u64) -> Vec<String> {
@@ -101,243 +279,20 @@ impl Block {
             .take(amount as usize)
             .collect();
 
-        if let Some(parent) = &self.parent {
+        if let Some(parent) = self.get_parent() {
             let remaining = amount - result.len() as u64;
             if remaining > 0 {
-                let mut parent_similar = parent
-                    .as_ref()
-                    .borrow()
-                    .get_similar_names(name, remaining, min_dst);
+                let mut parent_similar = parent.get_similar_names(name, remaining, min_dst);
                 result.append(&mut parent_similar);
             }
         }
 
         result
     }
-
-    pub fn declare_function(
-        &mut self,
-        name: String,
-        id: NodeId,
-        span: Span,
-    ) -> Result<(), SemanticError> {
-        let functions = self
-            .bindings
-            .entry(name)
-            .or_insert(BindingInfoKind::Ambiguous(Rc::new(
-                RefCell::new(Vec::new()),
-            )));
-
-        match functions {
-            BindingInfoKind::Ambiguous(f) => {
-                f.as_ref().borrow_mut().push(BindingInfo {
-                    id,
-                    src_location: Some(span),
-                });
-                Ok(())
-            }
-            BindingInfoKind::Unique(_) => {
-                panic!("User bug: Cannot redefine a variable as a function");
-            }
-        }
-    }
-
-    pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span) -> bool {
-        let variables = self.bindings.insert(
-            name,
-            BindingInfoKind::Unique(BindingInfo {
-                id,
-                src_location: Some(span),
-            }),
-        );
-
-        match variables {
-            Some(BindingInfoKind::Ambiguous(_)) => false,
-            _ => true,
-        }
-    }
-
-    pub fn resolve_function<'a, T>(
-        &self,
-        name: &str,
-        type_info_table: &'a TypeInfoTable,
-        args: &'a [&'a Rc<TypeInfo>],
-        resolver: T,
-    ) -> Result<Rc<TypeInfo>, FunctionOverloadError>
-    where
-        T: Fn(&BindingInfo, &FunctionType) -> Rc<TypeInfo>,
-    {
-        println!("Resolving function: {}", name);
-        let overload = self.get_binding_from_root(name);
-
-        overload.map(|binding| match binding {
-            BindingInfoKind::Ambiguous(f) => {
-                for binding in f.as_ref().borrow().iter() {
-                    let func_type = type_info_table.types.get(&binding.id).expect(
-                        "Compiler Bug: Block has a function binding, but can't find the associated type info",
-                    );
-
-                    match func_type.as_ref() {
-                        TypeInfo::Function(func) => {
-                            if func.args.len() != args.len() {
-                                continue;
-                            }
-
-                            let mut found = true;
-                            for (arg, expected) in args.iter().zip(func.args.iter()) {
-                                if !arg.does_coerce_to_same_type(expected) {
-                                    found = false;
-                                    break;
-                                }
-                            }
-
-                            if found {
-                                return Ok(resolver(binding, func));
-                            }
-                        }
-                        _ => unreachable!("Compiler Bug: Function binding is not a function type"),
-                    }
-                }
-                Err(FunctionOverloadError::NoOverloadFound)
-            }
-            BindingInfoKind::Unique(_) => Err(FunctionOverloadError::NotAFunction),
-        }).ok_or(FunctionOverloadError::BindingNotFound)?
-    }
-
-    fn register_binary_op(
-        &mut self,
-        type_info_table: &mut TypeInfoTable,
-        op_name: &str,
-        id: NodeId,
-        arg_type: PrimitiveType,
-        ret_type: PrimitiveType,
-    ) {
-        type_info_table.types.insert(
-            id,
-            Rc::new(TypeInfo::Function(FunctionType {
-                args: Rc::new([
-                    Rc::new(TypeInfo::BuiltIn(arg_type.clone())),
-                    Rc::new(TypeInfo::BuiltIn(arg_type.clone())),
-                ]),
-                ret: Rc::new(TypeInfo::BuiltIn(ret_type)),
-            })),
-        );
-        let _ = self.declare_function(op_name.to_string(), id, Span { start: 0, end: 0 });
-    }
-
-    pub fn predefine_builtins(&mut self, type_info_table: &mut TypeInfoTable) {
-        // F32 operations
-        self.register_binary_op(
-            type_info_table,
-            "add",
-            -13,
-            PrimitiveType::F32,
-            PrimitiveType::F32,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "sub",
-            -14,
-            PrimitiveType::F32,
-            PrimitiveType::F32,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "mul",
-            -15,
-            PrimitiveType::F32,
-            PrimitiveType::F32,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "div",
-            -16,
-            PrimitiveType::F32,
-            PrimitiveType::F32,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "eq",
-            -17,
-            PrimitiveType::F32,
-            PrimitiveType::Bool,
-        );
-
-        // I64 operations
-        self.register_binary_op(
-            type_info_table,
-            "add",
-            -1,
-            PrimitiveType::I64,
-            PrimitiveType::I64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "sub",
-            -3,
-            PrimitiveType::I64,
-            PrimitiveType::I64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "mul",
-            -5,
-            PrimitiveType::I64,
-            PrimitiveType::I64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "div",
-            -7,
-            PrimitiveType::I64,
-            PrimitiveType::I64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "eq",
-            -20,
-            PrimitiveType::I64,
-            PrimitiveType::Bool,
-        );
-
-        // F64 operations
-        self.register_binary_op(
-            type_info_table,
-            "add",
-            -2,
-            PrimitiveType::F64,
-            PrimitiveType::F64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "sub",
-            -4,
-            PrimitiveType::F64,
-            PrimitiveType::F64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "mul",
-            -6,
-            PrimitiveType::F64,
-            PrimitiveType::F64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "div",
-            -8,
-            PrimitiveType::F64,
-            PrimitiveType::F64,
-        );
-        self.register_binary_op(
-            type_info_table,
-            "eq",
-            -9,
-            PrimitiveType::F64,
-            PrimitiveType::Bool,
-        );
-    }
 }
+
+const MAX_SIMILAR_NAMES: u64 = 3;
+const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let len1 = s1.chars().count();
@@ -362,5 +317,3 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
     matrix[len1][len2]
 }
-
-pub type RootBlock = Rc<RefCell<Block>>;

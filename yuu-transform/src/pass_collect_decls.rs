@@ -1,12 +1,10 @@
-use std::{cell::RefCell, rc::Rc};
-
-use yuu_parse::parser::SourceCodeInfo;
 use yuu_shared::{
     ast::{FuncDeclStructural, Node, StructuralNode, AST},
-    block::Block,
+    block::{Block, RootBlock},
+    context::Context,
+    scheduler::Pass,
     semantic_error::SemanticError,
     type_info::TypeInfoTable,
-    Pass,
 };
 
 pub struct PassCollectDecls {}
@@ -18,17 +16,14 @@ impl PassCollectDecls {
 
     fn collect_func_decl(
         decl: &FuncDeclStructural,
-        block: &Rc<RefCell<Block>>,
+        block: &mut Block,
     ) -> Result<(), SemanticError> {
-        block
-            .as_ref()
-            .borrow_mut()
-            .declare_function(decl.name.clone(), decl.id, decl.span.clone())
+        block.declare_function(decl.name.clone(), decl.id, decl.span.clone())
     }
 
     fn collect_structural(
         structural: &StructuralNode,
-        block: &Rc<RefCell<Block>>,
+        block: &mut Block,
     ) -> Result<(), SemanticError> {
         match structural {
             StructuralNode::FuncDecl(decl) => Self::collect_func_decl(decl, block),
@@ -36,7 +31,7 @@ impl PassCollectDecls {
         }
     }
 
-    fn collect_decls(ast: &AST, block: &Rc<RefCell<Block>>) -> Result<(), SemanticError> {
+    fn collect_decls(ast: &AST, block: &mut Block) -> Result<(), SemanticError> {
         for node in &ast.structurals {
             Self::collect_structural(node, block)?;
         }
@@ -45,24 +40,28 @@ impl PassCollectDecls {
 }
 
 impl Pass for PassCollectDecls {
-    fn run(&mut self, context: &mut yuu_shared::Context) -> bool {
-        let src_info = context.require_pass_data::<SourceCodeInfo>("CollectDecls");
+    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+        let ast = context.require_pass_data::<AST>(self);
 
         let mut type_info_table = TypeInfoTable::new();
-        let root_block = Block::root(&mut type_info_table);
+        let mut root_block = RootBlock::new(&mut type_info_table);
+        let ast = ast.lock().unwrap();
+        let ast = &*ast;
 
-        if let Err(err) = Self::collect_decls(&src_info.borrow().root_node, &root_block) {
-            // TODO: Handle error properly
-            return false;
-        }
-
+        Self::collect_decls(ast, root_block.root_mut())?;
         context.add_pass_data(root_block);
         context.add_pass_data(type_info_table);
 
-        true
+        Ok(())
     }
 
-    fn install(self, pipeline: &mut yuu_shared::Pipeline) {
-        pipeline.add_pass(self);
+    fn install(self, schedule: &mut yuu_shared::scheduler::Schedule) {
+        schedule.requires_resource_read::<AST>(&self);
+        schedule.produces_resource::<RootBlock>(&self);
+        schedule.add_pass(self);
+    }
+
+    fn get_name(&self) -> &'static str {
+        "CollectDecls"
     }
 }

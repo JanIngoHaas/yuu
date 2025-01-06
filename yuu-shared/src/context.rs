@@ -1,0 +1,61 @@
+use std::{
+    any::Any,
+    sync::{Arc, Mutex},
+};
+
+use hashbrown::HashMap;
+
+use crate::scheduler::{Pass, ResourceId};
+
+pub struct Context {
+    passes_data: HashMap<&'static str, Arc<dyn Any + Send + Sync + 'static>>,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            passes_data: HashMap::new(),
+        }
+    }
+
+    pub fn split(&self) -> Self {
+        Self {
+            passes_data: self.passes_data.clone(),
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.passes_data.extend(other.passes_data);
+    }
+
+    pub fn add_pass_data<T: ResourceId>(&mut self, pass_data: T) -> bool {
+        if self.passes_data.contains_key(T::resource_name()) {
+            return false;
+        }
+        self.passes_data
+            .insert(T::resource_name(), Arc::new(Mutex::new(pass_data)));
+        true
+    }
+
+    pub fn replace_pass_data<T: ResourceId>(&mut self, pass_data: T) {
+        self.passes_data
+            .insert(T::resource_name(), Arc::new(Mutex::new(pass_data)));
+    }
+
+    pub fn require_pass_data<T: ResourceId>(&self, pass: &impl Pass) -> Arc<Mutex<T>> {
+        self.passes_data
+            .get(T::resource_name())
+            .map(|arc| {
+                arc.clone()
+                    .downcast::<Mutex<T>>()
+                    .expect("Type mismatch in pass data")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "Pass {} requires pass data of type {}",
+                    pass.get_name(),
+                    T::resource_name()
+                )
+            })
+    }
+}

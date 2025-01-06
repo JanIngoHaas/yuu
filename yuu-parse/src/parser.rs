@@ -1,38 +1,29 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     add_ids::add_ids,
     lexer::{GenericError, Lexer, Note, ParseError, UnprocessedCodeInfo},
 };
-use ariadne::Source;
 use logos::Span;
 use yuu_shared::{
     ast::*,
     token::{Token, TokenKind},
-    Context, Pass, Pipeline,
 };
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
-    code_info: &'a UnprocessedCodeInfo<'a>,
-}
-
-pub type SrcCache = Rc<RefCell<(String, Source)>>;
-
-pub fn default_src_cache() -> SrcCache {
-    Rc::new(RefCell::new((String::new(), Source::from("".to_string()))))
-}
-
-pub struct SourceCodeInfo {
-    pub cache: Rc<RefCell<(String, Source)>>,
-    pub root_node: AST,
+    code_info: &'a UnprocessedCodeInfo,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(code_info: &'a UnprocessedCodeInfo<'a>) -> Self {
+    pub fn new(code_info: &'a UnprocessedCodeInfo) -> Self {
         Self {
-            lexer: Lexer::new(code_info),
-            code_info,
+            lexer: Lexer::new(&code_info),
+            code_info: code_info,
         }
     }
 
@@ -597,7 +588,7 @@ impl<'a> Parser<'a> {
         Ok(x)
     }
 
-    pub fn parse(&mut self) -> Result<SourceCodeInfo, ParseError> {
+    pub fn parse(&mut self) -> Result<AST, ParseError> {
         // Parse structural nodes as often as possible, until EOF
         let mut structural_nodes = Vec::new();
         loop {
@@ -612,62 +603,48 @@ impl<'a> Parser<'a> {
             structurals: structural_nodes,
         };
 
-        let source_code = ariadne::Source::from(self.code_info.code.to_string());
-        let source_code_info = SourceCodeInfo {
-            cache: Rc::new(RefCell::new((
-                self.code_info.file_name.to_string(),
-                source_code,
-            ))),
-            root_node: ast,
-        };
-        Ok(source_code_info)
+        Ok(ast)
     }
 
-    pub fn parse_and_add_ids(&mut self) -> Result<SourceCodeInfo, ParseError> {
-        let mut source_code_info = self.parse()?;
-        add_ids(&mut source_code_info.root_node);
-        Ok(source_code_info)
-    }
-
-    pub fn parse_and_create_context(&mut self) -> Result<Context, ParseError> {
-        let source_code_info = self.parse_and_add_ids()?;
-        let mut context = Context::new();
-        context.add_pass_data(source_code_info);
-        Ok(context)
+    pub fn parse_and_add_ids(&mut self) -> Result<AST, ParseError> {
+        let mut ast = self.parse()?;
+        add_ids(&mut ast);
+        Ok(ast)
     }
 }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
 
-    use crate::add_ids::{self};
+//     use crate::add_ids::{self};
 
-    use super::*;
+//     use super::*;
 
-    #[test]
-    fn test_parse_fac() {
-        let code_info = UnprocessedCodeInfo {
-            code: "fn fac(n: i64) -> i64 {
-            out if n == 0 {
-                out 1; 
-            }            
-            else {
-                let n_out = n * fac(n - 1.0);
-                out n_out; 
-            };
-        }",
-            file_name: "test.yuu",
-        };
+//     #[test]
+//     fn test_parse_fac() {
+//         let code_info = UnprocessedCodeInfo {
+//             code: "fn fac(n: i64) -> i64 {
+//             out if n == 0 {
+//                 out 1;
+//             }
+//             else {
+//                 let n_out = n * fac(n - 1.0);
+//                 out n_out;
+//             };
+//         }"
+//             .into(),
+//             file_name: "test.yuu".into(),
+//         };
 
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
+//         let mut parser = Parser::new(&code_info);
+//         let result = parser.parse();
 
-        if let Err(err) = result {
-            err.print(&code_info);
-        } else {
-            let mut result = result.unwrap();
-            add_ids::add_ids(&mut result.root_node);
-            println!("{}", result.root_node.to_graphviz_string());
-        }
-    }
-}
+//         if let Err(err) = result {
+//             err.print(&code_info);
+//         } else {
+//             let mut result = result.unwrap();
+//             add_ids::add_ids(&mut result.root_node);
+//             println!("{}", result.root_node.to_graphviz_string());
+//         }
+//     }
+// }

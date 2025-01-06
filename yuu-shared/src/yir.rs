@@ -1,124 +1,359 @@
-use crate::{
-    ast::NodeId,
-    type_info::{self, TypeInfo},
-};
+use crate::scheduler::{ResourceId, ResourceName};
+use crate::type_info::TypeInfo;
 use hashbrown::HashMap;
-use std::fmt::{Display, Formatter, Result};
-use std::{hash::Hash, rc::Rc};
-
-pub type RegisterId = i64;
-
-#[derive(Clone)]
-pub enum YirTypeInfo {
-    YuuPrimitiveType(type_info::PrimitiveType),
-    FunctionType(Rc<[Rc<YirTypeInfo>]>, Rc<YirTypeInfo>),
-    Pointer(Rc<YirTypeInfo>),
-}
-
-impl YirTypeInfo {
-    pub fn ptr_to(self: Rc<Self>) -> Rc<Self> {
-        Rc::new(YirTypeInfo::Pointer(self))
-    }
-}
-
-impl Display for YirTypeInfo {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        match self {
-            YirTypeInfo::YuuPrimitiveType(prim) => write!(f, "{}", prim),
-            YirTypeInfo::FunctionType(args, ret) => {
-                write!(f, "(")?;
-                let mut first = true;
-                for arg in args.iter() {
-                    if !first {
-                        write!(f, ",")?;
-                    }
-                    first = false;
-                    write!(f, "{}", arg)?;
-                }
-                write!(f, ")->{}", ret)
-            }
-            YirTypeInfo::Pointer(inner) => write!(f, "ptr {}", inner),
-        }
-    }
-}
+use std::cell::RefCell;
+use std::fmt::{self, Write};
+use std::rc::Rc;
 
 #[derive(Clone)]
-pub struct RegisterCreateInfo {
-    inner: Rc<RegisterCreateInfoInner>,
+pub struct Register {
+    name: String,
+    id: i64,
+    ty: &'static TypeInfo,
 }
 
-impl RegisterCreateInfo {
-    pub fn assume_exists(&self) -> RegisterRef {
-        RegisterRef {
-            referenced_id: -1,
-            register_create_info: self.clone(),
-        }
-    }
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct Label {
+    name: String,
+    id: i64,
 }
 
-struct RegisterCreateInfoInner {
-    pub name: String,
-    pub ty: Rc<YirTypeInfo>,
-    pub node_id: NodeId,
-}
-
-impl RegisterCreateInfo {
-    pub fn new(name: String, ty: Rc<YirTypeInfo>, node_id: NodeId) -> Self {
-        Self {
-            inner: Rc::new(RegisterCreateInfoInner { name, ty, node_id }),
-        }
+impl Register {
+    pub fn new(name: String, id: i64, ty: &'static TypeInfo) -> Self {
+        Self { name, id, ty }
     }
 
     pub fn name(&self) -> &str {
-        &self.inner.name
+        &self.name
     }
 
-    pub fn ty(&self) -> &Rc<YirTypeInfo> {
-        &self.inner.ty
+    pub fn id(&self) -> i64 {
+        self.id
     }
 
-    pub fn node_id(&self) -> NodeId {
-        self.inner.node_id
+    pub fn ty(&self) -> &'static TypeInfo {
+        &self.ty
     }
 }
 
+impl Label {
+    fn new(name: String, id: i64) -> Self {
+        Self { name, id }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+}
+
+#[derive(Clone)]
+pub enum Operand {
+    I64Const(i64),
+    F32Const(f32),
+    F64Const(f64),
+    BoolConst(bool),
+    Register(Register),
+    NoOp,
+}
+
+#[derive(Clone)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+}
+
+#[derive(Clone)]
+pub enum UnaryOp {
+    Neg,
+}
+
+#[derive(Clone)]
+pub enum Instruction {
+    Assign {
+        target: Register,
+        value: Operand,
+    },
+    Binary {
+        target: Register,
+        op: BinOp,
+        lhs: Operand,
+        rhs: Operand,
+    },
+    Unary {
+        target: Register,
+        op: UnaryOp,
+        operand: Operand,
+    },
+    Load {
+        target: Register,
+        address: Operand,
+    },
+    Store {
+        address: Operand,
+        value: Operand,
+    },
+    Alloca {
+        target: Register,
+    },
+    Call {
+        target: Option<Register>,
+        name: String,
+        args: Vec<Operand>,
+    },
+    Phi {
+        target: Register,
+        incoming: Vec<(Label, Operand)>,
+    },
+}
+
+#[derive(Clone)]
+pub enum ControlFlow {
+    Jump(Label),
+    Branch {
+        condition: Operand,
+        if_true: Label,
+        if_false: Label,
+    },
+    Return(Option<Operand>),
+}
+
+#[derive(Clone)]
+pub struct BasicBlock {
+    pub label: Label,
+    pub instructions: Vec<Instruction>,
+    pub terminator: ControlFlow,
+    pub predecessors: Vec<Label>,
+}
+
+#[derive(Clone)]
 pub struct Function {
     pub name: String,
-    pub function_type: Rc<YirTypeInfo>,
-    pub instructions: Instructions,
-    pub variables: HashMap<String, RegisterRef>,
+    pub params: Vec<(String, &'static TypeInfo)>,
+    pub return_type: &'static TypeInfo,
+    pub blocks: HashMap<i64, BasicBlock>,
+    pub entry_block: i64,
+    current_block: i64,
+    next_reg_id: i64,
+    next_label_id: i64,
 }
 
 impl Function {
-    pub fn new(name: String, function_type: Rc<YirTypeInfo>) -> Self {
-        Self {
+    pub fn new(name: String, return_type: &'static TypeInfo) -> Self {
+        let mut f = Self {
             name,
-            function_type,
-            instructions: Instructions::new(),
-            variables: HashMap::new(),
+            params: Vec::new(),
+            return_type,
+            blocks: HashMap::new(),
+            entry_block: 0,
+            current_block: 0,
+            next_reg_id: 0,
+            next_label_id: 0,
+        };
+        f.add_block("entry".to_string());
+        f
+    }
+
+    pub fn fresh_register(&mut self, name: String, ty: &'static TypeInfo) -> Register {
+        let id = self.next_reg_id;
+        self.next_reg_id += 1;
+        Register::new(name, id, ty)
+    }
+
+    pub fn get_block_mut(&mut self, id: i64) -> Option<&mut BasicBlock> {
+        self.blocks.get_mut(&id)
+    }
+
+    pub fn get_current_block_mut(&mut self) -> Option<&mut BasicBlock> {
+        self.blocks.get_mut(&self.current_block)
+    }
+
+    pub fn current_block(&self) -> i64 {
+        self.current_block
+    }
+
+    fn fresh_label(&mut self, name: String) -> Label {
+        let id = self.next_label_id;
+        self.next_label_id += 1;
+        Label::new(name, id)
+    }
+
+    pub fn add_block(&mut self, name: String) -> Label {
+        let label = self.fresh_label(name);
+        self.blocks.insert(
+            label.id(),
+            BasicBlock {
+                label: label.clone(),
+                instructions: Vec::new(),
+                terminator: ControlFlow::Return(None),
+                predecessors: Vec::new(),
+            },
+        );
+        label
+    }
+
+    pub fn make_assign(&mut self, target: Register, value: Operand) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block
+                .instructions
+                .push(Instruction::Assign { target, value });
         }
     }
 
-    pub fn new_main() -> Self {
-        Self {
-            name: "main".to_string(),
-            function_type: Rc::new(YirTypeInfo::FunctionType(
-                Rc::new([]),
-                Rc::new(YirTypeInfo::YuuPrimitiveType(type_info::PrimitiveType::I64)),
-            )),
-            instructions: Instructions::new(),
-            variables: HashMap::new(),
+    pub fn make_unary(&mut self, target: Register, op: UnaryOp, operand: Operand) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Unary {
+                target,
+                op,
+                operand,
+            });
         }
     }
-}
 
-pub enum FunctionDeclarationState {
-    Declared(Rc<YirTypeInfo>),
-    Defined(Rc<Function>),
+    pub fn make_binary(
+        &mut self,
+        name: String,
+        op: BinOp,
+        lhs: Operand,
+        rhs: Operand,
+        ty: &'static TypeInfo,
+    ) -> Register {
+        let target = self.fresh_register(name, ty);
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Binary {
+                target: target.clone(),
+                op,
+                lhs,
+                rhs,
+            });
+        }
+        target
+    }
+
+    pub fn make_store(&mut self, address: Operand, value: Operand) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block
+                .instructions
+                .push(Instruction::Store { address, value });
+        }
+    }
+
+    pub fn make_load(
+        &mut self,
+        name: String,
+        address: Operand,
+        value_type: &'static TypeInfo,
+    ) -> Register {
+        let target = self.fresh_register(name, value_type);
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Load {
+                target: target.clone(),
+                address,
+            });
+        }
+        target
+    }
+
+    pub fn make_alloca(&mut self, name: String, value_type: &'static TypeInfo) -> Register {
+        let ptr_type = value_type.ptr_to();
+        let target = self.fresh_register(name, ptr_type);
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Alloca {
+                target: target.clone(),
+            });
+        }
+        target
+    }
+
+    pub fn make_call(
+        &mut self,
+        name: String,
+        func_name: String,
+        args: Vec<Operand>,
+        return_type: &'static TypeInfo,
+    ) -> Option<Register> {
+        if return_type.is_nil() {
+            return None;
+        }
+        let target = self.fresh_register(name, return_type);
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Call {
+                target: Some(target.clone()),
+                name: func_name,
+                args,
+            });
+        }
+        Some(target)
+    }
+
+    pub fn branch(&mut self, condition: Operand) -> (Label, Label) {
+        let true_label = self.fresh_label("then".to_string());
+        let false_label = self.fresh_label("else".to_string());
+
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.terminator = ControlFlow::Branch {
+                condition,
+                if_true: true_label.clone(),
+                if_false: false_label.clone(),
+            };
+        }
+
+        self.blocks.insert(
+            true_label.id(),
+            BasicBlock {
+                label: true_label.clone(),
+                instructions: Vec::new(),
+                terminator: ControlFlow::Return(None),
+                predecessors: vec![Label::new("current".to_string(), self.current_block)],
+            },
+        );
+
+        self.blocks.insert(
+            false_label.id(),
+            BasicBlock {
+                label: false_label.clone(),
+                instructions: Vec::new(),
+                terminator: ControlFlow::Return(None),
+                predecessors: vec![Label::new("current".to_string(), self.current_block)],
+            },
+        );
+
+        (true_label, false_label)
+    }
+
+    pub fn set_current_block(&mut self, label: &Label) {
+        self.current_block = label.id();
+    }
+
+    pub fn set_terminator(&mut self, terminator: ControlFlow) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.terminator = terminator;
+        }
+    }
+
+    pub fn make_phi(&mut self, target: Register, incoming: Vec<(Label, Operand)>) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block
+                .instructions
+                .push(Instruction::Phi { target, incoming });
+        }
+    }
 }
 
 pub struct Module {
     pub functions: HashMap<String, FunctionDeclarationState>,
+}
+
+impl ResourceId for Module {
+    fn resource_name() -> ResourceName {
+        "Module"
+    }
 }
 
 impl Module {
@@ -128,444 +363,241 @@ impl Module {
         }
     }
 
-    pub fn declare_function(&mut self, name: String, func_type: Rc<YirTypeInfo>) {
+    pub fn declare_function(&mut self, name: String, func_type: &'static TypeInfo) {
         self.functions
             .insert(name, FunctionDeclarationState::Declared(func_type));
     }
 
     pub fn define_function(&mut self, func: Function) {
-        //TODO: Check if the function was previously declared
         self.functions.insert(
             func.name.clone(),
-            FunctionDeclarationState::Defined(Rc::new(func)),
+            FunctionDeclarationState::Defined(Box::new(func)),
         );
     }
-
-    pub fn get_defined_function(&self, name: &str) -> Option<Rc<Function>> {
-        self.functions.get(name).and_then(|state| match state {
-            FunctionDeclarationState::Defined(func) => Some(func.clone()),
-            _ => None,
-        })
-    }
-
-    pub fn get_declared_function(&self, name: &str) -> Option<Function> {
-        self.functions.get(name).and_then(|state| match state {
-            FunctionDeclarationState::Declared(ty) => {
-                Some(Function::new(name.to_string(), ty.clone()))
-            }
-            _ => None,
-        })
-    }
-
-    pub fn is_declared(&self, name: &str) -> bool {
-        self.functions.get(name).is_some()
-    }
-
-    pub fn is_defined(&self, name: &str) -> bool {
-        self.functions.get(name).map_or(false, |state| match state {
-            FunctionDeclarationState::Defined(_) => true,
-            _ => false,
-        })
-    }
-}
-
-pub enum Operand {
-    RegisterOp(RegisterRef), // Takes the value from the register at the given InstId
-    ImmediateI64Op(i64),
-    ImmediateF32Op(f32),
-    ImmediateF64Op(f64),
-    ImmediateBoolOp(bool),
-    NoOp,
 }
 
 #[derive(Clone)]
-pub struct RegisterRef {
-    pub referenced_id: InstId,
-    pub register_create_info: RegisterCreateInfo,
+pub enum FunctionDeclarationState {
+    Declared(&'static TypeInfo),
+    Defined(Box<Function>),
 }
 
-pub struct CallInst {
-    pub target: Option<RegisterCreateInfo>,
-    pub func_name: String,
-    pub args: Vec<Operand>,
-}
-
-pub struct InstTriple {
-    pub register: RegisterCreateInfo,
-    pub op1: Operand,
-    pub op2: Operand,
-}
-
-pub struct InstPair {
-    pub register: RegisterCreateInfo,
-    pub op: Operand,
-}
-
-pub struct SlotDataFlow {
-    pub written_by: Vec<InstId>,
-    pub read_by: Vec<InstId>,
-}
-
-pub type InstId = i64;
-pub type LabelId = i64;
-
-pub struct Inst {
-    pub kind: InstKind,
-    pub id: InstId,
-    pub next: Option<InstId>,
-    pub prev: Option<InstId>,
-}
-
-pub struct Label {
-    pub name: String,
-    pub id: LabelId,
-}
-
-pub struct Goto {
-    pub label: LabelId,
-}
-
-pub struct Branch {
-    pub cond: Operand,
-    pub if_true: LabelId,
-    pub if_false: LabelId,
-}
-
-pub struct Alloca {
-    pub register: RegisterCreateInfo,
-}
-
-pub struct Store {
-    pub target: RegisterRef,
-    pub value: Operand,
-}
-
-pub struct Load {
-    pub target: RegisterCreateInfo,
-    pub source: Operand,
-}
-
-pub enum InstKind {
-    AddKind(InstTriple),
-    SubKind(InstTriple),
-    MulKind(InstTriple),
-    DivKind(InstTriple),
-    EqKind(InstTriple),
-    NegKind(InstPair),
-
-    // Labels & Branches
-    LabelKind(Label),
-    GotoKind(Goto),
-    BranchKind(Branch),
-
-    // Alloc
-    AllocaKind(Alloca),
-
-    // Load & Store
-    StoreKind(Store),
-    LoadKind(Load),
-
-    // Function calls
-    CallInstKind(CallInst),
-}
-
-impl Default for SlotDataFlow {
-    fn default() -> Self {
-        Self {
-            written_by: Vec::new(),
-            read_by: Vec::new(),
+impl fmt::Display for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (name, func_state) in &self.functions {
+            match func_state {
+                FunctionDeclarationState::Declared(ty) => {
+                    writeln!(f, "declare {} : {}", name, ty)?;
+                }
+                FunctionDeclarationState::Defined(func) => {
+                    write!(f, "{}", func)?;
+                }
+            }
         }
+        Ok(())
     }
 }
 
-pub struct Instructions {
-    pub instructions: Vec<Inst>,
-    pub next_label: LabelId,
-    pub label_map: HashMap<LabelId, InstId>,
-    pub inst_indices: HashMap<InstId, usize>, // Maps InstId to index in instructions Vec
-}
-
-impl Instructions {
-    pub fn new() -> Self {
-        Self {
-            instructions: Vec::new(),
-            next_label: 0,
-            label_map: HashMap::new(),
-            inst_indices: HashMap::new(),
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Print function signature
+        write!(f, "fn {}(", self.name)?;
+        for (i, (param_name, param_type)) in self.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}: {}", param_name, param_type)?;
         }
-    }
+        writeln!(f, ") -> {} {{", self.return_type)?;
 
-    pub fn fresh_label(&mut self) -> LabelId {
-        let label = self.next_label;
-        self.next_label += 1;
-        label
-    }
+        // Track register definitions
+        let mut reg_defs = std::collections::HashMap::new();
 
-    pub fn make_register_create_info(
-        &mut self,
-        node_id: NodeId,
-        name: String,
-        ty: Rc<YirTypeInfo>,
-    ) -> RegisterCreateInfo {
-        RegisterCreateInfo::new(name, ty, node_id)
-    }
+        // Print blocks in order, starting with entry block
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = vec![self.entry_block];
 
-    // Helper method to create RegisterRef
-    fn create_ref(&mut self, kind: InstKind, info: RegisterCreateInfo) -> RegisterRef {
-        let id = self.add(kind);
-        RegisterRef {
-            referenced_id: id,
-            register_create_info: info,
-        }
-    }
+        while let Some(block_id) = queue.pop() {
+            if !visited.insert(block_id) {
+                continue;
+            }
 
-    pub fn add_label(&mut self, name: String, label_id: LabelId) -> InstId {
-        let kind = InstKind::LabelKind(Label { name, id: label_id });
-        let id = self.add(kind);
-        self.label_map.insert(label_id, id);
-        id
-    }
+            if let Some(block) = self.blocks.get(&block_id) {
+                // Print block label (without : prefix as this is the definition)
+                writeln!(f, "{}:", block.label.name())?;
 
-    pub fn goto_label(&self, label_id: LabelId) -> &Inst {
-        self.label_map
-            .get(&label_id)
-            .copied()
-            .and_then(|x| self.get(x))
-            .unwrap()
-    }
+                // Print instructions
+                for inst in &block.instructions {
+                    write!(f, "    ")?;
+                    match inst {
+                        Instruction::Assign { target, value } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(f, "{} := {}", reg_name, print_operand(value, &reg_defs))?;
+                        }
+                        Instruction::Binary {
+                            target,
+                            op,
+                            lhs,
+                            rhs,
+                        } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(
+                                f,
+                                "{} := {} {} {}",
+                                reg_name,
+                                print_operand(lhs, &reg_defs),
+                                print_binop(op),
+                                print_operand(rhs, &reg_defs)
+                            )?;
+                        }
+                        Instruction::Unary {
+                            target,
+                            op,
+                            operand,
+                        } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(
+                                f,
+                                "{} := {}{}",
+                                reg_name,
+                                print_unop(op),
+                                print_operand(operand, &reg_defs)
+                            )?;
+                        }
+                        Instruction::Load { target, address } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(
+                                f,
+                                "{} := load {}",
+                                reg_name,
+                                print_operand(address, &reg_defs)
+                            )?;
+                        }
+                        Instruction::Store { address, value } => {
+                            writeln!(
+                                f,
+                                "store {} <- {}",
+                                print_operand(address, &reg_defs),
+                                print_operand(value, &reg_defs)
+                            )?;
+                        }
+                        Instruction::Alloca { target } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(f, "{} := alloca {}", reg_name, target.ty())?;
+                        }
+                        Instruction::Call { target, name, args } => {
+                            if let Some(target) = target {
+                                let reg_name = print_register(target, &mut reg_defs);
+                                write!(f, "{} := ", reg_name)?;
+                            }
+                            write!(f, "call {}(", name)?;
+                            for (i, arg) in args.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "{}", print_operand(arg, &reg_defs))?;
+                            }
+                            writeln!(f, ")")?;
+                        }
+                        Instruction::Phi { target, incoming } => {
+                            let reg_name = print_register(target, &mut reg_defs);
+                            writeln!(f, "{} := phi {{", reg_name)?;
+                            for (i, (label, operand)) in incoming.iter().enumerate() {
+                                writeln!(
+                                    f,
+                                    "    {} -> {}",
+                                    label.name(),
+                                    print_operand(operand, &reg_defs)
+                                )?;
+                            }
+                            writeln!(f, "}}")?;
+                        }
+                    }
+                }
 
-    pub fn get_as_goto(&self, id: InstId) -> Option<&Goto> {
-        self.get(id).and_then(|inst| match &inst.kind {
-            InstKind::GotoKind(goto) => Some(goto),
-            _ => None,
-        })
-    }
-
-    pub fn get_as_branch(&self, id: InstId) -> Option<&Branch> {
-        self.get(id).and_then(|inst| match &inst.kind {
-            InstKind::BranchKind(branch) => Some(branch),
-            _ => None,
-        })
-    }
-
-    pub fn get_as_call_inst(&self, id: InstId) -> Option<&CallInst> {
-        self.get(id).and_then(|inst| match &inst.kind {
-            InstKind::CallInstKind(call) => Some(call),
-            _ => None,
-        })
-    }
-
-    pub fn get_as_label(&self, id: InstId) -> Option<&Label> {
-        self.get(id).and_then(|inst| match &inst.kind {
-            InstKind::LabelKind(label) => Some(label),
-            _ => None,
-        })
-    }
-
-    pub fn add_goto(&mut self, label: LabelId) -> InstId {
-        let kind = InstKind::GotoKind(Goto { label });
-        self.add(kind)
-    }
-
-    pub fn add_branch(&mut self, cond: Operand, if_true: LabelId, if_false: LabelId) -> InstId {
-        let kind = InstKind::BranchKind(Branch {
-            cond,
-            if_true,
-            if_false,
-        });
-        self.add(kind)
-    }
-
-    pub fn add_alloca(&mut self, reg: RegisterCreateInfo) -> RegisterRef {
-        let kind = InstKind::AllocaKind(Alloca {
-            register: reg.clone(),
-        });
-        let refd = self.add(kind);
-        RegisterRef {
-            referenced_id: refd,
-            register_create_info: reg,
-        }
-    }
-
-    pub fn add_store(&mut self, target: RegisterRef, value: Operand) -> InstId {
-        let kind = InstKind::StoreKind(Store { target, value });
-        self.add(kind)
-    }
-
-    pub fn add_load(&mut self, target: RegisterCreateInfo, source: Operand) -> RegisterRef {
-        let kind = InstKind::LoadKind(Load {
-            target: target.clone(),
-            source,
-        });
-        let refd = self.add(kind);
-        RegisterRef {
-            referenced_id: refd,
-            register_create_info: target,
-        }
-    }
-
-    pub fn add_bin_op(
-        &mut self,
-        op: impl FnOnce(InstTriple) -> InstKind,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        self.create_ref(
-            op(InstTriple {
-                register: target.clone(),
-                op1,
-                op2,
-            }),
-            target,
-        )
-    }
-
-    pub fn add_bin_add(
-        &mut self,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        self.add_bin_op(InstKind::AddKind, target, op1, op2)
-    }
-
-    pub fn add_bin_sub(
-        &mut self,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        self.add_bin_op(InstKind::SubKind, target, op1, op2)
-    }
-
-    pub fn add_bin_mul(
-        &mut self,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        let kind = InstKind::MulKind(InstTriple {
-            register: target.clone(),
-            op1,
-            op2,
-        });
-        let refd = self.add(kind);
-        RegisterRef {
-            referenced_id: refd,
-            register_create_info: target,
-        }
-    }
-
-    pub fn add_bin_div(
-        &mut self,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        let kind = InstKind::DivKind(InstTriple {
-            register: target.clone(),
-            op1,
-            op2,
-        });
-        let refd = self.add(kind);
-        RegisterRef {
-            referenced_id: refd,
-            register_create_info: target,
-        }
-    }
-
-    pub fn add_bin_eq(
-        &mut self,
-        target: RegisterCreateInfo,
-        op1: Operand,
-        op2: Operand,
-    ) -> RegisterRef {
-        let kind = InstKind::EqKind(InstTriple {
-            register: target.clone(),
-            op1,
-            op2,
-        });
-        let refd = self.add(kind);
-        RegisterRef {
-            referenced_id: refd,
-            register_create_info: target,
-        }
-    }
-
-    pub fn add_un_op(&mut self, target: RegisterCreateInfo, op: Operand) -> RegisterRef {
-        self.create_ref(
-            InstKind::NegKind(InstPair {
-                register: target.clone(),
-                op,
-            }),
-            target,
-        )
-    }
-
-    pub fn add_un_neg(&mut self, target: RegisterCreateInfo, op: Operand) -> RegisterRef {
-        self.add_un_op(target, op)
-    }
-
-    pub fn add_un_pos(&mut self, target: RegisterCreateInfo, op: Operand) -> RegisterRef {
-        self.add_un_op(target, op)
-    }
-
-    pub fn add_call(
-        &mut self,
-        target: Option<RegisterCreateInfo>,
-        func_name: String,
-        args: Vec<Operand>,
-    ) -> Option<RegisterRef> {
-        let kind = InstKind::CallInstKind(CallInst {
-            target: target.clone(),
-            func_name,
-            args,
-        });
-        let refd = self.add(kind);
-        target.map(|info| RegisterRef {
-            referenced_id: refd,
-            register_create_info: info,
-        })
-    }
-
-    pub fn add(&mut self, inst: InstKind) -> InstId {
-        let id = self.instructions.len() as InstId;
-        let inst = Inst {
-            kind: inst,
-            id,
-            next: None,
-            prev: if self.instructions.is_empty() {
-                None
-            } else {
-                Some((self.instructions.len() - 1) as InstId)
-            },
-        };
-
-        // Update the previous instruction's next pointer
-        if let Some(prev_idx) = self.instructions.len().checked_sub(1) {
-            if let Some(prev_inst) = self.instructions.get_mut(prev_idx) {
-                prev_inst.next = Some(id);
+                // Print terminator
+                write!(f, "    ")?;
+                match &block.terminator {
+                    ControlFlow::Jump(label) => {
+                        writeln!(f, "jump :{}", label.name())?;
+                        queue.push(label.id());
+                    }
+                    ControlFlow::Branch {
+                        condition,
+                        if_true,
+                        if_false,
+                    } => {
+                        writeln!(
+                            f,
+                            "branch {} ? :{} : :{}",
+                            print_operand(condition, &reg_defs),
+                            if_true.name(),
+                            if_false.name()
+                        )?;
+                        queue.push(if_true.id());
+                        queue.push(if_false.id());
+                    }
+                    ControlFlow::Return(value) => {
+                        write!(f, "return")?;
+                        if let Some(val) = value {
+                            write!(f, " {}", print_operand(val, &reg_defs))?;
+                        }
+                        writeln!(f)?;
+                    }
+                }
+                writeln!(f)?;
             }
         }
 
-        // Add the instruction and update the index map
-        self.inst_indices.insert(id, self.instructions.len());
-        self.instructions.push(inst);
-        id
+        writeln!(f, "}}")
     }
+}
 
-    pub fn get(&self, id: InstId) -> Option<&Inst> {
-        self.inst_indices
-            .get(&id)
-            .and_then(|&idx| self.instructions.get(idx))
-    }
+fn print_register(
+    reg: &Register,
+    reg_defs: &mut std::collections::HashMap<String, usize>,
+) -> String {
+    let base_name = reg.name();
+    let count = reg_defs.entry(base_name.to_string()).or_insert(0);
+    let result = if *count == 0 {
+        base_name.to_string()
+    } else {
+        format!("{}.{}", base_name, count)
+    };
+    *count += 1;
+    result
+}
 
-    pub fn get_mut(&mut self, id: InstId) -> Option<&mut Inst> {
-        if let Some(&idx) = self.inst_indices.get(&id) {
-            self.instructions.get_mut(idx)
-        } else {
-            None
+fn print_operand(op: &Operand, reg_defs: &std::collections::HashMap<String, usize>) -> String {
+    match op {
+        Operand::I64Const(n) => n.to_string(),
+        Operand::F32Const(f) => format!("{}f32", f),
+        Operand::F64Const(f) => format!("{}f64", f),
+        Operand::BoolConst(b) => b.to_string(),
+        Operand::Register(reg) => {
+            let count = reg_defs.get(reg.name()).unwrap_or(&0);
+            if *count <= 1 {
+                reg.name().to_string()
+            } else {
+                format!("{}.{}", reg.name(), count - 1)
+            }
         }
+        Operand::NoOp => "nop".to_string(),
+    }
+}
+
+fn print_binop(op: &BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Eq => "==",
+    }
+}
+
+fn print_unop(op: &UnaryOp) -> &'static str {
+    match op {
+        UnaryOp::Neg => "-",
     }
 }

@@ -1,7 +1,7 @@
 use logos::Span;
 use serde::{Deserialize, Serialize};
 
-use crate::token::Token;
+use crate::{scheduler::ResourceId, token::Token};
 use std::fmt::{self, Display, Formatter};
 
 /// Binary operators for arithmetic expressions
@@ -271,6 +271,12 @@ pub enum Node {
 
 pub struct AST {
     pub structurals: Vec<Box<StructuralNode>>,
+}
+
+impl ResourceId for AST {
+    fn resource_name() -> &'static str {
+        "AST"
+    }
 }
 
 impl Display for Node {

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ariadne = { version = "0.5.0", features = ["auto-color"] }
+anyhow = "1.0.95"
 hashbrown = "0.15.1"
 serde_json = "1.0.134"
 thiserror = "2.0.3"
