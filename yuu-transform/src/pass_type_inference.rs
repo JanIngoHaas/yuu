@@ -377,7 +377,6 @@ impl PassTypeInference {
                             ident_binding.id,
                             ident_binding.span.clone(),
                         );
-                        println!("ident_binding: {:?}\n\n\n", ident_binding);
                         ty_info_table.types.insert(ident_binding.id, ty);
 
                         Ok(())

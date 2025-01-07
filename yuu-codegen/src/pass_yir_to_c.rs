@@ -1,73 +1,347 @@
-// use yuu_shared::{
-//     ast::*,
-//     token::{Integer, TokenKind},
-// };
-// use yuu_transform::{block, type_info::TypeInfoTable};
+use yuu_shared::{
+    context::Context,
+    scheduler::{Pass, ResourceId},
+    type_info::{PrimitiveType, TypeInfo},
+    yir::{BasicBlock, Function, FunctionDeclarationState, Instruction, Module, Operand, Register},
+};
 
-// pub struct AstToCPass;
+use std::fmt::Write;
 
-// pub struct TransientData<'a> {
-//     output: String,
-//     types: &'a TypeInfoTable,
-//     merge_counter: u64,
-// }
+struct TransientData<'a> {
+    module: &'a Module,
+    output: String,
+}
 
-// impl AstToCPass {
-//     pub fn new() -> Self {
-//         Self {}
-//     }
+impl PassYirToC {
+    fn gen_type(
+        &self,
+        data: &mut TransientData,
+        ty: &'static TypeInfo,
+    ) -> Result<(), std::fmt::Error> {
+        match ty {
+            TypeInfo::BuiltIn(primitive_type) => match primitive_type {
+                PrimitiveType::Bool => write!(data.output, "bool"),
+                PrimitiveType::F64 => write!(data.output, "double"),
+                PrimitiveType::F32 => write!(data.output, "float"),
+                PrimitiveType::I64 => write!(data.output, "int64_t"),
+                PrimitiveType::Nil => write!(data.output, "void"),
+            },
+            TypeInfo::Function(function_type) => todo!(),
+            TypeInfo::Pointer(type_info) => {
+                self.gen_type(data, type_info)?;
+                write!(data.output, "*")
+            }
+        }
+    }
 
-//     pub fn gen_expr(expr: &ExprNode, data: &mut TransientData) {
-//         let out = match &expr {
-//             ExprNode::Literal(literal_expr) => Self::gen_literal_expr(literal_expr, data),
-//             ExprNode::Binary(binary_expr) => gen_binary_expr(binary_expr, data),
-//             ExprNode::Unary(unary_expr) => gen_unary_expr(unary_expr, data),
-//             ExprNode::Ident(ident_expr) => gen_ident_expr(ident_expr, data),
-//             ExprNode::Block(block_expr) => gen_block_expr(block_expr, data),
-//             ExprNode::FuncCall(func_call_expr) => gen_func_call_expr(func_call_expr, data),
-//             ExprNode::If(if_expr) => gen_if_expr(if_expr, data),
-//         };
-//     }
+    fn gen_operand(
+        &self,
+        data: &mut TransientData,
+        operand: &Operand,
+    ) -> Result<(), std::fmt::Error> {
+        match operand {
+            Operand::I64Const(c) => write!(data.output, "((int64_t)INT64_C({}))", c), // INT64_C expands to a type that is >= 64bit, so we cast it down to 64bit
+            Operand::F32Const(c) => write!(data.output, "({}f)", c),
+            Operand::F64Const(c) => write!(data.output, "({}d)", c),
+            Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
+            Operand::Register(register) => register.write_unique_name(&mut data.output),
+            Operand::NoOp => Ok(()),
+        }
+    }
 
-//     pub fn gen_literal_expr(literal_expr: &LiteralExpr, data: &mut TransientData) {
-//         let out = match literal_expr.lit.kind {
-//             TokenKind::Integer(Integer::I64(i)) => format!("INT64_C({})", i),
-//             TokenKind::F32(f) => format!("{}f", f),
-//             TokenKind::F64(f) => format!("{}d", f),
-//             TokenKind::TrueKw => format!("true"),
-//             TokenKind::FalseKw => format!("false"),
-//             _ => unreachable!("Other literals are not supported yet"),
-//         };
-//         data.output.push_str(&out);
-//     }
+    fn gen_instruction(
+        &self,
+        instruction: &Instruction,
+        data: &mut TransientData,
+    ) -> anyhow::Result<()> {
+        match instruction {
+            Instruction::Assign { target, value } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, value)?;
+            }
+            Instruction::Binary {
+                target,
+                op,
+                lhs,
+                rhs,
+            } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, lhs)?;
+                match op {
+                    yuu_shared::yir::BinOp::Add => write!(data.output, "+"),
+                    yuu_shared::yir::BinOp::Sub => write!(data.output, "-"),
+                    yuu_shared::yir::BinOp::Mul => write!(data.output, "*"),
+                    yuu_shared::yir::BinOp::Div => write!(data.output, "/"),
+                    yuu_shared::yir::BinOp::Eq => write!(data.output, "=="),
+                }?;
+                self.gen_operand(data, rhs)?;
+            }
+            Instruction::Unary {
+                target,
+                op,
+                operand,
+            } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                match op {
+                    yuu_shared::yir::UnaryOp::Neg => write!(data.output, "-"),
+                }?;
+                self.gen_operand(data, operand)?;
+            }
+            Instruction::Load { target, address } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=*")?;
+                self.gen_operand(data, address)?;
+            }
+            Instruction::Store { address, value } => {
+                write!(data.output, "*")?;
+                self.gen_operand(data, address)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, value)?;
+            }
+            Instruction::Alloca { target } => {
+                self.gen_type(data, target.ty().deref_ptr())?;
+                write!(data.output, " ")?;
+                target.write_unique_name(&mut data.output)?;
+                write!(data.output, "__mem;")?;
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "&")?;
+                target.write_unique_name(&mut data.output)?;
+                write!(data.output, "__mem;")?;
+            }
+            Instruction::Call { target, name, args } => {
+                if let Some(target) = target {
+                    self.gen_type(data, target.ty())?;
+                    write!(data.output, " ")?;
+                    target.write_unique_name(&mut data.output)?;
+                    write!(data.output, "=")?;
+                }
+                write!(data.output, "{}(", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(data.output, ", ")?;
+                    }
+                    self.gen_operand(data, arg)?;
+                }
+                write!(data.output, ")")?;
+            }
+            Instruction::Omega { target, .. } => {
+                self.gen_register(data, target)?;
+            }
+            Instruction::Omikron { target, value } => {
+                target.write_unique_name(&mut data.output)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, value)?;
+            }
+        }
+        write!(data.output, ";")?;
+        Ok(())
+    }
 
-//     pub fn gen_binary_expr(binary_expr: &BinaryExpr, data: &mut TransientData) {
-//         let out = format!("({}{}{})", binary_expr.lhs, binary_expr.op, binary_expr.rhs);
-//         data.output.push_str(&out);
-//     }
+    fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> anyhow::Result<()> {
+        // Generate label
+        writeln!(data.output, "{}:", block.label.name())?;
 
-//     pub fn gen_unary_expr(unary_expr: &UnaryExpr, data: &mut TransientData) {
-//         let out = format!("({}{})", unary_expr.op, unary_expr.rhs);
-//         data.output.push_str(&out);
-//     }
+        // Generate instructions
+        for instruction in block.instructions.iter() {
+            self.gen_instruction(instruction, data)?;
+            writeln!(data.output)?;
+        }
 
-//     pub fn gen_ident_expr(ident_expr: &IdentExpr, data: &mut TransientData) {
-//         let out = format!("{}", ident_expr.ident);
-//         data.output.push_str(&ident_expr.ident);
-//     }
+        // Generate terminator
+        match &block.terminator {
+            yuu_shared::yir::ControlFlow::Jump(label) => {
+                writeln!(data.output, "    goto {};", label.name())?;
+            }
+            yuu_shared::yir::ControlFlow::Branch {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                write!(data.output, "    if (")?;
+                self.gen_operand(data, condition)?;
+                writeln!(data.output, ") goto {};", if_true.name())?;
+                writeln!(data.output, "else{{goto {};}}", if_false.name())?;
+            }
+            yuu_shared::yir::ControlFlow::Return(value) => {
+                write!(data.output, "    return ")?;
+                if let Some(val) = value {
+                    self.gen_operand(data, val)?;
+                }
+                writeln!(data.output, ";")?;
+            }
+        }
+        Ok(())
+    }
 
-//     pub fn gen_block_expr(block_expr: &BlockExpr, data: &mut TransientData) {
-//         let out = format!("{{{}}}", block_expr.body);
-//         data.output.push_str(&out);
-//     }
+    fn gen_function(&self, func: &Function, data: &mut TransientData) -> anyhow::Result<()> {
+        self.gen_block(&func.blocks[&func.entry_block], data)?;
 
-//     pub fn generate(node: &Node, data: &mut TransientData) {
-//         match &node {
-//             Node::Expr(expr_node) => todo!(),
-//             Node::Stmt(stmt_node) => todo!(),
-//             Node::Type(type_node) => todo!(),
-//             Node::Structural(structural_node) => todo!(),
-//             Node::Binding(binding_node) => todo!(),
-//         };
-//     }
-// }
+        for (_, block) in &func.blocks {
+            if block.label.name() != "entry" {
+                self.gen_block(block, data)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn gen_register(
+        &self,
+        data: &mut TransientData,
+        reg: &Register,
+    ) -> Result<(), std::fmt::Error> {
+        self.gen_type(data, reg.ty())?;
+        write!(data.output, " ")?;
+        reg.write_unique_name(&mut data.output)?;
+        Ok(())
+    }
+
+    fn gen_func_decl(
+        &self,
+        func: &Function,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
+        self.gen_type(data, func.return_type)?;
+        write!(data.output, " {}", func.name)?;
+        write!(data.output, "(")?;
+        for (i, reg) in func.params.iter().enumerate() {
+            self.gen_register(data, reg)?;
+
+            if i > 0 {
+                write!(data.output, ", ")?;
+            }
+        }
+        write!(data.output, ")")?;
+        Ok(())
+    }
+
+    fn gen_module(&self, data: &mut TransientData) -> anyhow::Result<()> {
+        // Add standard includes
+        writeln!(data.output, "#include <stdint.h>\n")?;
+        writeln!(data.output, "#include <stdbool.h>\n")?;
+
+        // Generate function declarations
+        for function_state in data.module.functions.values() {
+            match function_state {
+                // Predeclare all functions
+                FunctionDeclarationState::Declared(func) => {
+                    self.gen_func_decl(&func, data)?;
+                    write!(data.output, ";")?;
+                }
+                FunctionDeclarationState::Defined(func) => {
+                    self.gen_func_decl(&func, data)?;
+                    write!(data.output, "{{")?;
+                    self.gen_function(&func, data)?;
+                    write!(data.output, "}}")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct PassYirToC;
+
+impl Default for PassYirToC {
+    fn default() -> Self {
+        Self
+    }
+}
+
+pub struct CSourceCode(pub String);
+
+impl ResourceId for CSourceCode {
+    fn resource_name() -> &'static str {
+        "CSourceCode"
+    }
+}
+
+impl Pass for PassYirToC {
+    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+        let module = context.require_pass_data::<Module>(self);
+        let module = module.lock().unwrap();
+        let mut data = TransientData {
+            module: &module,
+            output: String::new(),
+        };
+
+        // Generate code for each function
+        self.gen_module(&mut data)?;
+
+        // Add the generated code to the context
+        context.add_pass_data(CSourceCode(data.output));
+        Ok(())
+    }
+
+    fn install(self, schedule: &mut yuu_shared::scheduler::Schedule)
+    where
+        Self: Sized,
+    {
+        schedule.requires_resource_read::<Module>(&self);
+        schedule.produces_resource::<CSourceCode>(&self);
+        schedule.add_pass(self);
+    }
+
+    fn get_name(&self) -> &'static str {
+        "YIRToC"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use yuu_parse::{lexer::UnprocessedCodeInfo, pass_parse::ParsePass};
+    use yuu_shared::scheduler::{Schedule, Scheduler};
+    use yuu_transform::{
+        pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
+        pass_type_inference::PassTypeInference,
+    };
+
+    #[test]
+    fn test_fac_to_c() {
+        // Create the factorial function code
+        let code_info = UnprocessedCodeInfo {
+            code: Arc::from(
+                r#"fn fac(n: i64) -> i64 {
+                    out if n == 0 {
+                        out 1;
+                    }
+                    else {
+                        let n_out = n * n * fac(n - 1);
+                        out n_out;
+                    };
+                }"#,
+            ),
+            file_name: Arc::from("test.yuu"),
+        };
+
+        // Create a new context and add the code info
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+
+        // Create and configure the schedule
+        let mut schedule = Schedule::new();
+
+        // Add passes in the correct order
+        ParsePass.install(&mut schedule);
+        PassCollectDecls::new().install(&mut schedule);
+        PassTypeInference::new().install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToC.install(&mut schedule);
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get and print the generated C code
+        let c_code = context.require_pass_data::<CSourceCode>(&PassYirToC);
+        let c_code = c_code.lock().unwrap();
+        println!("Generated C code:\n\n```C\n{}\n```", c_code.0);
+    }
+}

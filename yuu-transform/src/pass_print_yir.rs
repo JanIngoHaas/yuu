@@ -18,6 +18,38 @@ impl PassYirToString {
     }
 }
 
+pub struct PassYirToColoredString;
+
+impl Default for PassYirToColoredString {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Pass for PassYirToColoredString {
+    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+        let module = context.require_pass_data::<Module>(self);
+        let module = module.lock().unwrap();
+        let mut f = String::new();
+        module.format_yir(true, &mut f)?;
+        context.add_pass_data(YirTextualRepresentation(f));
+        Ok(())
+    }
+
+    fn install(self, schedule: &mut yuu_shared::scheduler::Schedule)
+    where
+        Self: Sized,
+    {
+        schedule.requires_resource_read::<Module>(&self);
+        schedule.produces_resource::<YirTextualRepresentation>(&self);
+        schedule.add_pass(self);
+    }
+
+    fn get_name(&self) -> &'static str {
+        "YirToColoredString"
+    }
+}
+
 pub struct YirTextualRepresentation(pub String);
 
 impl ResourceId for YirTextualRepresentation {
@@ -68,7 +100,7 @@ mod tests {
                     out 1;
                 }
                 else {
-                    let n_out = n * fac(n - 1);
+                    let n_out = n * n * fac(n - 1);
                     out n_out;
                 };
             }"#,
@@ -87,8 +119,8 @@ mod tests {
         ParsePass.install(&mut schedule);
         PassCollectDecls::new().install(&mut schedule);
         PassTypeInference::new().install(&mut schedule);
-        PassAstToYir::new().install(&mut schedule);
-        PassYirToString::new().install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
 
         // Print the pass dependency graph in DOT format
         println!("Pass Dependency Graph (DOT format):");

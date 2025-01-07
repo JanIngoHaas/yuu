@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.95"
+colored = "2.1.0"
 hashbrown = "0.15.1"
 logos = "0.15.0"
 petgraph = "0.7.0"

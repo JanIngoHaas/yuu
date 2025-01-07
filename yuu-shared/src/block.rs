@@ -195,7 +195,7 @@ impl Block {
         &self,
         name: &str,
         type_info_table: &TypeInfoTable,
-        args: &[&'static TypeInfo],
+        resolve_arg_types: &[&'static TypeInfo],
         resolve_ret_type: T,
     ) -> Result<&'static TypeInfo, FunctionOverloadError>
     where
@@ -213,11 +213,11 @@ impl Block {
                     .ok_or(FunctionOverloadError::NotAFunction)?;
 
                 if let TypeInfo::Function(func) = &**func_type {
-                    if func.args.len() != args.len() {
+                    if func.args.len() != resolve_arg_types.len() {
                         return Err(FunctionOverloadError::NoOverloadFound);
                     }
 
-                    for (expected, actual) in func.args.iter().zip(args.iter()) {
+                    for (expected, actual) in func.args.iter().zip(resolve_arg_types.iter()) {
                         if !actual.does_coerce_to_same_type(expected) {
                             return Err(FunctionOverloadError::NoOverloadFound);
                         }
@@ -229,8 +229,6 @@ impl Block {
                 }
             }
             BindingInfoKind::Ambiguous(funcs) => {
-                println!("funcs: {:?}", funcs);
-                println!("type_info_table: {:?}", type_info_table);
                 for func in funcs.iter() {
                     let func_type = type_info_table
                         .types
@@ -238,12 +236,14 @@ impl Block {
                         .ok_or(FunctionOverloadError::NotAFunction)?;
 
                     if let TypeInfo::Function(func_type) = &**func_type {
-                        if func_type.args.len() != args.len() {
+                        if func_type.args.len() != resolve_arg_types.len() {
                             continue;
                         }
 
                         let mut all_args_match = true;
-                        for (expected, actual) in func_type.args.iter().zip(args.iter()) {
+                        for (expected, actual) in
+                            func_type.args.iter().zip(resolve_arg_types.iter())
+                        {
                             if !actual.does_coerce_to_same_type(expected) {
                                 all_args_match = false;
                                 break;

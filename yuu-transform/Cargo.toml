@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.95"
+colored = "2.2.0"
 hashbrown = "0.15.1"
 serde_json = "1.0.134"
 thiserror = "2.0.3"

@@ -128,6 +128,13 @@ impl TypeInterner {
         unsafe { &*(out.as_ref() as *const TypeInfo) }
     }
 
+    pub fn deref_ptr(ty: &'static TypeInfo) -> &'static TypeInfo {
+        if let TypeInfo::Pointer(inner) = ty {
+            return inner;
+        }
+        panic!("Cannot dereference non-pointer type: {}", ty);
+    }
+
     pub fn function_type(
         &'static self,
         args: &[&'static TypeInfo],
@@ -228,12 +235,6 @@ impl From<(&[&'static TypeInfo], &'static TypeInfo)> for &'static TypeInfo {
     }
 }
 
-#[derive(Clone)]
-pub enum AmbiguousTypeInfo {
-    Resolved(&'static TypeInfo),
-    Unresolved(Box<Vec<BindingInfo>>),
-}
-
 #[derive(Clone, Debug)]
 pub enum TypeInfo {
     BuiltIn(PrimitiveType),
@@ -256,6 +257,10 @@ impl TypeInfo {
 
     pub fn ptr_to(&'static self) -> &'static Self {
         TYPE_CACHE.ptr_to(self)
+    }
+
+    pub fn deref_ptr(&'static self) -> &'static Self {
+        TypeInterner::deref_ptr(self)
     }
 
     pub fn is_exact_same_type(&self, other: &'static Self) -> bool {

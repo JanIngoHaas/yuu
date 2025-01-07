@@ -1,7 +1,246 @@
 use crate::scheduler::{ResourceId, ResourceName};
-use crate::type_info::TypeInfo;
-use hashbrown::HashMap;
+use crate::type_info::{
+    primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
+};
+use colored::Colorize;
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
+
+/*
+Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
+*/
+
+// Color palette system
+#[derive(Clone)]
+struct RGB(u8, u8, u8);
+
+// Add color support detection
+#[derive(PartialEq)]
+enum ColorSupport {
+    NoColor,
+    Basic,     // 16 colors
+    Color256,  // 256 colors
+    TrueColor, // 16.7M colors
+}
+
+impl ColorSupport {
+    fn detect() -> Self {
+        // Check NO_COLOR environment variable
+        if std::env::var("NO_COLOR").is_ok() {
+            return ColorSupport::NoColor;
+        }
+
+        // Check COLORTERM
+        if let Ok(colorterm) = std::env::var("COLORTERM") {
+            if colorterm.contains("truecolor") || colorterm.contains("24bit") {
+                return ColorSupport::TrueColor;
+            }
+        }
+
+        // Check TERM
+        if let Ok(term) = std::env::var("TERM") {
+            if term.contains("256color") {
+                return ColorSupport::Color256;
+            }
+        }
+
+        ColorSupport::Basic
+    }
+}
+
+struct ColorPalette {
+    colors: HashMap<&'static str, RGB>,
+    color_support: ColorSupport,
+}
+
+impl ColorPalette {
+    // Add fallback colors for terminals with limited color support
+    fn get_fallback_color(&self, rgb: RGB) -> colored::Color {
+        match self.color_support {
+            ColorSupport::NoColor => colored::Color::White,
+            ColorSupport::Basic => {
+                // Map RGB to the closest basic color
+                let RGB(r, g, b) = rgb;
+                if r > 200 && g > 200 && b > 200 {
+                    colored::Color::White
+                } else if r > 200 {
+                    colored::Color::Red
+                } else if g > 200 {
+                    colored::Color::Green
+                } else if b > 200 {
+                    colored::Color::Blue
+                } else if r > 200 && g > 200 {
+                    colored::Color::Yellow
+                } else if g > 200 && b > 200 {
+                    colored::Color::Cyan
+                } else if r > 200 && b > 200 {
+                    colored::Color::Magenta
+                } else {
+                    colored::Color::White
+                }
+            }
+            ColorSupport::Color256 => {
+                // You could implement more sophisticated 256-color mapping here
+                let RGB(r, g, b) = rgb;
+                colored::Color::TrueColor { r, g, b }
+            }
+            ColorSupport::TrueColor => {
+                let RGB(r, g, b) = rgb;
+                colored::Color::TrueColor { r, g, b }
+            }
+        }
+    }
+
+    fn deep_ocean() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(255, 255, 255)); // White
+        colors.insert("keyword", RGB(255, 215, 0)); // Deep Gold
+        colors.insert("type", RGB(64, 224, 208)); // Turquoise
+        colors.insert("register", RGB(230, 230, 250)); // Lavender
+        colors.insert("constant", RGB(46, 139, 87)); // Sea Green
+        colors.insert("label", RGB(125, 249, 255)); // Electric Blue
+        colors.insert("operator", RGB(250, 128, 114)); // Salmon
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn warm_ember() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(255, 255, 255)); // White
+        colors.insert("keyword", RGB(255, 140, 85)); // Warm Orange
+        colors.insert("type", RGB(255, 183, 138)); // Peach
+        colors.insert("register", RGB(255, 121, 121)); // Soft Red
+        colors.insert("constant", RGB(255, 218, 121)); // Warm Yellow
+        colors.insert("label", RGB(255, 166, 158)); // Coral Pink
+        colors.insert("operator", RGB(255, 110, 74)); // Burnt Orange
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn mystic_forest() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(255, 255, 255)); // White
+        colors.insert("keyword", RGB(144, 238, 144)); // Light Green
+        colors.insert("type", RGB(152, 251, 152)); // Pale Green
+        colors.insert("register", RGB(143, 188, 143)); // Dark Sea Green
+        colors.insert("constant", RGB(50, 205, 50)); // Lime Green
+        colors.insert("label", RGB(127, 255, 170)); // Aquamarine
+        colors.insert("operator", RGB(34, 139, 34)); // Forest Green
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn cosmic_night() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(255, 255, 255)); // White
+        colors.insert("keyword", RGB(147, 112, 219)); // Medium Purple
+        colors.insert("type", RGB(138, 43, 226)); // Blue Violet
+        colors.insert("register", RGB(216, 191, 216)); // Thistle
+        colors.insert("constant", RGB(221, 160, 221)); // Plum
+        colors.insert("label", RGB(218, 112, 214)); // Orchid
+        colors.insert("operator", RGB(186, 85, 211)); // Medium Orchid
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn neon_dreams() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(255, 255, 255)); // White
+        colors.insert("keyword", RGB(255, 110, 199)); // Hot Pink
+        colors.insert("type", RGB(0, 255, 255)); // Cyan
+        colors.insert("register", RGB(191, 255, 0)); // Neon Green
+        colors.insert("constant", RGB(255, 0, 255)); // Magenta
+        colors.insert("label", RGB(255, 255, 0)); // Yellow
+        colors.insert("operator", RGB(255, 69, 0)); // Red-Orange
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    // === Light Background Palettes ===
+
+    fn summer_breeze() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(0, 0, 0)); // Black
+        colors.insert("keyword", RGB(255, 110, 74)); // Burnt Orange
+        colors.insert("type", RGB(0, 119, 182)); // Ocean Blue
+        colors.insert("register", RGB(86, 130, 3)); // Olive Green
+        colors.insert("constant", RGB(255, 49, 49)); // Bright Red
+        colors.insert("label", RGB(106, 76, 147)); // Royal Purple
+        colors.insert("operator", RGB(220, 47, 2)); // Deep Red
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn cherry_blossom() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(0, 0, 0)); // Black
+        colors.insert("keyword", RGB(219, 68, 88)); // Deep Pink
+        colors.insert("type", RGB(15, 76, 129)); // Navy Blue
+        colors.insert("register", RGB(255, 87, 127)); // Bright Pink
+        colors.insert("constant", RGB(53, 80, 112)); // Steel Blue
+        colors.insert("label", RGB(234, 72, 72)); // Coral Red
+        colors.insert("operator", RGB(140, 20, 84)); // Dark Magenta
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn forest_morning() -> Self {
+        let mut colors = HashMap::new();
+        colors.insert("function", RGB(0, 0, 0)); // Black
+        colors.insert("keyword", RGB(0, 102, 0)); // Dark Green
+        colors.insert("type", RGB(0, 77, 122)); // Deep Blue
+        colors.insert("register", RGB(153, 51, 0)); // Brown
+        colors.insert("constant", RGB(204, 51, 0)); // Dark Orange
+        colors.insert("label", RGB(0, 153, 76)); // Emerald
+        colors.insert("operator", RGB(153, 0, 0)); // Dark Red
+        Self {
+            colors,
+            color_support: ColorSupport::detect(),
+        }
+    }
+
+    fn get_color(&self, key: &str) -> RGB {
+        self.colors.get(key).cloned().unwrap_or(RGB(255, 255, 255))
+    }
+}
+
+thread_local! {
+    static CURRENT_PALETTE: std::cell::RefCell<ColorPalette> = std::cell::RefCell::new(ColorPalette::warm_ember());
+}
+
+fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
+    if !do_color {
+        return text.to_string();
+    }
+
+    CURRENT_PALETTE.with(|palette| {
+        let palette = palette.borrow();
+        let rgb = palette.get_color(color_key);
+
+        match palette.color_support {
+            ColorSupport::TrueColor => {
+                let RGB(r, g, b) = rgb;
+                text.truecolor(r, g, b).to_string()
+            }
+            _ => text.color(palette.get_fallback_color(rgb)).to_string(),
+        }
+    })
+}
 
 #[derive(Clone)]
 pub struct Register {
@@ -27,6 +266,10 @@ impl Register {
 
     pub fn id(&self) -> i64 {
         self.id
+    }
+
+    pub fn write_unique_name(&self, out: &mut impl fmt::Write) -> fmt::Result {
+        write!(out, "{}_{}", self.name, self.id)
     }
 
     pub fn ty(&self) -> &'static TypeInfo {
@@ -56,6 +299,19 @@ pub enum Operand {
     BoolConst(bool),
     Register(Register),
     NoOp,
+}
+
+impl Operand {
+    pub fn ty(&self) -> &'static TypeInfo {
+        match self {
+            Operand::I64Const(_) => primitive_i64(),
+            Operand::F32Const(_) => primitive_f32(),
+            Operand::F64Const(_) => primitive_f64(),
+            Operand::BoolConst(_) => primitive_bool(),
+            Operand::Register(reg) => reg.ty(),
+            Operand::NoOp => primitive_nil(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -105,9 +361,13 @@ pub enum Instruction {
         name: String,
         args: Vec<Operand>,
     },
-    Phi {
+    Omega {
         target: Register,
-        incoming: Vec<(Label, Operand)>,
+        writable_blocks: Vec<Label>,
+    },
+    Omikron {
+        target: Register,
+        value: Operand,
     },
 }
 
@@ -127,15 +387,14 @@ pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<Instruction>,
     pub terminator: ControlFlow,
-    pub predecessors: Vec<Label>,
 }
 
 #[derive(Clone)]
 pub struct Function {
     pub name: String,
-    pub params: Vec<(String, &'static TypeInfo)>,
+    pub params: Vec<Register>,
     pub return_type: &'static TypeInfo,
-    pub blocks: HashMap<i64, BasicBlock>,
+    pub blocks: hashbrown::HashMap<i64, BasicBlock>,
     pub entry_block: i64,
     current_block: i64,
     next_reg_id: i64,
@@ -148,7 +407,7 @@ impl Function {
             name,
             params: Vec::new(),
             return_type,
-            blocks: HashMap::new(),
+            blocks: hashbrown::HashMap::new(),
             entry_block: 0,
             current_block: 0,
             next_reg_id: 0,
@@ -190,7 +449,6 @@ impl Function {
                 label: label.clone(),
                 instructions: Vec::new(),
                 terminator: ControlFlow::Return(None),
-                predecessors: Vec::new(),
             },
         );
         label
@@ -308,7 +566,6 @@ impl Function {
                 label: true_label.clone(),
                 instructions: Vec::new(),
                 terminator: ControlFlow::Return(None),
-                predecessors: vec![Label::new("current".to_string(), self.current_block)],
             },
         );
 
@@ -318,7 +575,6 @@ impl Function {
                 label: false_label.clone(),
                 instructions: Vec::new(),
                 terminator: ControlFlow::Return(None),
-                predecessors: vec![Label::new("current".to_string(), self.current_block)],
             },
         );
 
@@ -335,17 +591,214 @@ impl Function {
         }
     }
 
-    pub fn make_phi(&mut self, target: Register, incoming: Vec<(Label, Operand)>) {
+    pub fn make_omega(&mut self, target: Register, writable_blocks: Vec<Label>) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::Omega {
+                target,
+                writable_blocks,
+            });
+        }
+    }
+
+    pub fn make_omikron(&mut self, target: Register, value: Operand) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block
                 .instructions
-                .push(Instruction::Phi { target, incoming });
+                .push(Instruction::Omikron { target, value });
         }
+    }
+
+    pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
+        // Print function signature
+        write!(
+            f,
+            "{} {}(",
+            format_keyword("fn", do_color),
+            if do_color {
+                self.name.white()
+            } else {
+                self.name.as_str().into()
+            }
+        )?;
+
+        for (i, reg) in self.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", format_register(reg, do_color))?;
+        }
+
+        writeln!(f, ") -> {} {{", format_type(self.return_type, do_color))?;
+
+        // TODO: Maybe rework this using a heap instead of a queue, key will be the block id
+        // Print blocks in order, starting with entry block
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = vec![self.entry_block];
+
+        while let Some(block_id) = queue.pop() {
+            if !visited.insert(block_id) {
+                continue;
+            }
+
+            if let Some(block) = self.blocks.get(&block_id) {
+                // Print block label
+                writeln!(f, "{}:", format_label(block.label.name(), do_color))?;
+
+                // Print instructions
+                for inst in &block.instructions {
+                    write!(f, "    ")?;
+                    match inst {
+                        Instruction::Assign { target, value } => {
+                            writeln!(
+                                f,
+                                "{} := {}",
+                                format_register(target, do_color),
+                                format_operand(value, do_color)
+                            )?;
+                        }
+                        Instruction::Binary {
+                            target,
+                            op,
+                            lhs,
+                            rhs,
+                        } => {
+                            writeln!(
+                                f,
+                                "{} := {} {} {}",
+                                format_register(target, do_color),
+                                format_operand(lhs, do_color),
+                                format_binop(op, do_color),
+                                format_operand(rhs, do_color)
+                            )?;
+                        }
+                        Instruction::Unary {
+                            target,
+                            op,
+                            operand,
+                        } => {
+                            writeln!(
+                                f,
+                                "{} := {}{}",
+                                format_register(target, do_color),
+                                format_unop(op, do_color),
+                                format_operand(operand, do_color)
+                            )?;
+                        }
+                        Instruction::Load { target, address } => {
+                            writeln!(
+                                f,
+                                "{} := {} {}",
+                                format_register(target, do_color),
+                                format_keyword("load", do_color),
+                                format_operand(address, do_color)
+                            )?;
+                        }
+                        Instruction::Store { address, value } => {
+                            writeln!(
+                                f,
+                                "{} {} <- {}",
+                                format_keyword("store", do_color),
+                                format_operand(address, do_color),
+                                format_operand(value, do_color)
+                            )?;
+                        }
+                        Instruction::Alloca { target } => {
+                            writeln!(
+                                f,
+                                "{} := {}",
+                                format_register(target, do_color),
+                                format_keyword("alloca", do_color),
+                            )?;
+                        }
+                        Instruction::Call { target, name, args } => {
+                            if let Some(target) = target {
+                                write!(f, "{} := ", format_register(target, do_color))?;
+                            }
+                            write!(f, "{} {}(", format_keyword("call", do_color), name)?;
+                            for (i, arg) in args.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "{}", format_operand(arg, do_color))?;
+                            }
+                            writeln!(f, ")")?;
+                        }
+                        Instruction::Omega {
+                            target,
+                            writable_blocks,
+                        } => {
+                            write!(
+                                f,
+                                "{} := {} [",
+                                format_register(target, do_color),
+                                format_keyword("Ω", do_color)
+                            )?;
+                            for (i, block) in writable_blocks.iter().enumerate() {
+                                if i > 0 {
+                                    write!(f, ", ")?;
+                                }
+                                write!(f, "{}", format_label(block.name(), do_color))?;
+                            }
+                            writeln!(f, "]")?;
+                        }
+                        Instruction::Omikron { target, value } => {
+                            writeln!(
+                                f,
+                                "{} :={} {}",
+                                format_register(target, do_color),
+                                format_keyword("ο", do_color),
+                                format_operand(value, do_color)
+                            )?;
+                        }
+                    }
+                }
+
+                // Print terminator
+                write!(f, "    ")?;
+                match &block.terminator {
+                    ControlFlow::Jump(label) => {
+                        writeln!(
+                            f,
+                            "{} {}",
+                            format_keyword("jump", do_color),
+                            format_label(label.name(), do_color)
+                        )?;
+                        queue.push(label.id());
+                    }
+                    ControlFlow::Branch {
+                        condition,
+                        if_true,
+                        if_false,
+                    } => {
+                        writeln!(
+                            f,
+                            "{} {} ? {} : {}",
+                            format_keyword("branch", do_color),
+                            format_operand(condition, do_color),
+                            format_label(if_true.name(), do_color),
+                            format_label(if_false.name(), do_color)
+                        )?;
+                        queue.push(if_true.id());
+                        queue.push(if_false.id());
+                    }
+                    ControlFlow::Return(value) => {
+                        write!(f, "{}", format_keyword("return", do_color))?;
+                        if let Some(val) = value {
+                            write!(f, " {}", format_operand(val, do_color))?;
+                        }
+                        writeln!(f)?;
+                    }
+                }
+                writeln!(f)?;
+            }
+        }
+
+        writeln!(f, "}}")
     }
 }
 
 pub struct Module {
-    pub functions: HashMap<String, FunctionDeclarationState>,
+    pub functions: std::collections::HashMap<String, FunctionDeclarationState>,
 }
 
 impl ResourceId for Module {
@@ -367,34 +820,34 @@ impl Module {
         }
     }
 
-    pub fn declare_function(&mut self, name: String, func_type: &'static TypeInfo) {
-        self.functions
-            .insert(name, FunctionDeclarationState::Declared(func_type));
+    pub fn declare_function(&mut self, func: Function) {
+        self.functions.insert(
+            func.name.clone(),
+            FunctionDeclarationState::Declared(Arc::new(func)),
+        );
     }
 
     pub fn define_function(&mut self, func: Function) {
         self.functions.insert(
             func.name.clone(),
-            FunctionDeclarationState::Defined(Box::new(func)),
+            FunctionDeclarationState::Defined(Arc::new(func)),
         );
     }
-}
 
-#[derive(Clone)]
-pub enum FunctionDeclarationState {
-    Declared(&'static TypeInfo),
-    Defined(Box<Function>),
-}
-
-impl fmt::Display for Module {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
         for (name, func_state) in &self.functions {
             match func_state {
-                FunctionDeclarationState::Declared(ty) => {
-                    writeln!(f, "declare {} : {}", name, ty)?;
+                FunctionDeclarationState::Declared(func) => {
+                    writeln!(
+                        f,
+                        "{} {} : {}",
+                        format_keyword("declare", do_color),
+                        name,
+                        format_type(func.return_type, do_color)
+                    )?;
                 }
                 FunctionDeclarationState::Defined(func) => {
-                    write!(f, "{}", func)?;
+                    func.format_yir(do_color, f)?;
                 }
             }
         }
@@ -402,206 +855,116 @@ impl fmt::Display for Module {
     }
 }
 
+#[derive(Clone)]
+pub enum FunctionDeclarationState {
+    Declared(Arc<Function>),
+    Defined(Arc<Function>),
+}
+
+impl fmt::Display for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.format_yir(false, f)
+    }
+}
+
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Print function signature
-        write!(f, "fn {}(", self.name)?;
-        for (i, (param_name, param_type)) in self.params.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{}: {}", param_name, param_type)?;
-        }
-        writeln!(f, ") -> {} {{", self.return_type)?;
-
-        // Track register definitions
-        let mut reg_defs = std::collections::HashMap::new();
-
-        // Print blocks in order, starting with entry block
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = vec![self.entry_block];
-
-        while let Some(block_id) = queue.pop() {
-            if !visited.insert(block_id) {
-                continue;
-            }
-
-            if let Some(block) = self.blocks.get(&block_id) {
-                // Print block label (without : prefix as this is the definition)
-                writeln!(f, "{}:", block.label.name())?;
-
-                // Print instructions
-                for inst in &block.instructions {
-                    write!(f, "    ")?;
-                    match inst {
-                        Instruction::Assign { target, value } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(f, "{} := {}", reg_name, print_operand(value, &reg_defs))?;
-                        }
-                        Instruction::Binary {
-                            target,
-                            op,
-                            lhs,
-                            rhs,
-                        } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(
-                                f,
-                                "{} := {} {} {}",
-                                reg_name,
-                                print_operand(lhs, &reg_defs),
-                                print_binop(op),
-                                print_operand(rhs, &reg_defs)
-                            )?;
-                        }
-                        Instruction::Unary {
-                            target,
-                            op,
-                            operand,
-                        } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(
-                                f,
-                                "{} := {}{}",
-                                reg_name,
-                                print_unop(op),
-                                print_operand(operand, &reg_defs)
-                            )?;
-                        }
-                        Instruction::Load { target, address } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(
-                                f,
-                                "{} := load {}",
-                                reg_name,
-                                print_operand(address, &reg_defs)
-                            )?;
-                        }
-                        Instruction::Store { address, value } => {
-                            writeln!(
-                                f,
-                                "store {} <- {}",
-                                print_operand(address, &reg_defs),
-                                print_operand(value, &reg_defs)
-                            )?;
-                        }
-                        Instruction::Alloca { target } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(f, "{} := alloca {}", reg_name, target.ty())?;
-                        }
-                        Instruction::Call { target, name, args } => {
-                            if let Some(target) = target {
-                                let reg_name = print_register(target, &mut reg_defs);
-                                write!(f, "{} := ", reg_name)?;
-                            }
-                            write!(f, "call {}(", name)?;
-                            for (i, arg) in args.iter().enumerate() {
-                                if i > 0 {
-                                    write!(f, ", ")?;
-                                }
-                                write!(f, "{}", print_operand(arg, &reg_defs))?;
-                            }
-                            writeln!(f, ")")?;
-                        }
-                        Instruction::Phi { target, incoming } => {
-                            let reg_name = print_register(target, &mut reg_defs);
-                            writeln!(f, "{} := phi {{", reg_name)?;
-                            for (label, operand) in incoming.iter() {
-                                writeln!(
-                                    f,
-                                    "    {} -> {}",
-                                    label.name(),
-                                    print_operand(operand, &reg_defs)
-                                )?;
-                            }
-                            writeln!(f, "}}")?;
-                        }
-                    }
-                }
-
-                // Print terminator
-                write!(f, "    ")?;
-                match &block.terminator {
-                    ControlFlow::Jump(label) => {
-                        writeln!(f, "jump :{}", label.name())?;
-                        queue.push(label.id());
-                    }
-                    ControlFlow::Branch {
-                        condition,
-                        if_true,
-                        if_false,
-                    } => {
-                        writeln!(
-                            f,
-                            "branch {} ? :{} : :{}",
-                            print_operand(condition, &reg_defs),
-                            if_true.name(),
-                            if_false.name()
-                        )?;
-                        queue.push(if_true.id());
-                        queue.push(if_false.id());
-                    }
-                    ControlFlow::Return(value) => {
-                        write!(f, "return")?;
-                        if let Some(val) = value {
-                            write!(f, " {}", print_operand(val, &reg_defs))?;
-                        }
-                        writeln!(f)?;
-                    }
-                }
-                writeln!(f)?;
-            }
-        }
-
-        writeln!(f, "}}")
+        self.format_yir(false, f)
     }
 }
 
-fn print_register(
-    reg: &Register,
-    reg_defs: &mut std::collections::HashMap<String, usize>,
-) -> String {
+// Helper functions for formatting
+fn format_type(ty: &TypeInfo, do_color: bool) -> String {
+    let s = format!("@{}", ty);
+    colorize(&s, "type", do_color)
+}
+
+fn format_register(reg: &Register, do_color: bool) -> String {
     let base_name = reg.name();
-    let count = reg_defs.entry(base_name.to_string()).or_insert(0);
-    let result = if *count == 0 {
+    let name = if reg.id() == 0 {
         base_name.to_string()
     } else {
-        format!("{}.{}", base_name, count)
+        format!("{}.{}", base_name, reg.id())
     };
-    *count += 1;
-    result
+    format!(
+        "{}{}",
+        colorize(&name, "register", do_color),
+        format_type(reg.ty(), do_color)
+    )
 }
 
-fn print_operand(op: &Operand, reg_defs: &std::collections::HashMap<String, usize>) -> String {
+fn format_operand(op: &Operand, do_color: bool) -> String {
     match op {
-        Operand::I64Const(n) => n.to_string(),
-        Operand::F32Const(f) => format!("{}f32", f),
-        Operand::F64Const(f) => format!("{}f64", f),
-        Operand::BoolConst(b) => b.to_string(),
+        Operand::I64Const(n) => {
+            format!(
+                "{}{}",
+                colorize(&n.to_string(), "constant", do_color),
+                colorize("@i64", "type", do_color)
+            )
+        }
+        Operand::F32Const(f) => {
+            format!(
+                "{}{}",
+                colorize(&f.to_string(), "constant", do_color),
+                colorize("@f32", "type", do_color)
+            )
+        }
+        Operand::F64Const(f) => {
+            format!(
+                "{}{}",
+                colorize(&f.to_string(), "constant", do_color),
+                colorize("@f64", "type", do_color)
+            )
+        }
+        Operand::BoolConst(b) => {
+            format!(
+                "{}{}",
+                colorize(&b.to_string(), "constant", do_color),
+                colorize("@bool", "type", do_color)
+            )
+        }
         Operand::Register(reg) => {
-            let count = reg_defs.get(reg.name()).unwrap_or(&0);
-            if *count <= 1 {
+            let name = if reg.id() == 0 {
                 reg.name().to_string()
             } else {
-                format!("{}.{}", reg.name(), count - 1)
-            }
+                format!("{}.{}", reg.name(), reg.id())
+            };
+            format!(
+                "{}{}",
+                colorize(&name, "register", do_color),
+                format_type(reg.ty(), do_color)
+            )
         }
-        Operand::NoOp => "nop".to_string(),
+        Operand::NoOp => colorize("nop", "operator", do_color),
     }
 }
 
-fn print_binop(op: &BinOp) -> &'static str {
-    match op {
+fn format_keyword(keyword: &str, do_color: bool) -> String {
+    colorize(keyword, "keyword", do_color)
+}
+
+fn format_label(label: &str, do_color: bool) -> String {
+    format!(":{}", colorize(label, "label", do_color))
+}
+
+fn format_operator(op: &str, do_color: bool) -> String {
+    colorize(op, "operator", do_color)
+}
+
+fn format_binop(op: &BinOp, do_color: bool) -> String {
+    let op_str = match op {
         BinOp::Add => "+",
         BinOp::Sub => "-",
         BinOp::Mul => "*",
         BinOp::Div => "/",
         BinOp::Eq => "==",
-    }
+    };
+    format_operator(op_str, do_color)
 }
 
-fn print_unop(op: &UnaryOp) -> &'static str {
-    match op {
+fn format_unop(op: &UnaryOp, do_color: bool) -> String {
+    let op_str = match op {
         UnaryOp::Neg => "-",
-    }
+    };
+    format_operator(op_str, do_color)
 }

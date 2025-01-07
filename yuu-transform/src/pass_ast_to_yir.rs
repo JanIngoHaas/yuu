@@ -4,12 +4,13 @@ use yuu_shared::{
     },
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
-    yir::{self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp},
+    yir::{self, BinOp as YirBinOp, Function, Module, Operand, Register, UnaryOp as YirUnaryOp},
 };
 
 pub struct TransientData<'a> {
     pub function: Function,
     type_table: &'a TypeInfoTable,
+    bindings: std::collections::HashMap<String, Register>,
 }
 
 impl TransientData<'_> {
@@ -17,7 +18,19 @@ impl TransientData<'_> {
         self.type_table.types.get(&node_id).unwrap()
     }
 
-    fn lower_expr(&mut self, expr: &ExprNode) -> Operand {
+    fn lower_binding(&mut self, binding: &BindingNode, value: Operand) {
+        match binding {
+            BindingNode::Ident(ident_binding) => {
+                let ty = self.get_type(ident_binding.id);
+                let target = self.function.make_alloca(ident_binding.name.clone(), ty);
+                self.function
+                    .make_store(Operand::Register(target.clone()), value);
+                self.bindings.insert(ident_binding.name.clone(), target);
+            }
+        }
+    }
+
+    fn lower_expr(&mut self, expr: &ExprNode, block_level: u64) -> Operand {
         match expr {
             ExprNode::Literal(lit) => match &lit.lit {
                 yuu_shared::token::Token {
@@ -40,8 +53,8 @@ impl TransientData<'_> {
             },
 
             ExprNode::Binary(bin_expr) => {
-                let lhs = self.lower_expr(&bin_expr.left);
-                let rhs = self.lower_expr(&bin_expr.right);
+                let lhs = self.lower_expr(&bin_expr.left, block_level);
+                let rhs = self.lower_expr(&bin_expr.right, block_level);
                 let ty = self.get_type(bin_expr.id);
 
                 let op = match bin_expr.op {
@@ -59,7 +72,7 @@ impl TransientData<'_> {
             }
 
             ExprNode::Unary(un_expr) => {
-                let operand = self.lower_expr(&un_expr.operand);
+                let operand = self.lower_expr(&un_expr.operand, block_level);
                 let ty = self.get_type(un_expr.id);
 
                 match un_expr.op {
@@ -74,47 +87,57 @@ impl TransientData<'_> {
             }
 
             ExprNode::If(if_expr) => {
-                let cond = self.lower_expr(&if_expr.if_block.condition);
+                let cond = self.lower_expr(&if_expr.if_block.condition, block_level);
                 let (then_label, else_label) = self.function.branch(cond);
                 let merge_label = self.function.add_block("merge".to_string());
 
+                // Create Omega node for the result
+                let ty = self.get_type(if_expr.id);
+                let result = self.function.fresh_register("if_result".to_string(), ty);
+                self.function
+                    .make_omega(result.clone(), vec![then_label.clone(), else_label.clone()]);
+
                 // Then block
                 self.function.set_current_block(&then_label);
-                let then_value = self.lower_expr(&if_expr.if_block.body);
+                let then_value = self.lower_expr(&if_expr.if_block.body, block_level + 1);
+                self.function.make_omikron(result.clone(), then_value);
                 self.function
                     .set_terminator(yir::ControlFlow::Jump(merge_label.clone()));
+
+                // TODO: Else-If blocks
 
                 // Else block
                 self.function.set_current_block(&else_label);
                 let else_value = if let Some(else_block) = &if_expr.else_block {
-                    self.lower_expr(else_block)
+                    self.lower_expr(&else_block, block_level + 1)
                 } else {
                     Operand::NoOp
                 };
+                self.function.make_omikron(result.clone(), else_value);
                 self.function
                     .set_terminator(yir::ControlFlow::Jump(merge_label.clone()));
 
-                // Merge block
+                // Continue in merge block
                 self.function.set_current_block(&merge_label);
-                let ty = self.get_type(if_expr.id);
-                let result = self.function.fresh_register("if_result".to_string(), ty);
-
-                // Create phi node with values from both paths
-                self.function.make_phi(
-                    result.clone(),
-                    vec![(then_label, then_value), (else_label, else_value)],
-                );
 
                 Operand::Register(result)
             }
 
             ExprNode::Ident(ident_expr) => {
-                let ty = self.get_type(ident_expr.id);
-                let result = self.function.fresh_register(ident_expr.ident.clone(), ty);
-                Operand::Register(result)
+                if let Some(reg) = self.bindings.get(&ident_expr.ident) {
+                    let ty = self.get_type(ident_expr.id);
+                    let result = self.function.make_load(
+                        "load_result".to_string(),
+                        Operand::Register(reg.clone()),
+                        ty,
+                    );
+                    Operand::Register(result)
+                } else {
+                    panic!("Identifier not found in bindings: {}", ident_expr.ident);
+                }
             }
 
-            ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
+            ExprNode::Block(block_expr) => self.lower_block_expr(block_expr, block_level + 1),
 
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
@@ -125,7 +148,7 @@ impl TransientData<'_> {
                 let args: Vec<_> = func_call_expr
                     .args
                     .iter()
-                    .map(|arg| self.lower_expr(arg))
+                    .map(|arg| self.lower_expr(arg, block_level))
                     .collect();
 
                 let return_type = self.get_type(func_call_expr.id);
@@ -142,40 +165,38 @@ impl TransientData<'_> {
         }
     }
 
-    fn lower_binding(&mut self, binding: &BindingNode, value: Operand) {
-        match binding {
-            BindingNode::Ident(ident_binding) => {
-                let ty = self.get_type(ident_binding.id);
-                let target = self.function.make_alloca(ident_binding.name.clone(), ty);
-                self.function.make_store(Operand::Register(target), value);
-            }
-        }
-    }
-
-    fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
+    fn lower_block_expr(&mut self, block_expr: &BlockExpr, block_level: u64) -> Operand {
         for stmt in &block_expr.body {
-            if let Some(result) = self.lower_stmt(stmt) {
+            if let Some(result) = self.lower_stmt(stmt, block_level) {
                 return result;
             }
         }
         Operand::NoOp
     }
 
-    fn lower_stmt(&mut self, stmt: &StmtNode) -> Option<Operand> {
+    fn lower_stmt(&mut self, stmt: &StmtNode, block_level: u64) -> Option<Operand> {
         match stmt {
             StmtNode::Let(let_stmt) => {
-                let value = self.lower_expr(&let_stmt.expr);
+                let value = self.lower_expr(&let_stmt.expr, block_level);
                 self.lower_binding(&let_stmt.binding, value);
                 None
             }
             StmtNode::Atomic(expr) => {
-                let _ = self.lower_expr(expr);
+                let _ = self.lower_expr(expr, block_level);
                 None
             }
             StmtNode::Return(ret) => {
-                let value = self.lower_expr(&ret.expr);
+                let value = self.lower_expr(&ret.expr, block_level);
                 match ret.kind {
-                    yuu_shared::ast::ReturnStmtKind::ReturnFromBlock => Some(value),
+                    yuu_shared::ast::ReturnStmtKind::ReturnFromBlock => {
+                        if block_level > 0 {
+                            Some(value)
+                        } else {
+                            self.function
+                                .set_terminator(yir::ControlFlow::Return(Some(value)));
+                            None
+                        }
+                    }
                     yuu_shared::ast::ReturnStmtKind::ReturnFromFunction => {
                         self.function
                             .set_terminator(yir::ControlFlow::Return(Some(value)));
@@ -208,11 +229,13 @@ impl PassAstToYir {
             match node.as_ref() {
                 StructuralNode::FuncDecl(func_decl) => {
                     let ty = tit.types[&func_decl.id];
-                    module.declare_function(func_decl.name.clone(), ty);
+                    let func = Function::new(func_decl.name.clone(), ty);
+                    module.declare_function(func);
                 }
                 StructuralNode::FuncDef(func_def) => {
                     let ty = tit.types[&func_def.id];
-                    module.declare_function(func_def.decl.name.clone(), ty);
+                    let func = Function::new(func_def.decl.name.clone(), ty);
+                    module.declare_function(func);
                 }
             }
         }
@@ -230,6 +253,7 @@ impl PassAstToYir {
             let mut data = TransientData {
                 function: Function::new(func.decl.name.clone(), return_type),
                 type_table: tit,
+                bindings: std::collections::HashMap::new(),
             };
 
             // Add parameters
@@ -237,10 +261,13 @@ impl PassAstToYir {
                 let (ty, name) = match &arg.binding {
                     BindingNode::Ident(id) => (data.get_type(id.id), id.name.clone()),
                 };
-                data.function.params.push((name, ty));
+                let param = data.function.fresh_register(name.clone(), ty);
+                data.function.params.push(param.clone());
+                // Use lower_binding to handle parameter storage consistently
+                data.lower_binding(&arg.binding, Operand::Register(param));
             }
 
-            data.lower_block_expr(&func.body);
+            data.lower_block_expr(&func.body, 0);
             module.define_function(data.function);
         }
 
