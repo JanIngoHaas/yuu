@@ -147,7 +147,7 @@ pub struct ReturnStmt {
     pub id: NodeId, // Add this field
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IdentBinding {
     pub id: NodeId,
     pub span: Span,

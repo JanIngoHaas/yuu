@@ -63,7 +63,8 @@ impl Pass for PassCollectDecls {
 
     fn install(self, schedule: &mut yuu_shared::scheduler::Schedule) {
         schedule.requires_resource_read::<AST>(&self);
-        schedule.produces_resource::<RootBlock>(&self);
+        schedule.produces_resource::<Box<RootBlock>>(&self);
+        schedule.produces_resource::<TypeInfoTable>(&self);
         schedule.add_pass(self);
     }
 

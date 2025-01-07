@@ -11,6 +11,12 @@ pub struct Context {
     passes_data: HashMap<&'static str, Arc<dyn Any + Send + Sync + 'static>>,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Context {
     pub fn new() -> Self {
         Self {

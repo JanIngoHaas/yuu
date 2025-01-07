@@ -1,9 +1,7 @@
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::TypeInfo;
 use hashbrown::HashMap;
-use std::cell::RefCell;
-use std::fmt::{self, Write};
-use std::rc::Rc;
+use std::fmt;
 
 #[derive(Clone)]
 pub struct Register {
@@ -32,7 +30,7 @@ impl Register {
     }
 
     pub fn ty(&self) -> &'static TypeInfo {
-        &self.ty
+        self.ty
     }
 }
 
@@ -356,6 +354,12 @@ impl ResourceId for Module {
     }
 }
 
+impl Default for Module {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Module {
     pub fn new() -> Self {
         Self {
@@ -502,7 +506,7 @@ impl fmt::Display for Function {
                         Instruction::Phi { target, incoming } => {
                             let reg_name = print_register(target, &mut reg_defs);
                             writeln!(f, "{} := phi {{", reg_name)?;
-                            for (i, (label, operand)) in incoming.iter().enumerate() {
+                            for (label, operand) in incoming.iter() {
                                 writeln!(
                                     f,
                                     "    {} -> {}",

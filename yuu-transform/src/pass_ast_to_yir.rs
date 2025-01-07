@@ -187,15 +187,15 @@ impl TransientData<'_> {
     }
 }
 
-pub struct AstToYirPass;
+pub struct PassAstToYir;
 
-impl Default for AstToYirPass {
+impl Default for PassAstToYir {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AstToYirPass {
+impl PassAstToYir {
     pub fn new() -> Self {
         Self
     }
@@ -234,13 +234,10 @@ impl AstToYirPass {
 
             // Add parameters
             for arg in &func.decl.args {
-                let ty = tit.types[&arg.id];
-                data.function.params.push((
-                    match &arg.binding {
-                        BindingNode::Ident(id) => id.name.clone(),
-                    },
-                    ty,
-                ));
+                let (ty, name) = match &arg.binding {
+                    BindingNode::Ident(id) => (data.get_type(id.id), id.name.clone()),
+                };
+                data.function.params.push((name, ty));
             }
 
             data.lower_block_expr(&func.body);
@@ -251,7 +248,7 @@ impl AstToYirPass {
     }
 }
 
-impl Pass for AstToYirPass {
+impl Pass for PassAstToYir {
     fn run(&self, context: &mut yuu_shared::context::Context) -> anyhow::Result<()> {
         let ast = context.require_pass_data::<AST>(self);
         let ast = ast.lock().unwrap();

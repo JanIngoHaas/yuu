@@ -1,18 +1,16 @@
 // Here, we define the built-in functions etc. that are already present in the language.
 
-use std::cell::RefCell;
-
 use super::Span;
 
 use crate::ast::NodeId;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BindingInfo {
     pub id: NodeId,
     pub src_location: Option<Span>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BindingInfoKind {
     Ambiguous(Vec<BindingInfo>), // Probably function overloading
     Unique(BindingInfo),

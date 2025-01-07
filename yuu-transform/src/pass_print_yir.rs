@@ -4,15 +4,15 @@ use yuu_shared::{
     yir::Module,
 };
 
-pub struct YirToStringPass;
+pub struct PassYirToString;
 
-impl Default for YirToStringPass {
+impl Default for PassYirToString {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl YirToStringPass {
+impl PassYirToString {
     pub fn new() -> Self {
         Self
     }
@@ -26,7 +26,7 @@ impl ResourceId for YirTextualRepresentation {
     }
 }
 
-impl Pass for YirToStringPass {
+impl Pass for PassYirToString {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
         let module = context.require_pass_data::<Module>(self);
         let module = module.lock().unwrap();
@@ -43,5 +43,66 @@ impl Pass for YirToStringPass {
 
     fn get_name(&self) -> &'static str {
         "YirToString"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
+        pass_type_inference::PassTypeInference,
+    };
+    use yuu_parse::{lexer::UnprocessedCodeInfo, pass_parse::ParsePass};
+    use yuu_shared::scheduler::{Schedule, Scheduler};
+
+    #[test]
+    fn test_fac_yir() {
+        // Create the factorial function code
+        let code_info = UnprocessedCodeInfo {
+            code: Arc::from(
+                r#"fn fac(n: i64) -> i64 {
+                out if n == 0 {
+                    out 1;
+                }
+                else {
+                    let n_out = n * fac(n - 1);
+                    out n_out;
+                };
+            }"#,
+            ),
+            file_name: Arc::from("test.yuu"),
+        };
+
+        // Create a new context and add the code info
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+
+        // Create and configure the schedule
+        let mut schedule = Schedule::new();
+
+        // Add passes in the correct order
+        ParsePass.install(&mut schedule);
+        PassCollectDecls::new().install(&mut schedule);
+        PassTypeInference::new().install(&mut schedule);
+        PassAstToYir::new().install(&mut schedule);
+        PassYirToString::new().install(&mut schedule);
+
+        // Print the pass dependency graph in DOT format
+        println!("Pass Dependency Graph (DOT format):");
+        schedule.print_dot();
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.require_pass_data::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR:\n{}", yir_output.0);
     }
 }

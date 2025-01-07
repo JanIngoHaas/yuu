@@ -15,7 +15,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(code_info: &'a UnprocessedCodeInfo) -> Self {
         Self {
-            lexer: Lexer::new(&code_info),
+            lexer: Lexer::new(code_info),
         }
     }
 

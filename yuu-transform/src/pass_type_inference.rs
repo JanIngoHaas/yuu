@@ -4,6 +4,7 @@ use yuu_shared::{
     binding_info::{BindingInfo, BindingInfoKind},
     block::{Block, FunctionOverloadError, RootBlock},
     context::Context,
+    graphviz_output::ToGraphviz,
     scheduler::Pass,
     type_info::{
         primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, FunctionType,
@@ -112,6 +113,10 @@ impl PassTypeInference {
                 }
             }
         };
+        // Add the type to the type info table
+        data.type_info_table
+            .types
+            .insert(ty.node_id(), semantic_type);
         Ok(semantic_type)
     }
 
@@ -175,7 +180,6 @@ impl PassTypeInference {
                 let rhs = Self::infer_expr(&binary_expr.right, block, data, None)?;
 
                 let op_name = binary_expr.op.static_name();
-
                 let ty = block
                     .resolve_function(op_name, data.type_info_table, &[lhs, rhs], |_, func| {
                         func.ret
@@ -192,7 +196,7 @@ impl PassTypeInference {
 
                 let result_ty = block
                     .resolve_function(op_name, data.type_info_table, &[ty], |_, func| func.ret)
-                    .map_err(|err| panic!("User bug: Function overload error"))?;
+                    .map_err(|_err| panic!("User bug: Function overload error"))?;
 
                 data.type_info_table.types.insert(unary_expr.id, result_ty);
 
@@ -373,7 +377,7 @@ impl PassTypeInference {
                             ident_binding.id,
                             ident_binding.span.clone(),
                         );
-
+                        println!("ident_binding: {:?}\n\n\n", ident_binding);
                         ty_info_table.types.insert(ident_binding.id, ty);
 
                         Ok(())
@@ -473,7 +477,7 @@ pub fn resolve_function_overload(
     actual_args: &[&'static TypeInfo],
 ) -> Result<BindingInfo, FunctionOverloadError> {
     for candidate in candidate_funcs {
-        if let TypeInfo::Function(func) = type_info_table.types[&candidate.id] {
+        if let Some(TypeInfo::Function(func)) = type_info_table.types.get(&candidate.id) {
             // Check if argument lengths match
             if func.args.len() != actual_args.len() {
                 continue;
@@ -534,17 +538,20 @@ pub fn resolve_function_overload(
 
 impl Pass for PassTypeInference {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let root_block = context.require_pass_data::<RootBlock>(self);
+        let root_block = context.require_pass_data::<Box<RootBlock>>(self);
         let ast = context.require_pass_data::<AST>(self);
+        let type_info_table = context.require_pass_data::<TypeInfoTable>(self);
 
         let mut root_block = root_block.lock().unwrap();
-        let mut type_info_table = TypeInfoTable::new();
         let ast = ast.lock().unwrap();
         let ast = &*ast;
 
+        let mut type_info_table = type_info_table.lock().unwrap();
+        let type_info_table = &mut *type_info_table;
+
         let mut data = TransientData {
             ast,
-            type_info_table: &mut type_info_table,
+            type_info_table,
         };
 
         for node in &ast.structurals {
@@ -558,13 +565,14 @@ impl Pass for PassTypeInference {
     where
         Self: Sized,
     {
-        schedule.requires_resource_write::<RootBlock>(&self);
-        schedule.produces_resource::<TypeInfoTable>(&self);
+        schedule.requires_resource_read::<AST>(&self);
+        schedule.requires_resource_write::<Box<RootBlock>>(&self);
+        schedule.requires_resource_write::<TypeInfoTable>(&self);
         schedule.add_pass(self);
     }
 
     fn get_name(&self) -> &'static str {
-        todo!()
+        "TypeInference"
     }
 }
 

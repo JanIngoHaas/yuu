@@ -1,11 +1,4 @@
-use std::{
-    cell::{LazyCell, RefCell},
-    fmt::Display,
-    hash::Hasher,
-    ops::Deref,
-    rc::Rc,
-    sync::{Arc, LazyLock},
-};
+use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use std::hash::Hash;
 
@@ -16,7 +9,7 @@ use crate::{
 };
 use scc::HashMap;
 
-struct GiveMePtrHashes<T: 'static>(&'static T);
+pub struct GiveMePtrHashes<T: 'static>(&'static T);
 
 impl<T> Hash for GiveMePtrHashes<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -28,7 +21,7 @@ impl<T> Hash for GiveMePtrHashes<T> {
 
 impl<T> PartialEq for GiveMePtrHashes<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.0 as *const T == other.0 as *const T
+        std::ptr::eq(self.0, other.0)
     }
 }
 
@@ -41,7 +34,7 @@ impl<T> Deref for GiveMePtrHashes<T> {
 }
 
 impl<T> Eq for GiveMePtrHashes<T> {}
-enum TypeCombination {
+pub enum TypeCombination {
     Pointer(GiveMePtrHashes<TypeInfo>),
     Function(Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>),
 }
@@ -111,6 +104,12 @@ impl From<PrimitiveType> for &'static TypeInfo {
     }
 }
 
+impl Default for TypeInterner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeInterner {
     pub fn new() -> Self {
         Self {
@@ -118,7 +117,7 @@ impl TypeInterner {
         }
     }
 
-    pub fn ptr_to(self: &'static Self, ty: &'static TypeInfo) -> &'static TypeInfo {
+    pub fn ptr_to(&'static self, ty: &'static TypeInfo) -> &'static TypeInfo {
         let key = TypeCombination::Pointer(GiveMePtrHashes(ty));
         let out = self
             .combination_to_type
@@ -130,7 +129,7 @@ impl TypeInterner {
     }
 
     pub fn function_type(
-        self: &'static Self,
+        &'static self,
         args: &[&'static TypeInfo],
         ret: &'static TypeInfo,
     ) -> &'static TypeInfo {
@@ -151,9 +150,9 @@ impl TypeInterner {
     }
 }
 
-static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(|| TypeInterner::new());
+static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(TypeInterner::new);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TypeInfoTable {
     pub types: hashbrown::HashMap<NodeId, &'static TypeInfo>,
 }
@@ -178,7 +177,7 @@ impl TypeInfoTable {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Clone, PartialEq, Eq, Copy, Debug)]
 pub enum PrimitiveType {
     I64,
     F32,
@@ -211,7 +210,7 @@ impl Display for FunctionType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionType {
     pub args: Vec<&'static TypeInfo>,
     pub ret: &'static TypeInfo,
@@ -235,7 +234,7 @@ pub enum AmbiguousTypeInfo {
     Unresolved(Box<Vec<BindingInfo>>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TypeInfo {
     BuiltIn(PrimitiveType),
     Function(FunctionType),
@@ -252,18 +251,15 @@ impl TypeInfo {
     }
 
     pub fn is_nil(&self) -> bool {
-        match self {
-            TypeInfo::BuiltIn(PrimitiveType::Nil) => true,
-            _ => false,
-        }
+        matches!(self, TypeInfo::BuiltIn(PrimitiveType::Nil))
     }
 
-    pub fn ptr_to(self: &'static Self) -> &'static Self {
+    pub fn ptr_to(&'static self) -> &'static Self {
         TYPE_CACHE.ptr_to(self)
     }
 
     pub fn is_exact_same_type(&self, other: &'static Self) -> bool {
-        self as *const TypeInfo == other as *const TypeInfo
+        std::ptr::eq(self, other)
     }
 
     pub fn does_coerce_to_same_type(&self, other: &TypeInfo) -> bool {
@@ -278,7 +274,7 @@ impl TypeInfo {
                         return false;
                     }
                 }
-                a.ret.does_coerce_to_same_type(&b.ret)
+                a.ret.does_coerce_to_same_type(b.ret)
             }
             (TypeInfo::Pointer(a), TypeInfo::Pointer(b)) => a.does_coerce_to_same_type(b),
             //(TypeInfo::FunctionGroup(_), _) | (_, TypeInfo::FunctionGroup(_)) => false,

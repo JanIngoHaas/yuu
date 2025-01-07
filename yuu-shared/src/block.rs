@@ -6,10 +6,6 @@ use crate::{
     type_info::{FunctionType, PrimitiveType, TypeInfo, TypeInfoTable},
 };
 use hashbrown::HashMap;
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::Cell;
-use std::marker::PhantomData;
-use std::ops::DerefMut;
 
 use crate::semantic_error::SemanticError;
 
@@ -23,7 +19,7 @@ pub struct Block {
 
 unsafe impl Send for RootBlock {}
 
-impl ResourceId for RootBlock {
+impl ResourceId for Box<RootBlock> {
     fn resource_name() -> &'static str {
         "RootBlock"
     }
@@ -42,27 +38,27 @@ pub struct RootBlock {
 }
 
 impl RootBlock {
-    pub fn new(tyt: &mut TypeInfoTable) -> Self {
+    pub fn new(tyt: &mut TypeInfoTable) -> Box<Self> {
         let mut arena = Vec::new();
 
-        let mut root = Block {
+        let mut top_level_block = Block {
             bindings: HashMap::new(),
             parent: None,
             root_block: std::ptr::null_mut(),
             id: 0,
         };
 
-        root.predefine_builtins(tyt);
+        top_level_block.predefine_builtins(tyt);
 
-        arena.push(root);
+        arena.push(top_level_block);
 
-        let mut out = Self {
+        let mut root = Box::new(Self {
             root: arena.len() - 1,
             arena,
-        };
+        });
 
-        out.arena[0].root_block = &mut out;
-        out
+        root.arena[0].root_block = &mut *root;
+        root
     }
 
     pub fn root(&self) -> &Block {
@@ -108,7 +104,7 @@ impl Block {
         let child = Block {
             bindings: HashMap::new(),
             parent: Some(id),
-            root_block: root_block,
+            root_block,
             id: len,
         };
         root_block.arena.push(child);
@@ -195,11 +191,11 @@ impl Block {
         self.register_binary_op(tyt, "eq", -9, PrimitiveType::F64, PrimitiveType::Bool);
     }
 
-    pub fn resolve_function<'a, T>(
+    pub fn resolve_function<T>(
         &self,
         name: &str,
         type_info_table: &TypeInfoTable,
-        args: &'a [&'static TypeInfo],
+        args: &[&'static TypeInfo],
         resolve_ret_type: T,
     ) -> Result<&'static TypeInfo, FunctionOverloadError>
     where
@@ -233,6 +229,8 @@ impl Block {
                 }
             }
             BindingInfoKind::Ambiguous(funcs) => {
+                println!("funcs: {:?}", funcs);
+                println!("type_info_table: {:?}", type_info_table);
                 for func in funcs.iter() {
                     let func_type = type_info_table
                         .types
@@ -291,16 +289,13 @@ impl Block {
     }
 }
 
-const MAX_SIMILAR_NAMES: u64 = 3;
-const MIN_DST_SIMILAR_NAMES: u64 = 3;
-
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let len1 = s1.chars().count();
     let len2 = s2.chars().count();
     let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
 
-    for i in 0..=len1 {
-        matrix[i][0] = i;
+    for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
+        row[0] = i;
     }
     for j in 0..=len2 {
         matrix[0][j] = j;
