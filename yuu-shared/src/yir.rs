@@ -3,8 +3,9 @@ use crate::type_info::{
     primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
 };
 use colored::Colorize;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /*
@@ -26,25 +27,37 @@ enum ColorSupport {
 
 impl ColorSupport {
     fn detect() -> Self {
-        // Check NO_COLOR environment variable
+        // Check NO_COLOR first - respect user preferences
         if std::env::var("NO_COLOR").is_ok() {
             return ColorSupport::NoColor;
         }
 
-        // Check COLORTERM
+        // Check for true color support via COLORTERM
         if let Ok(colorterm) = std::env::var("COLORTERM") {
             if colorterm.contains("truecolor") || colorterm.contains("24bit") {
                 return ColorSupport::TrueColor;
             }
         }
 
-        // Check TERM
+        // On Windows, check for Windows Terminal or ConEmu
+        #[cfg(windows)]
+        {
+            if std::env::var("WT_SESSION").is_ok() || std::env::var("ConEmuANSI").is_ok() {
+                return ColorSupport::TrueColor;
+            }
+        }
+
+        // Check for TERM that might indicate advanced color support
         if let Ok(term) = std::env::var("TERM") {
+            if term.contains("24bit") || term.contains("direct") {
+                return ColorSupport::TrueColor;
+            }
             if term.contains("256color") {
                 return ColorSupport::Color256;
             }
         }
 
+        // Default to basic colors if no better support detected
         ColorSupport::Basic
     }
 }
@@ -231,13 +244,27 @@ fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
     CURRENT_PALETTE.with(|palette| {
         let palette = palette.borrow();
         let rgb = palette.get_color(color_key);
+        let RGB(r, g, b) = rgb;
+
+        // Always try true color first in Windows Terminal
+        #[cfg(windows)]
+        if std::env::var("WT_SESSION").is_ok() {
+            return text.truecolor(r, g, b).to_string();
+        }
 
         match palette.color_support {
-            ColorSupport::TrueColor => {
-                let RGB(r, g, b) = rgb;
-                text.truecolor(r, g, b).to_string()
+            ColorSupport::NoColor => text.to_string(),
+            ColorSupport::TrueColor => text.truecolor(r, g, b).to_string(),
+            ColorSupport::Color256 => {
+                // For 256 color mode, use the closest ANSI color
+                let color = palette.get_fallback_color(rgb);
+                text.color(color).to_string()
             }
-            _ => text.color(palette.get_fallback_color(rgb)).to_string(),
+            ColorSupport::Basic => {
+                // For basic mode, use the closest ANSI color
+                let color = palette.get_fallback_color(rgb);
+                text.color(color).to_string()
+            }
         }
     })
 }
@@ -248,6 +275,20 @@ pub struct Register {
     id: i64,
     ty: &'static TypeInfo,
 }
+
+impl Hash for Register {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Register {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Register {}
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Label {
@@ -365,19 +406,18 @@ pub enum Instruction {
         target: Register,
         writable_blocks: Vec<Label>,
     },
-    Omikron {
-        target: Register,
-        value: Operand,
-    },
 }
 
 #[derive(Clone)]
 pub enum ControlFlow {
-    Jump(Label),
+    Jump {
+        target: Label,
+        writes: Vec<(Register, Operand)>, // Omikron writes at jump
+    },
     Branch {
         condition: Operand,
-        if_true: Label,
-        if_false: Label,
+        if_true: (Label, Vec<(Register, Operand)>), // Writes for true branch
+        if_false: (Label, Vec<(Register, Operand)>), // Writes for false branch
     },
     Return(Option<Operand>),
 }
@@ -397,24 +437,37 @@ pub struct Function {
     pub blocks: hashbrown::HashMap<i64, BasicBlock>,
     pub entry_block: i64,
     current_block: i64,
+    next_block_label: Option<Label>,
     next_reg_id: i64,
     next_label_id: i64,
+    omega_registers: HashMap<Register, Vec<Label>>, // Track omega register writers
 }
 
 impl Function {
     pub fn new(name: String, return_type: &'static TypeInfo) -> Self {
-        let mut f = Self {
+        let mut f = Function {
             name,
             params: Vec::new(),
             return_type,
             blocks: hashbrown::HashMap::new(),
             entry_block: 0,
             current_block: 0,
+            next_block_label: None,
             next_reg_id: 0,
             next_label_id: 0,
+            omega_registers: HashMap::new(),
         };
         f.add_block("entry".to_string());
         f
+    }
+
+    pub fn make_jump_to_next_block_label(&mut self, writes: Vec<(Register, Operand)>) {
+        let next = self
+            .next_block_label
+            .as_ref()
+            .expect("Compiler Error: No next block")
+            .clone();
+        self.make_jump(next, writes);
     }
 
     pub fn fresh_register(&mut self, name: String, ty: &'static TypeInfo) -> Register {
@@ -452,6 +505,44 @@ impl Function {
             },
         );
         label
+    }
+
+    fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Register, Operand)>) {
+        for (reg, _) in writes {
+            self.omega_registers
+                .get_mut(reg)
+                .expect("omega register not found")
+                .push(self.blocks.get(&self.current_block).unwrap().label.clone());
+        }
+    }
+
+    pub fn make_jump(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
+        self.update_omega_writes(writes.iter());
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
+            .terminator = ControlFlow::Jump { target, writes };
+    }
+
+    pub fn make_return(&mut self, value: Option<Operand>) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.terminator = ControlFlow::Return(value);
+        }
+    }
+
+    pub fn set_branch_writes(
+        &mut self,
+        condition: Operand,
+        if_true: (Label, Vec<(Register, Operand)>),
+        if_false: (Label, Vec<(Register, Operand)>),
+    ) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.terminator = ControlFlow::Branch {
+                condition,
+                if_true,
+                if_false,
+            };
+        }
     }
 
     pub fn make_assign(&mut self, target: Register, value: Operand) {
@@ -548,17 +639,47 @@ impl Function {
         Some(target)
     }
 
-    pub fn branch(&mut self, condition: Operand) -> (Label, Label) {
+    pub fn make_branch_to_existing(
+        &mut self,
+        condition: Operand,
+        then: Label,
+        else_: Label,
+        then_writes: Vec<(Register, Operand)>,
+        else_writes: Vec<(Register, Operand)>,
+    ) {
+        self.update_omega_writes(then_writes.iter());
+        self.update_omega_writes(else_writes.iter());
+
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
+            .terminator = ControlFlow::Branch {
+            condition,
+            if_true: (then, Vec::new()),
+            if_false: (else_, Vec::new()),
+        };
+    }
+
+    pub fn make_branch(
+        &mut self,
+        condition: Operand,
+        then_writes: Vec<(Register, Operand)>,
+        else_writes: Vec<(Register, Operand)>,
+    ) -> (Label, Label) {
         let true_label = self.fresh_label("then".to_string());
         let false_label = self.fresh_label("else".to_string());
 
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.terminator = ControlFlow::Branch {
-                condition,
-                if_true: true_label.clone(),
-                if_false: false_label.clone(),
-            };
-        }
+        self.update_omega_writes(then_writes.iter());
+        self.update_omega_writes(else_writes.iter());
+
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
+            .terminator = ControlFlow::Branch {
+            condition,
+            if_true: (true_label.clone(), then_writes),
+            if_false: (false_label.clone(), else_writes),
+        };
 
         self.blocks.insert(
             true_label.id(),
@@ -581,30 +702,42 @@ impl Function {
         (true_label, false_label)
     }
 
-    pub fn set_current_block(&mut self, label: &Label) {
-        self.current_block = label.id();
+    pub fn set_current_block(&mut self, current: &Label, next: Label) {
+        self.current_block = current.id();
+        self.next_block_label = Some(next);
     }
 
-    pub fn set_terminator(&mut self, terminator: ControlFlow) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.terminator = terminator;
-        }
+    pub fn get_next_block_label(&self) -> Option<&Label> {
+        self.next_block_label.as_ref()
     }
 
-    pub fn make_omega(&mut self, target: Register, writable_blocks: Vec<Label>) {
+    pub fn get_next_block_label_forced(&self) -> &Label {
+        self.next_block_label
+            .as_ref()
+            .expect("Compiler Error: No next block")
+    }
+
+    pub fn set_next_as_current(&mut self) {
+        self.current_block = self
+            .next_block_label
+            .as_ref()
+            .expect("Compiler Error: No next block")
+            .id();
+        self.next_block_label = None;
+    }
+
+    // fn set_terminator(&mut self, terminator: ControlFlow) {
+    //     if let Some(block) = self.blocks.get_mut(&self.current_block) {
+    //         block.terminator = terminator;
+    //     }
+    // }
+
+    pub fn make_omega(&mut self, target: Register) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Omega {
                 target,
-                writable_blocks,
+                writable_blocks: Vec::new(),
             });
-        }
-    }
-
-    pub fn make_omikron(&mut self, target: Register, value: Operand) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block
-                .instructions
-                .push(Instruction::Omikron { target, value });
         }
     }
 
@@ -741,45 +874,39 @@ impl Function {
                             }
                             writeln!(f, "]")?;
                         }
-                        Instruction::Omikron { target, value } => {
-                            writeln!(
-                                f,
-                                "{} :={} {}",
-                                format_register(target, do_color),
-                                format_keyword("ο", do_color),
-                                format_operand(value, do_color)
-                            )?;
-                        }
                     }
                 }
 
                 // Print terminator
                 write!(f, "    ")?;
                 match &block.terminator {
-                    ControlFlow::Jump(label) => {
+                    ControlFlow::Jump { target, writes } => {
                         writeln!(
                             f,
-                            "{} {}",
+                            "{} {} {}",
                             format_keyword("jump", do_color),
-                            format_label(label.name(), do_color)
+                            format_label(target.name(), do_color),
+                            format_omikron_writes(writes, do_color)
                         )?;
-                        queue.push(label.id());
+                        queue.push(target.id());
                     }
                     ControlFlow::Branch {
                         condition,
-                        if_true,
-                        if_false,
+                        if_true: (true_label, true_writes),
+                        if_false: (false_label, false_writes),
                     } => {
                         writeln!(
                             f,
-                            "{} {} ? {} : {}",
+                            "{} {} ? {} {}, {} {}",
                             format_keyword("branch", do_color),
                             format_operand(condition, do_color),
-                            format_label(if_true.name(), do_color),
-                            format_label(if_false.name(), do_color)
+                            format_label(true_label.name(), do_color),
+                            format_omikron_writes(true_writes, do_color),
+                            format_label(false_label.name(), do_color),
+                            format_omikron_writes(false_writes, do_color)
                         )?;
-                        queue.push(if_true.id());
-                        queue.push(if_false.id());
+                        queue.push(true_label.id());
+                        queue.push(false_label.id());
                     }
                     ControlFlow::Return(value) => {
                         write!(f, "{}", format_keyword("return", do_color))?;
@@ -798,7 +925,7 @@ impl Function {
 }
 
 pub struct Module {
-    pub functions: std::collections::HashMap<String, FunctionDeclarationState>,
+    pub functions: HashMap<String, FunctionDeclarationState>,
 }
 
 impl ResourceId for Module {
@@ -967,4 +1094,24 @@ fn format_unop(op: &UnaryOp, do_color: bool) -> String {
         UnaryOp::Neg => "-",
     };
     format_operator(op_str, do_color)
+}
+
+// Add helper function for formatting Omikron writes
+fn format_omikron_writes(writes: &[(Register, Operand)], do_color: bool) -> String {
+    if writes.is_empty() {
+        format!("ο{{}}")
+    } else {
+        let writes_str = writes
+            .iter()
+            .map(|(reg, val)| {
+                format!(
+                    "{} = {}",
+                    format_register(reg, do_color),
+                    format_operand(val, do_color)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("ο{{ {} }}", writes_str)
+    }
 }

@@ -1,36 +1,61 @@
+use std::vec;
+
+use yuu_parse::add_ids::GetId;
 use yuu_shared::{
     ast::{
-        BinOp, BindingNode, BlockExpr, ExprNode, NodeId, StmtNode, StructuralNode, UnaryOp, AST,
+        BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, NodeId, StmtNode, StructuralNode, UnaryOp,
+        AST,
     },
+    block::{self, Block, BlockIterator, RootBlock, FUNC_BLOCK_NAME},
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
-    yir::{self, BinOp as YirBinOp, Function, Module, Operand, Register, UnaryOp as YirUnaryOp},
+    yir::{
+        self, BinOp as YirBinOp, ControlFlow, Function, Module, Operand, Register,
+        UnaryOp as YirUnaryOp,
+    },
 };
 
 pub struct TransientData<'a> {
     pub function: Function,
     type_table: &'a TypeInfoTable,
-    bindings: std::collections::HashMap<String, Register>,
+    block: &'a Block,
+    block_iter: BlockIterator<'a>, // Add iterator
+    register_bindings: hashbrown::HashMap<NodeId, Register>,
+    block_labels: hashbrown::HashMap<NodeId, (yir::Label, Register)>, // Maps block ID to its label and omega register
 }
 
-impl TransientData<'_> {
-    fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
-        self.type_table.types.get(&node_id).unwrap()
+impl<'a> TransientData<'a> {
+    fn new(function: Function, type_table: &'a TypeInfoTable, block: &'a Block) -> Self {
+        Self {
+            function,
+            type_table,
+            block,
+            block_iter: BlockIterator::new(block), // Initialize iterator
+            register_bindings: hashbrown::HashMap::new(),
+            block_labels: hashbrown::HashMap::new(),
+        }
     }
 
-    fn lower_binding(&mut self, binding: &BindingNode, value: Operand) {
+    fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
+        self.type_table
+            .types
+            .get(&node_id)
+            .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
+    }
+
+    fn allocate_and_initialize_binding(&mut self, binding: &BindingNode, value: Operand) {
         match binding {
             BindingNode::Ident(ident_binding) => {
                 let ty = self.get_type(ident_binding.id);
                 let target = self.function.make_alloca(ident_binding.name.clone(), ty);
                 self.function
                     .make_store(Operand::Register(target.clone()), value);
-                self.bindings.insert(ident_binding.name.clone(), target);
+                self.register_bindings.insert(ident_binding.id, target);
             }
         }
     }
 
-    fn lower_expr(&mut self, expr: &ExprNode, block_level: u64) -> Operand {
+    fn lower_expr(&mut self, expr: &ExprNode) -> Operand {
         match expr {
             ExprNode::Literal(lit) => match &lit.lit {
                 yuu_shared::token::Token {
@@ -53,8 +78,8 @@ impl TransientData<'_> {
             },
 
             ExprNode::Binary(bin_expr) => {
-                let lhs = self.lower_expr(&bin_expr.left, block_level);
-                let rhs = self.lower_expr(&bin_expr.right, block_level);
+                let lhs = self.lower_expr(&bin_expr.left);
+                let rhs = self.lower_expr(&bin_expr.right);
                 let ty = self.get_type(bin_expr.id);
 
                 let op = match bin_expr.op {
@@ -72,7 +97,7 @@ impl TransientData<'_> {
             }
 
             ExprNode::Unary(un_expr) => {
-                let operand = self.lower_expr(&un_expr.operand, block_level);
+                let operand = self.lower_expr(&un_expr.operand);
                 let ty = self.get_type(un_expr.id);
 
                 match un_expr.op {
@@ -86,58 +111,27 @@ impl TransientData<'_> {
                 }
             }
 
-            ExprNode::If(if_expr) => {
-                let cond = self.lower_expr(&if_expr.if_block.condition, block_level);
-                let (then_label, else_label) = self.function.branch(cond);
-                let merge_label = self.function.add_block("merge".to_string());
-
-                // Create Omega node for the result
-                let ty = self.get_type(if_expr.id);
-                let result = self.function.fresh_register("if_result".to_string(), ty);
-                self.function
-                    .make_omega(result.clone(), vec![then_label.clone(), else_label.clone()]);
-
-                // Then block
-                self.function.set_current_block(&then_label);
-                let then_value = self.lower_expr(&if_expr.if_block.body, block_level + 1);
-                self.function.make_omikron(result.clone(), then_value);
-                self.function
-                    .set_terminator(yir::ControlFlow::Jump(merge_label.clone()));
-
-                // TODO: Else-If blocks
-
-                // Else block
-                self.function.set_current_block(&else_label);
-                let else_value = if let Some(else_block) = &if_expr.else_block {
-                    self.lower_expr(&else_block, block_level + 1)
-                } else {
-                    Operand::NoOp
-                };
-                self.function.make_omikron(result.clone(), else_value);
-                self.function
-                    .set_terminator(yir::ControlFlow::Jump(merge_label.clone()));
-
-                // Continue in merge block
-                self.function.set_current_block(&merge_label);
-
-                Operand::Register(result)
-            }
+            ExprNode::If(if_expr) => self.lower_if_expr(if_expr),
 
             ExprNode::Ident(ident_expr) => {
-                if let Some(reg) = self.bindings.get(&ident_expr.ident) {
-                    let ty = self.get_type(ident_expr.id);
-                    let result = self.function.make_load(
-                        "load_result".to_string(),
-                        Operand::Register(reg.clone()),
-                        ty,
-                    );
-                    Operand::Register(result)
+                if let Some(binding) = self.block.get_unique_binding_forced(&ident_expr.ident) {
+                    if let Some(reg) = self.register_bindings.get(&binding.id) {
+                        let ty = self.get_type(ident_expr.id);
+                        let result = self.function.make_load(
+                            "load_result".to_string(),
+                            Operand::Register(reg.clone()),
+                            ty,
+                        );
+                        Operand::Register(result)
+                    } else {
+                        Operand::NoOp
+                    }
                 } else {
-                    panic!("Identifier not found in bindings: {}", ident_expr.ident);
+                    Operand::NoOp
                 }
             }
 
-            ExprNode::Block(block_expr) => self.lower_block_expr(block_expr, block_level + 1),
+            ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
 
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
@@ -148,7 +142,7 @@ impl TransientData<'_> {
                 let args: Vec<_> = func_call_expr
                     .args
                     .iter()
-                    .map(|arg| self.lower_expr(arg, block_level))
+                    .map(|arg| self.lower_expr(arg))
                     .collect();
 
                 let return_type = self.get_type(func_call_expr.id);
@@ -162,49 +156,161 @@ impl TransientData<'_> {
 
                 result.map(Operand::Register).unwrap_or(Operand::NoOp)
             }
-        }
-    }
+            ExprNode::Assignment(assignment_expr) => {
+                let binding = &assignment_expr.binding;
+                let value = self.lower_expr(&assignment_expr.rhs);
 
-    fn lower_block_expr(&mut self, block_expr: &BlockExpr, block_level: u64) -> Operand {
-        for stmt in &block_expr.body {
-            if let Some(result) = self.lower_stmt(stmt, block_level) {
-                return result;
-            }
-        }
-        Operand::NoOp
-    }
-
-    fn lower_stmt(&mut self, stmt: &StmtNode, block_level: u64) -> Option<Operand> {
-        match stmt {
-            StmtNode::Let(let_stmt) => {
-                let value = self.lower_expr(&let_stmt.expr, block_level);
-                self.lower_binding(&let_stmt.binding, value);
-                None
-            }
-            StmtNode::Atomic(expr) => {
-                let _ = self.lower_expr(expr, block_level);
-                None
-            }
-            StmtNode::Return(ret) => {
-                let value = self.lower_expr(&ret.expr, block_level);
-                match ret.kind {
-                    yuu_shared::ast::ReturnStmtKind::ReturnFromBlock => {
-                        if block_level > 0 {
-                            Some(value)
-                        } else {
-                            self.function
-                                .set_terminator(yir::ControlFlow::Return(Some(value)));
-                            None
-                        }
-                    }
-                    yuu_shared::ast::ReturnStmtKind::ReturnFromFunction => {
+                match binding.as_ref() {
+                    BindingNode::Ident(ident_binding) => {
+                        let target = self.register_bindings.get(&ident_binding.id).unwrap();
                         self.function
-                            .set_terminator(yir::ControlFlow::Return(Some(value)));
-                        None
+                            .make_store(Operand::Register(target.clone()), value);
+                        Operand::Register(target.clone())
                     }
                 }
             }
         }
+    }
+
+    fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
+        self.block_iter.descend();
+
+        // For labeled blocks, create omega register
+        let omega = if let Some(label) = &block_expr.label {
+            let binding = self
+                .block_iter
+                .peek()
+                .get_unique_binding_forced(label)
+                .expect("Compiler bug: Block binding not found");
+
+            let omega = self
+                .function
+                .fresh_register("block_return".to_string(), self.get_type(block_expr.id));
+            self.function.make_omega(omega.clone());
+
+            // Store for break targets
+            self.block_labels.insert(
+                binding.id,
+                (
+                    self.function.get_next_block_label_forced().clone(),
+                    omega.clone(),
+                ),
+            );
+
+            Some(omega)
+        } else {
+            None
+        };
+
+        // Process statements in current block
+        for stmt in &block_expr.body {
+            self.lower_stmt(stmt);
+        }
+
+        // Handle block completion
+        if let Some(last_expr) = &block_expr.last_expr {
+            let value = self.lower_expr(last_expr);
+
+            match omega {
+                // Labeled block: jump to next with value in omega
+                Some(omega) => {
+                    self.function
+                        .make_jump_to_next_block_label(vec![(omega.clone(), value)]);
+                    Operand::Register(omega)
+                }
+                // Unlabeled block:
+                _ => {
+                    // Jump to next block, pass operand back to caller
+                    self.function.make_jump_to_next_block_label(vec![]);
+                    value
+                }
+            }
+        } else {
+            if let Some(omega) = omega {
+                self.function.make_jump_to_next_block_label(vec![]);
+                Operand::Register(omega)
+            } else {
+                Operand::NoOp
+            }
+        }
+    }
+
+    fn lower_stmt(&mut self, stmt: &StmtNode) {
+        match stmt {
+            StmtNode::Let(let_stmt) => {
+                let value = self.lower_expr(&let_stmt.expr);
+                self.allocate_and_initialize_binding(&let_stmt.binding, value);
+            }
+            StmtNode::Atomic(expr) => {
+                let _ = self.lower_expr(expr);
+            }
+            StmtNode::Break(exit_stmt) => {
+                let value = self.lower_expr(&exit_stmt.value);
+
+                if exit_stmt.target == FUNC_BLOCK_NAME {
+                    self.function.make_return(Some(value));
+                } else if let Some(target_binding) = self.block.get_name(&exit_stmt.target) {
+                    // Look up the target block's label and omega register
+                    if let Some((target_label, omega_reg)) =
+                        self.block_labels.get(&target_binding.id)
+                    {
+                        // Write the break value to the block's omega register
+                        self.function
+                            .make_jump(target_label.clone(), vec![(omega_reg.clone(), value)]);
+                    }
+                }
+            }
+        }
+    }
+
+    fn lower_if_expr(&mut self, if_expr: &IfExpr) -> Operand {
+        // 1. Evaluate condition
+        let cond = self.lower_expr(&if_expr.if_block.condition);
+
+        // 2. Create then/else blocks
+        let (then_label, else_label) = self.function.make_branch(cond, vec![], vec![]);
+        let merge_label = self.function.add_block("merge".to_string());
+
+        // 3. Create result register if needed
+        let omega_reg = if !self.get_type(if_expr.id).is_nil() {
+            let omega = self
+                .function
+                .fresh_register("if_result".to_string(), self.get_type(if_expr.id));
+            self.function.make_omega(omega.clone());
+            Some(omega)
+        } else {
+            None
+        };
+
+        // 5. Lower then block
+        self.function
+            .set_current_block(&then_label, merge_label.clone());
+        let then_value = self.lower_block_expr(&if_expr.if_block.body);
+        if let Some(omega) = &omega_reg {
+            self.function
+                .make_jump(merge_label.clone(), vec![(omega.clone(), then_value)]);
+        } else {
+            self.function.make_jump(merge_label.clone(), vec![]);
+        }
+
+        // 6. Lower else block
+        self.function
+            .set_current_block(&else_label, merge_label.clone());
+        if let Some(else_block) = &if_expr.else_block {
+            let value = self.lower_expr(else_block);
+            if let Some(omega) = &omega_reg {
+                self.function
+                    .make_jump(merge_label.clone(), vec![(omega.clone(), value)]);
+            } else {
+                self.function.make_jump(merge_label.clone(), vec![]);
+            }
+        } else {
+            self.function.make_jump(merge_label.clone(), vec![]);
+        };
+
+        // 7. Continue in merge block
+        self.function.set_next_as_current();
+        omega_reg.map(Operand::Register).unwrap_or(Operand::NoOp)
     }
 }
 
@@ -221,24 +327,8 @@ impl PassAstToYir {
         Self
     }
 
-    fn lower_ast(&self, ast: &AST, tit: &TypeInfoTable) -> Module {
+    fn lower_ast(&self, ast: &AST, tit: &TypeInfoTable, root_block: &RootBlock) -> Module {
         let mut module = Module::new();
-
-        // Declare functions
-        for node in &ast.structurals {
-            match node.as_ref() {
-                StructuralNode::FuncDecl(func_decl) => {
-                    let ty = tit.types[&func_decl.id];
-                    let func = Function::new(func_decl.name.clone(), ty);
-                    module.declare_function(func);
-                }
-                StructuralNode::FuncDef(func_def) => {
-                    let ty = tit.types[&func_def.id];
-                    let func = Function::new(func_def.decl.name.clone(), ty);
-                    module.declare_function(func);
-                }
-            }
-        }
 
         // Define functions
         for func in ast.structurals.iter().filter_map(|x| match x.as_ref() {
@@ -250,11 +340,11 @@ impl PassAstToYir {
                 _ => panic!("Expected function type"),
             };
 
-            let mut data = TransientData {
-                function: Function::new(func.decl.name.clone(), return_type),
-                type_table: tit,
-                bindings: std::collections::HashMap::new(),
-            };
+            let mut data = TransientData::new(
+                Function::new(func.decl.name.clone(), return_type),
+                tit,
+                root_block.root(), // Use root block from type inference
+            );
 
             // Add parameters
             for arg in &func.decl.args {
@@ -263,11 +353,12 @@ impl PassAstToYir {
                 };
                 let param = data.function.fresh_register(name.clone(), ty);
                 data.function.params.push(param.clone());
-                // Use lower_binding to handle parameter storage consistently
-                data.lower_binding(&arg.binding, Operand::Register(param));
+                // Use allocate_and_initialize_binding to handle parameter storage consistently
+                data.allocate_and_initialize_binding(&arg.binding, Operand::Register(param));
             }
 
-            data.lower_block_expr(&func.body, 0);
+            // Process the function body block
+            data.lower_block_expr(&func.body);
             module.define_function(data.function);
         }
 
@@ -278,12 +369,15 @@ impl PassAstToYir {
 impl Pass for PassAstToYir {
     fn run(&self, context: &mut yuu_shared::context::Context) -> anyhow::Result<()> {
         let ast = context.require_pass_data::<AST>(self);
-        let ast = ast.lock().unwrap();
-        let ast = &*ast;
         let type_info_table = context.require_pass_data::<TypeInfoTable>(self);
+        let root_block = context.require_pass_data::<Box<RootBlock>>(self);
+
+        let ast = ast.lock().unwrap();
         let type_info_table = type_info_table.lock().unwrap();
-        let type_info_table = &*type_info_table;
-        let module = self.lower_ast(ast, type_info_table);
+        let root_block = root_block.lock().unwrap();
+
+        let module = self.lower_ast(&ast, &type_info_table, &root_block);
+
         context.add_pass_data(module);
         Ok(())
     }
@@ -294,6 +388,7 @@ impl Pass for PassAstToYir {
     {
         schedule.requires_resource_read::<AST>(&self);
         schedule.requires_resource_read::<TypeInfoTable>(&self);
+        schedule.requires_resource_read::<Box<RootBlock>>(&self);
         schedule.produces_resource::<Module>(&self);
         schedule.add_pass(self);
     }

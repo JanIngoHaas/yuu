@@ -2,10 +2,18 @@ use yuu_shared::{
     context::Context,
     scheduler::{Pass, ResourceId},
     type_info::{PrimitiveType, TypeInfo},
-    yir::{BasicBlock, Function, FunctionDeclarationState, Instruction, Module, Operand, Register},
+    yir::{
+        self, BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module,
+        Operand, Register,
+    },
 };
 
 use std::fmt::Write;
+
+const PREFIX_REGISTER: &str = "reg_";
+const PREFIX_MEMORY: &str = "mem_";
+const PREFIX_LABEL: &str = "lbl_";
+const PREFIX_FUNCTION: &str = "fn_";
 
 struct TransientData<'a> {
     module: &'a Module,
@@ -13,6 +21,31 @@ struct TransientData<'a> {
 }
 
 impl PassYirToC {
+    fn write_register_name(
+        reg: &Register,
+        f: &mut impl std::fmt::Write,
+    ) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}_{}", PREFIX_REGISTER, reg.name(), reg.id())
+    }
+
+    fn write_memory_name(
+        reg: &Register,
+        f: &mut impl std::fmt::Write,
+    ) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}_{}", PREFIX_MEMORY, reg.name(), reg.id())
+    }
+
+    fn write_label_name(label: &str, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}", PREFIX_LABEL, label)
+    }
+
+    fn write_function_name(
+        name: &str,
+        f: &mut impl std::fmt::Write,
+    ) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}", PREFIX_FUNCTION, name)
+    }
+
     fn gen_type(
         &self,
         data: &mut TransientData,
@@ -26,11 +59,14 @@ impl PassYirToC {
                 PrimitiveType::I64 => write!(data.output, "int64_t"),
                 PrimitiveType::Nil => write!(data.output, "void"),
             },
-            TypeInfo::Function(function_type) => todo!(),
+            TypeInfo::Function(_function_type) => {
+                todo!()
+            }
             TypeInfo::Pointer(type_info) => {
                 self.gen_type(data, type_info)?;
                 write!(data.output, "*")
             }
+            TypeInfo::Inactive => panic!("Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"),
         }
     }
 
@@ -40,13 +76,23 @@ impl PassYirToC {
         operand: &Operand,
     ) -> Result<(), std::fmt::Error> {
         match operand {
-            Operand::I64Const(c) => write!(data.output, "((int64_t)INT64_C({}))", c), // INT64_C expands to a type that is >= 64bit, so we cast it down to 64bit
+            Operand::I64Const(c) => write!(data.output, "((int64_t)INT64_C({}))", c),
             Operand::F32Const(c) => write!(data.output, "({}f)", c),
             Operand::F64Const(c) => write!(data.output, "({}d)", c),
             Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
-            Operand::Register(register) => register.write_unique_name(&mut data.output),
+            Operand::Register(register) => Self::write_register_name(register, &mut data.output),
             Operand::NoOp => Ok(()),
         }
+    }
+
+    fn gen_register(
+        &self,
+        data: &mut TransientData,
+        reg: &Register,
+    ) -> Result<(), std::fmt::Error> {
+        self.gen_type(data, reg.ty())?;
+        write!(data.output, " ")?;
+        Self::write_register_name(reg, &mut data.output)
     }
 
     fn gen_instruction(
@@ -104,22 +150,21 @@ impl PassYirToC {
             Instruction::Alloca { target } => {
                 self.gen_type(data, target.ty().deref_ptr())?;
                 write!(data.output, " ")?;
-                target.write_unique_name(&mut data.output)?;
-                write!(data.output, "__mem;")?;
+                Self::write_memory_name(target, &mut data.output)?;
+                write!(data.output, ";")?;
                 self.gen_register(data, target)?;
-                write!(data.output, "=")?;
-                write!(data.output, "&")?;
-                target.write_unique_name(&mut data.output)?;
-                write!(data.output, "__mem;")?;
+                write!(data.output, "=&")?;
+                Self::write_memory_name(target, &mut data.output)?;
             }
             Instruction::Call { target, name, args } => {
                 if let Some(target) = target {
                     self.gen_type(data, target.ty())?;
                     write!(data.output, " ")?;
-                    target.write_unique_name(&mut data.output)?;
+                    Self::write_register_name(target, &mut data.output)?;
                     write!(data.output, "=")?;
                 }
-                write!(data.output, "{}(", name)?;
+                Self::write_function_name(name, &mut data.output)?;
+                write!(data.output, "(")?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         write!(data.output, ", ")?;
@@ -131,19 +176,14 @@ impl PassYirToC {
             Instruction::Omega { target, .. } => {
                 self.gen_register(data, target)?;
             }
-            Instruction::Omikron { target, value } => {
-                target.write_unique_name(&mut data.output)?;
-                write!(data.output, "=")?;
-                self.gen_operand(data, value)?;
-            }
         }
         write!(data.output, ";")?;
         Ok(())
     }
 
     fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> anyhow::Result<()> {
-        // Generate label
-        writeln!(data.output, "{}:", block.label.name())?;
+        Self::write_label_name(block.label.name(), &mut data.output)?;
+        writeln!(data.output, ":;")?;
 
         // Generate instructions
         for instruction in block.instructions.iter() {
@@ -153,20 +193,54 @@ impl PassYirToC {
 
         // Generate terminator
         match &block.terminator {
-            yuu_shared::yir::ControlFlow::Jump(label) => {
-                writeln!(data.output, "    goto {};", label.name())?;
+            ControlFlow::Jump { target, writes } => {
+                // Generate Omikron writes
+                for (reg, value) in writes {
+                    write!(data.output, "    ")?;
+                    Self::write_register_name(reg, &mut data.output)?;
+                    write!(data.output, "=")?;
+                    self.gen_operand(data, value)?;
+                    writeln!(data.output, ";")?;
+                }
+                write!(data.output, "    goto ")?;
+                Self::write_label_name(target.name(), &mut data.output)?;
+                writeln!(data.output, ";")?;
             }
-            yuu_shared::yir::ControlFlow::Branch {
+            ControlFlow::Branch {
                 condition,
-                if_true,
-                if_false,
+                if_true: (true_label, true_writes),
+                if_false: (false_label, false_writes),
             } => {
                 write!(data.output, "    if (")?;
                 self.gen_operand(data, condition)?;
-                writeln!(data.output, ") goto {};", if_true.name())?;
-                writeln!(data.output, "else{{goto {};}}", if_false.name())?;
+                writeln!(data.output, ") {{")?;
+
+                // Generate true branch writes
+                for (reg, value) in true_writes {
+                    write!(data.output, "    ")?;
+                    Self::write_register_name(reg, &mut data.output)?;
+                    write!(data.output, "=")?;
+                    self.gen_operand(data, value)?;
+                    writeln!(data.output, ";")?;
+                }
+                write!(data.output, "    goto ")?;
+                Self::write_label_name(true_label.name(), &mut data.output)?;
+                writeln!(data.output, "}}")?;
+
+                writeln!(data.output, "else{{")?;
+                // Generate false branch writes
+                for (reg, value) in false_writes {
+                    write!(data.output, "    ")?;
+                    Self::write_register_name(reg, &mut data.output)?;
+                    write!(data.output, "=")?;
+                    self.gen_operand(data, value)?;
+                    writeln!(data.output, ";")?;
+                }
+                write!(data.output, "    goto ")?;
+                Self::write_label_name(false_label.name(), &mut data.output)?;
+                writeln!(data.output, "}}")?;
             }
-            yuu_shared::yir::ControlFlow::Return(value) => {
+            ControlFlow::Return(value) => {
                 write!(data.output, "    return ")?;
                 if let Some(val) = value {
                     self.gen_operand(data, val)?;
@@ -188,31 +262,20 @@ impl PassYirToC {
         Ok(())
     }
 
-    fn gen_register(
-        &self,
-        data: &mut TransientData,
-        reg: &Register,
-    ) -> Result<(), std::fmt::Error> {
-        self.gen_type(data, reg.ty())?;
-        write!(data.output, " ")?;
-        reg.write_unique_name(&mut data.output)?;
-        Ok(())
-    }
-
     fn gen_func_decl(
         &self,
         func: &Function,
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         self.gen_type(data, func.return_type)?;
-        write!(data.output, " {}", func.name)?;
+        write!(data.output, " ")?;
+        Self::write_function_name(&func.name, &mut data.output)?;
         write!(data.output, "(")?;
         for (i, reg) in func.params.iter().enumerate() {
-            self.gen_register(data, reg)?;
-
             if i > 0 {
                 write!(data.output, ", ")?;
             }
+            self.gen_register(data, reg)?;
         }
         write!(data.output, ")")?;
         Ok(())
@@ -298,7 +361,7 @@ mod tests {
     use yuu_shared::scheduler::{Schedule, Scheduler};
     use yuu_transform::{
         pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
-        pass_type_inference::PassTypeInference,
+        type_inference::PassTypeInference,
     };
 
     #[test]
@@ -311,7 +374,7 @@ mod tests {
                         out 1;
                     }
                     else {
-                        let n_out = n * n * fac(n - 1);
+                        let n_out = n * fac(n - 1);
                         out n_out;
                     };
                 }"#,

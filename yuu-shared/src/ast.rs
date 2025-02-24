@@ -73,7 +73,7 @@ pub struct LiteralExpr {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ConditionWithBody {
     pub condition: Box<ExprNode>,
-    pub body: Box<ExprNode>,
+    pub body: BlockExpr,
 }
 
 /// Represents an if expression in the AST
@@ -112,6 +112,14 @@ pub struct IdentExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AssignmentExpr {
+    pub binding: Box<BindingNode>,
+    pub rhs: Box<ExprNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
 pub enum ExprNode {
@@ -122,6 +130,7 @@ pub enum ExprNode {
     Block(BlockExpr),
     FuncCall(FuncCallExpr),
     If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
+    Assignment(AssignmentExpr),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -133,30 +142,32 @@ pub struct LetStmt {
     pub binding: Box<BindingNode>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum ReturnStmtKind {
-    ReturnFromBlock,
-    ReturnFromFunction,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ReturnStmt {
-    pub span: Span,
-    pub expr: Box<ExprNode>,
-    pub kind: ReturnStmtKind,
-    pub id: NodeId, // Add this field
-}
+// #[derive(Serialize, Deserialize, Clone)]
+// pub struct ReturnStmt {
+//     pub span: Span,
+//     pub expr: Box<ExprNode>,
+//     pub id: NodeId,
+// }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IdentBinding {
     pub id: NodeId,
     pub span: Span,
     pub name: String,
+    pub is_mut: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BindingNode {
     Ident(IdentBinding),
+}
+
+impl BindingNode {
+    pub fn is_mut(&self) -> bool {
+        match self {
+            BindingNode::Ident(ident) => ident.is_mut,
+        }
+    }
 }
 
 impl Display for BindingNode {
@@ -228,6 +239,8 @@ pub struct BlockExpr {
     pub id: NodeId,
     pub span: Span,
     pub body: Vec<StmtNode>,
+    pub label: Option<String>,
+    pub last_expr: Option<Box<ExprNode>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -253,10 +266,19 @@ pub enum StructuralNode {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct BreakStmt {
+    pub span: Span,
+    pub value: Box<ExprNode>, // Optional for => ; case
+    pub target: String,       // None for => ; case, Some("blk1") for => blk1 case
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StmtNode {
     Let(LetStmt),
     Atomic(ExprNode),
-    Return(ReturnStmt),
+    //Return(ReturnStmt),
+    Break(BreakStmt), // new variant
 }
 
 /// Represents a node in the AST
@@ -279,11 +301,11 @@ impl ResourceId for AST {
     }
 }
 
-impl Display for Node {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_graphviz_string())
-    }
-}
+// impl Display for Node {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         write!(f, "{}", self.to_graphviz_string())
+//     }
+// }
 
 pub trait Spanned {
     fn span(&self) -> Span;
@@ -313,6 +335,7 @@ impl Spanned for ExprNode {
             ExprNode::Block(block_expr) => block_expr.span.clone(),
             ExprNode::FuncCall(func_call_expr) => func_call_expr.span.clone(),
             ExprNode::If(if_expr) => if_expr.span.clone(),
+            ExprNode::Assignment(assign) => assign.span.clone(),
         }
     }
 }
@@ -322,7 +345,8 @@ impl Spanned for StmtNode {
         match self {
             StmtNode::Let(let_stmt) => let_stmt.span.clone(),
             StmtNode::Atomic(expr_node) => expr_node.span(),
-            StmtNode::Return(return_stmt) => return_stmt.span.clone(),
+            //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
+            StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
         }
     }
 }
@@ -354,3 +378,18 @@ impl Spanned for BindingNode {
 }
 
 pub type NodeId = i64;
+
+impl ExprNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            ExprNode::Literal(lit) => lit.id,
+            ExprNode::Binary(bin) => bin.id,
+            ExprNode::Unary(un) => un.id,
+            ExprNode::Ident(id) => id.id,
+            ExprNode::Block(block) => block.id,
+            ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
+            ExprNode::If(if_expr) => if_expr.id,
+            ExprNode::Assignment(assign) => assign.id,
+        }
+    }
+}

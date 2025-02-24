@@ -8,6 +8,7 @@ use crate::ast::NodeId;
 pub struct BindingInfo {
     pub id: NodeId,
     pub src_location: Option<Span>,
+    pub is_mut: bool,
 }
 
 #[derive(Clone, Debug)]

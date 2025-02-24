@@ -85,7 +85,7 @@ mod tests {
     use super::*;
     use crate::{
         pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
-        pass_type_inference::PassTypeInference,
+        type_inference::PassTypeInference,
     };
     use yuu_parse::{lexer::UnprocessedCodeInfo, pass_parse::ParsePass};
     use yuu_shared::scheduler::{Schedule, Scheduler};
@@ -96,13 +96,13 @@ mod tests {
         let code_info = UnprocessedCodeInfo {
             code: Arc::from(
                 r#"fn fac(n: i64) -> i64 {
-                out if n == 0 {
-                    out 1;
+                if n == 0 {
+                    1!
                 }
                 else {
-                    let n_out = n * n * fac(n - 1);
-                    out n_out;
-                };
+                    let n_out = n * fac(n - 1);
+                    return n_out;
+                }!
             }"#,
             ),
             file_name: Arc::from("test.yuu"),
@@ -122,8 +122,8 @@ mod tests {
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 
-        // Print the pass dependency graph in DOT format
-        println!("Pass Dependency Graph (DOT format):");
+        // Print the pass dependency graph in DOT format for debugging
+        println!("Pass Dependencies:");
         schedule.print_dot();
 
         // Run the schedule

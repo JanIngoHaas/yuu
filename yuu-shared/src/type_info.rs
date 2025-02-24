@@ -4,7 +4,6 @@ use std::hash::Hash;
 
 use crate::{
     ast::*,
-    binding_info::BindingInfo,
     scheduler::{ResourceId, ResourceName},
 };
 use scc::HashMap;
@@ -92,6 +91,11 @@ pub fn primitive_bool() -> &'static TypeInfo {
     &PRIMITIVE_BOOL
 }
 
+pub fn inactive_type() -> &'static TypeInfo {
+    const INACTIVE_TYPE: TypeInfo = TypeInfo::Inactive;
+    &INACTIVE_TYPE
+}
+
 impl From<PrimitiveType> for &'static TypeInfo {
     fn from(value: PrimitiveType) -> Self {
         match value {
@@ -129,10 +133,12 @@ impl TypeInterner {
     }
 
     pub fn deref_ptr(ty: &'static TypeInfo) -> &'static TypeInfo {
-        if let TypeInfo::Pointer(inner) = ty {
-            return inner;
+        match ty {
+            TypeInfo::Pointer(inner) => inner,
+            TypeInfo::BuiltIn(_) => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::Function(_) => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::Inactive => panic!("Cannot dereference non-pointer type: {}", ty),
         }
-        panic!("Cannot dereference non-pointer type: {}", ty);
     }
 
     pub fn function_type(
@@ -182,6 +188,25 @@ impl TypeInfoTable {
             types: hashbrown::HashMap::new(),
         }
     }
+
+    pub fn unify_and_insert(
+        &mut self,
+        id: NodeId,
+        ty: &'static TypeInfo,
+    ) -> Result<&'static TypeInfo, UnificationError> {
+        let existing = self.types.get(&id);
+        let unified = if let Some(existing) = existing {
+            ty.unify(existing)?
+        } else {
+            ty
+        };
+        self.types.insert(id, unified);
+        Ok(unified)
+    }
+
+    pub fn unify_nil_and_insert(&mut self, id: NodeId) -> Result<&'static TypeInfo, UnificationError> {
+        self.unify_and_insert(id, primitive_nil())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Copy, Debug)]
@@ -213,7 +238,7 @@ impl Display for FunctionType {
             .map(|arg| format!("{}", arg))
             .collect::<Vec<String>>()
             .join(", ");
-        write!(f, "({}) -> {}", args, self.ret)
+        write!(f, "fn({}) -> {}", args, self.ret)
     }
 }
 
@@ -240,6 +265,9 @@ pub enum TypeInfo {
     BuiltIn(PrimitiveType),
     Function(FunctionType),
     Pointer(&'static TypeInfo),
+    Inactive, // Used to represent a 'inactive' type, i.e. a an expression which produces __no__ value and thus has no type
+              // This happens for example when you 'unwind' in a block - the block does not have a value.
+              // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
 }
 
 impl TypeInfo {
@@ -247,7 +275,8 @@ impl TypeInfo {
         match self {
             TypeInfo::BuiltIn(_) => true,
             TypeInfo::Pointer(inner) => inner.is_primitive(),
-            _ => false,
+            TypeInfo::Function(_) => false,
+            TypeInfo::Inactive => false,
         }
     }
 
@@ -267,24 +296,21 @@ impl TypeInfo {
         std::ptr::eq(self, other)
     }
 
-    pub fn does_coerce_to_same_type(&self, other: &TypeInfo) -> bool {
-        match (self, other) {
-            (TypeInfo::BuiltIn(a), TypeInfo::BuiltIn(b)) => a == b,
-            (TypeInfo::Function(a), TypeInfo::Function(b)) => {
-                if a.args.len() != b.args.len() {
-                    return false;
-                }
-                for (arg_a, arg_b) in a.args.iter().zip(b.args.iter()) {
-                    if !arg_a.does_coerce_to_same_type(arg_b) {
-                        return false;
-                    }
-                }
-                a.ret.does_coerce_to_same_type(b.ret)
-            }
-            (TypeInfo::Pointer(a), TypeInfo::Pointer(b)) => a.does_coerce_to_same_type(b),
-            //(TypeInfo::FunctionGroup(_), _) | (_, TypeInfo::FunctionGroup(_)) => false,
-            _ => false,
+    pub fn unify(&'static self, target: &'static TypeInfo) -> Result<&'static TypeInfo, UnificationError> {
+        // Unification with inactive yields the other type
+        match (self, target) {
+            (TypeInfo::Inactive, _) => Ok(target),
+            (_, TypeInfo::Inactive) => Ok(self),
+            _ if self.is_exact_same_type(target) => Ok(target),
+            _ => Err(UnificationError {
+                from: self.to_string(),
+                to: target.to_string(),
+            })
         }
+    }
+
+    pub fn does_coerce_to_same_type(&'static self, other: &'static TypeInfo) -> bool {
+        self.unify(other).is_ok()
     }
 }
 
@@ -294,6 +320,13 @@ impl Display for TypeInfo {
             TypeInfo::BuiltIn(built_in) => write!(f, "{}", built_in),
             TypeInfo::Function(function_type) => write!(f, "{}", function_type),
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
+            TypeInfo::Inactive => write!(f, "<no value>"),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct UnificationError {
+    pub from: String,
+    pub to: String,
 }

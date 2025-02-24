@@ -34,6 +34,10 @@ pub enum Integer {
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
 pub enum TokenKind {
+    // Bang
+    #[token("!")]
+    Bang,
+
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
         lex.slice().trim_end_matches('f').parse().ok()
@@ -52,8 +56,6 @@ pub enum TokenKind {
     #[logos(priority = 1)]
     Integer(Integer),
 
-    // #[regex(r#""([^"\\]|\\[\\nrt"])*""#, |lex| lex.slice().to_string())]
-    // String(String),
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
 
@@ -73,10 +75,10 @@ pub enum TokenKind {
     F64Kw,
 
     #[token("let")]
-    Let,
+    LetKw,
 
     #[token("mut")]
-    Mut,
+    MutKw,
 
     #[token("fn")]
     Fn,
@@ -86,9 +88,6 @@ pub enum TokenKind {
 
     #[token("return")]
     Return,
-
-    #[token("=>")]
-    FatArrow,
 
     #[token("out")]
     OutKw,
@@ -136,6 +135,16 @@ pub enum TokenKind {
     RBrace,
 
     EOF,
+}
+
+impl TokenKind {
+    pub fn from_keyword(keyword: &str) -> Option<TokenKind> {
+        match keyword {
+            "return" => Some(TokenKind::Return),
+            "out" => Some(TokenKind::OutKw),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

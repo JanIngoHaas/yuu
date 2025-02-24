@@ -9,12 +9,51 @@ use hashbrown::HashMap;
 
 use crate::semantic_error::SemanticError;
 
+pub const FUNC_BLOCK_NAME: &str = "_fn";
+
 #[derive(Clone)]
 pub struct Block {
     pub bindings: HashMap<String, BindingInfoKind>,
     pub parent: Option<usize>,
     pub root_block: *mut RootBlock,
     pub id: usize,
+    pub named_block_binding: Option<(String, BindingInfo)>,
+}
+
+#[derive(Copy, Clone)]
+pub struct BlockIterator<'a> {
+    current: &'a Block,
+    root_block: &'a RootBlock,
+}
+
+impl<'a> BlockIterator<'a> {
+    pub fn new(start: &'a Block) -> Self {
+        Self {
+            current: start,
+            root_block: start.get_root_block(),
+        }
+    }
+
+    /// Simply move to next block in arena
+    pub fn descend(&mut self) {
+        let next_id = self.current.id + 1;
+        if let Some(next_block) = self.root_block.arena.get(next_id) {
+            self.current = next_block;
+        }
+    }
+
+    /// Get current block without advancing
+    pub fn peek(&self) -> &'a Block {
+        self.current
+    }
+}
+
+impl<'a> Iterator for BlockIterator<'a> {
+    type Item = &'a Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.current)
+    }
 }
 
 unsafe impl Send for RootBlock {}
@@ -46,6 +85,7 @@ impl RootBlock {
             parent: None,
             root_block: std::ptr::null_mut(),
             id: 0,
+            named_block_binding: None,
         };
 
         top_level_block.predefine_builtins(tyt);
@@ -96,7 +136,34 @@ impl Block {
         self.get_parent().and_then(|p| p.get_binding(name))
     }
 
-    pub fn make_child(&mut self) -> &mut Block {
+    pub fn get_unique_binding_forced(&self, name: &str) -> Option<BindingInfo> {
+        let binding = self.get_binding(name);
+        if let Some(BindingInfoKind::Unique(binding)) = binding {
+            return Some(binding.clone());
+        }
+        debug_assert!(
+            binding.is_none(),
+            "Compiler bug: binding {} is not unique",
+            name
+        );
+        None
+    }
+
+    pub fn get_name(&self, searched_name: &str) -> Option<BindingInfo> {
+        if let Some((name, binding)) = self.named_block_binding.as_ref() {
+            if name == searched_name {
+                return Some(binding.clone());
+            }
+        }
+
+        self.get_parent().and_then(|p| p.get_name(searched_name))
+    }
+
+    pub fn get_fn_block_name(&self) -> BindingInfo {
+        self.get_name(FUNC_BLOCK_NAME).expect("Compiler bug: Every function has to have a root block and this is automatically assigned by the compiler. This one apparently doesn't have one.")
+    }
+
+    pub fn make_child(&mut self, name: Option<(String, BindingInfo)>) -> &mut Block {
         let id = self.id;
         let len = self.get_root_block().arena.len();
         let root_block = self.get_root_block_mut();
@@ -106,6 +173,7 @@ impl Block {
             parent: Some(id),
             root_block,
             id: len,
+            named_block_binding: name,
         };
         root_block.arena.push(child);
         &mut root_block.arena[len]
@@ -125,6 +193,7 @@ impl Block {
                 funcs.push(BindingInfo {
                     id,
                     src_location: Some(span),
+                    is_mut: false,
                 });
                 Ok(())
             }
@@ -132,6 +201,7 @@ impl Block {
                 let funcs = vec![BindingInfo {
                     id,
                     src_location: Some(span),
+                    is_mut: false,
                 }];
                 self.bindings
                     .insert(name, BindingInfoKind::Ambiguous(funcs));
@@ -140,12 +210,13 @@ impl Block {
         }
     }
 
-    pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span) {
+    pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span, is_mut: bool) {
         self.bindings.insert(
             name,
             BindingInfoKind::Unique(BindingInfo {
                 id,
                 src_location: Some(span),
+                is_mut,
             }),
         );
     }
@@ -218,7 +289,7 @@ impl Block {
                     }
 
                     for (expected, actual) in func.args.iter().zip(resolve_arg_types.iter()) {
-                        if !actual.does_coerce_to_same_type(expected) {
+                        if !actual.is_exact_same_type(expected) {
                             return Err(FunctionOverloadError::NoOverloadFound);
                         }
                     }
@@ -244,7 +315,7 @@ impl Block {
                         for (expected, actual) in
                             func_type.args.iter().zip(resolve_arg_types.iter())
                         {
-                            if !actual.does_coerce_to_same_type(expected) {
+                            if !actual.is_exact_same_type(expected) {
                                 all_args_match = false;
                                 break;
                             }
@@ -286,6 +357,10 @@ impl Block {
         }
 
         result
+    }
+
+    pub fn iter(&self) -> BlockIterator {
+        BlockIterator::new(self)
     }
 }
 

@@ -10,6 +10,9 @@ impl IdGenerator {
     }
 
     fn next(&mut self) -> NodeId {
+        if self.next_id == 8 {
+            println!("Yo");
+        }
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -53,10 +56,7 @@ impl AddId for ExprNode {
             }
             ExprNode::Ident(id) => id.id = gen.next(),
             ExprNode::Block(block) => {
-                block.id = gen.next();
-                for stmt in &mut block.body {
-                    stmt.add_id(gen);
-                }
+                block.add_id(gen);
             }
             ExprNode::FuncCall(func_call_expr) => {
                 func_call_expr.lhs.add_id(gen);
@@ -69,12 +69,19 @@ impl AddId for ExprNode {
                 if_expr.id = gen.next();
                 if_expr.if_block.condition.add_id(gen);
                 if_expr.if_block.body.add_id(gen);
+                // Add IDs to else-if blocks
+                for else_if in &mut if_expr.else_if_blocks {
+                    else_if.condition.add_id(gen);
+                    else_if.body.add_id(gen);
+                }
                 if let Some(else_expr) = &mut if_expr.else_block {
                     else_expr.add_id(gen);
                 }
-                if let Some(e) = if_expr.else_block.as_mut() {
-                    e.add_id(gen);
-                }
+            }
+            ExprNode::Assignment(assignment_expr) => {
+                assignment_expr.id = gen.next();
+                assignment_expr.binding.add_id(gen);
+                assignment_expr.rhs.add_id(gen);
             }
         }
     }
@@ -92,9 +99,9 @@ impl AddId for StmtNode {
                 }
             }
             StmtNode::Atomic(expr) => expr.add_id(gen),
-            StmtNode::Return(ret) => {
-                ret.id = gen.next();
-                ret.expr.add_id(gen);
+            StmtNode::Break(exit_stmt) => {
+                exit_stmt.id = gen.next();
+                exit_stmt.value.add_id(gen);
             }
         }
     }
@@ -152,17 +159,95 @@ impl AddId for StructuralNode {
             StructuralNode::FuncDef(def) => {
                 def.decl.add_id(gen);
                 def.id = gen.next();
-                def.body.id = gen.next();
-                for stmt in &mut def.body.body {
-                    stmt.add_id(gen);
-                }
+                def.body.add_id(gen);
             }
         }
     }
 }
 
+impl AddId for BlockExpr {
+    fn add_id(&mut self, gen: &mut IdGenerator) {
+        self.id = gen.next();
+        for stmt in &mut self.body {
+            stmt.add_id(gen);
+        }
+        if let Some(last_expr) = &mut self.last_expr {
+            last_expr.add_id(gen);
+        }
+    }
+}
+
 pub fn add_ids(root: &mut AST) {
+    // Use a single IdGenerator instance for the entire AST
+    let mut generator = IdGenerator::new();
     for node in root.structurals.iter_mut() {
-        node.add_id(&mut IdGenerator::new());
+        node.add_id(&mut generator);
+    }
+}
+
+pub trait GetId {
+    fn node_id(&self) -> NodeId;
+}
+
+impl GetId for Node {
+    fn node_id(&self) -> NodeId {
+        match self {
+            Node::Expr(expr) => expr.node_id(),
+            Node::Stmt(stmt) => stmt.node_id(),
+            Node::Type(ty) => ty.node_id(),
+            Node::Structural(s) => s.node_id(),
+            Node::Binding(pn) => pn.node_id(),
+        }
+    }
+}
+
+impl GetId for ExprNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            ExprNode::Literal(lit) => lit.id,
+            ExprNode::Binary(bin) => bin.id,
+            ExprNode::Unary(un) => un.id,
+            ExprNode::Ident(id) => id.id,
+            ExprNode::Block(block) => block.id,
+            ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
+            ExprNode::If(if_expr) => if_expr.id,
+            ExprNode::Assignment(assignment_expr) => assignment_expr.id,
+        }
+    }
+}
+
+impl GetId for StmtNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            StmtNode::Let(let_stmt) => let_stmt.id,
+            StmtNode::Atomic(expr) => expr.node_id(),
+            StmtNode::Break(exit_stmt) => exit_stmt.id,
+        }
+    }
+}
+
+impl GetId for TypeNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            TypeNode::Ident(i) => i.id,
+            TypeNode::BuiltIn(built_in_type) => built_in_type.id,
+        }
+    }
+}
+
+impl GetId for BindingNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            BindingNode::Ident(i) => i.id,
+        }
+    }
+}
+
+impl GetId for StructuralNode {
+    fn node_id(&self) -> NodeId {
+        match self {
+            StructuralNode::FuncDecl(fd) => fd.id,
+            StructuralNode::FuncDef(def) => def.id,
+        }
     }
 }

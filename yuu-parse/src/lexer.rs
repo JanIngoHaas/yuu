@@ -21,7 +21,7 @@ impl ResourceId for UnprocessedCodeInfo {
 #[derive(Debug, Clone)]
 pub struct Note {
     pub message: String,
-    pub span: Span,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
