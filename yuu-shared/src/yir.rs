@@ -6,7 +6,7 @@ use colored::Colorize;
 use hashbrown::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /*
 Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
@@ -296,6 +296,12 @@ pub struct Label {
     id: i64,
 }
 
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}_{}", self.name, self.id)
+    }
+}
+
 impl Register {
     pub fn new(name: String, id: i64, ty: &'static TypeInfo) -> Self {
         Self { name, id, ty }
@@ -404,7 +410,7 @@ pub enum Instruction {
     },
     Omega {
         target: Register,
-        writable_blocks: Vec<Label>,
+        writable_blocks: Arc<Mutex<Vec<Label>>>, // Share the same Arc<Mutex> as in omega_blocks
     },
 }
 
@@ -420,6 +426,7 @@ pub enum ControlFlow {
         if_false: (Label, Vec<(Register, Operand)>), // Writes for false branch
     },
     Return(Option<Operand>),
+    Fallthrough(Vec<(Register, Operand)>), // Writes for fallthrough
 }
 
 #[derive(Clone)]
@@ -427,6 +434,15 @@ pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<Instruction>,
     pub terminator: ControlFlow,
+}
+
+impl BasicBlock {
+    pub fn fallthrough_to(&self) -> Option<i64> {
+        match &self.terminator {
+            ControlFlow::Fallthrough(_) => Some(self.label.id() + 1),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -437,10 +453,9 @@ pub struct Function {
     pub blocks: hashbrown::HashMap<i64, BasicBlock>,
     pub entry_block: i64,
     current_block: i64,
-    next_block_label: Option<Label>,
     next_reg_id: i64,
     next_label_id: i64,
-    omega_registers: HashMap<Register, Vec<Label>>, // Track omega register writers
+    omega_blocks: HashMap<Register, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
 }
 
 impl Function {
@@ -452,22 +467,12 @@ impl Function {
             blocks: hashbrown::HashMap::new(),
             entry_block: 0,
             current_block: 0,
-            next_block_label: None,
             next_reg_id: 0,
             next_label_id: 0,
-            omega_registers: HashMap::new(),
+            omega_blocks: HashMap::new(),
         };
         f.add_block("entry".to_string());
         f
-    }
-
-    pub fn make_jump_to_next_block_label(&mut self, writes: Vec<(Register, Operand)>) {
-        let next = self
-            .next_block_label
-            .as_ref()
-            .expect("Compiler Error: No next block")
-            .clone();
-        self.make_jump(next, writes);
     }
 
     pub fn fresh_register(&mut self, name: String, ty: &'static TypeInfo) -> Register {
@@ -482,6 +487,14 @@ impl Function {
 
     pub fn get_current_block_mut(&mut self) -> Option<&mut BasicBlock> {
         self.blocks.get_mut(&self.current_block)
+    }
+
+    pub fn get_current_block(&self) -> Option<&BasicBlock> {
+        self.blocks.get(&self.current_block)
+    }
+
+    pub fn get_current_block_label<'a>(&'a self) -> &'a Label {
+        &self.blocks.get(&self.current_block).unwrap().label
     }
 
     pub fn current_block(&self) -> i64 {
@@ -501,22 +514,35 @@ impl Function {
             BasicBlock {
                 label: label.clone(),
                 instructions: Vec::new(),
-                terminator: ControlFlow::Return(None),
+                terminator: ControlFlow::Fallthrough(Vec::new()),
             },
         );
         label
     }
 
     fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Register, Operand)>) {
+        let current_label = self.blocks.get(&self.current_block).unwrap().label.clone();
+
         for (reg, _) in writes {
-            self.omega_registers
-                .get_mut(reg)
-                .expect("omega register not found")
-                .push(self.blocks.get(&self.current_block).unwrap().label.clone());
+            if let Some(blocks) = self.omega_blocks.get(reg) {
+                let mut blocks = blocks.lock().unwrap();
+                blocks.push(current_label.clone());
+            }
         }
     }
 
+    fn gen_writes_if_not_nop(
+        &mut self,
+        writes: Vec<(Register, Operand)>,
+    ) -> Vec<(Register, Operand)> {
+        writes
+            .into_iter()
+            .filter(|(_, op)| !matches!(op, Operand::NoOp))
+            .collect()
+    }
+
     pub fn make_jump(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
+        let writes = self.gen_writes_if_not_nop(writes);
         self.update_omega_writes(writes.iter());
         self.blocks
             .get_mut(&self.current_block)
@@ -528,6 +554,15 @@ impl Function {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.terminator = ControlFlow::Return(value);
         }
+    }
+
+    pub fn make_fallthrough(&mut self, writes: Vec<(Register, Operand)>) {
+        let writes = self.gen_writes_if_not_nop(writes);
+        self.update_omega_writes(writes.iter());
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
+            .terminator = ControlFlow::Fallthrough(writes);
     }
 
     pub fn set_branch_writes(
@@ -647,6 +682,8 @@ impl Function {
         then_writes: Vec<(Register, Operand)>,
         else_writes: Vec<(Register, Operand)>,
     ) {
+        let then_writes = self.gen_writes_if_not_nop(then_writes);
+        let else_writes = self.gen_writes_if_not_nop(else_writes);
         self.update_omega_writes(then_writes.iter());
         self.update_omega_writes(else_writes.iter());
 
@@ -655,8 +692,8 @@ impl Function {
             .expect("Compiler Error: No current block")
             .terminator = ControlFlow::Branch {
             condition,
-            if_true: (then, Vec::new()),
-            if_false: (else_, Vec::new()),
+            if_true: (then, then_writes),
+            if_false: (else_, else_writes),
         };
     }
 
@@ -668,6 +705,9 @@ impl Function {
     ) -> (Label, Label) {
         let true_label = self.fresh_label("then".to_string());
         let false_label = self.fresh_label("else".to_string());
+
+        let then_writes = self.gen_writes_if_not_nop(then_writes);
+        let else_writes = self.gen_writes_if_not_nop(else_writes);
 
         self.update_omega_writes(then_writes.iter());
         self.update_omega_writes(else_writes.iter());
@@ -686,7 +726,7 @@ impl Function {
             BasicBlock {
                 label: true_label.clone(),
                 instructions: Vec::new(),
-                terminator: ControlFlow::Return(None),
+                terminator: ControlFlow::Fallthrough(Vec::new()),
             },
         );
 
@@ -702,28 +742,8 @@ impl Function {
         (true_label, false_label)
     }
 
-    pub fn set_current_block(&mut self, current: &Label, next: Label) {
+    pub fn set_current_block(&mut self, current: &Label) {
         self.current_block = current.id();
-        self.next_block_label = Some(next);
-    }
-
-    pub fn get_next_block_label(&self) -> Option<&Label> {
-        self.next_block_label.as_ref()
-    }
-
-    pub fn get_next_block_label_forced(&self) -> &Label {
-        self.next_block_label
-            .as_ref()
-            .expect("Compiler Error: No next block")
-    }
-
-    pub fn set_next_as_current(&mut self) {
-        self.current_block = self
-            .next_block_label
-            .as_ref()
-            .expect("Compiler Error: No next block")
-            .id();
-        self.next_block_label = None;
     }
 
     // fn set_terminator(&mut self, terminator: ControlFlow) {
@@ -733,11 +753,15 @@ impl Function {
     // }
 
     pub fn make_omega(&mut self, target: Register) {
+        let blocks = Arc::new(Mutex::new(Vec::new()));
+
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            // Use the same Arc<Mutex> for both the instruction and the tracking map
             block.instructions.push(Instruction::Omega {
-                target,
-                writable_blocks: Vec::new(),
+                target: target.clone(),
+                writable_blocks: Arc::clone(&blocks), // Share the same Arc
             });
+            self.omega_blocks.insert(target, blocks);
         }
     }
 
@@ -753,171 +777,166 @@ impl Function {
                 self.name.as_str().into()
             }
         )?;
-
         for (i, reg) in self.params.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
             write!(f, "{}", format_register(reg, do_color))?;
         }
-
         writeln!(f, ") -> {} {{", format_type(self.return_type, do_color))?;
 
-        // TODO: Maybe rework this using a heap instead of a queue, key will be the block id
-        // Print blocks in order, starting with entry block
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = vec![self.entry_block];
+        // Removed queue logic: instead, collect and sort blocks by label id
+        let mut blocks: Vec<&BasicBlock> = self.blocks.values().collect();
+        blocks.sort_by_key(|block| block.label.id());
+        for block in blocks {
+            // Print block label
+            writeln!(f, "{}:", format_label(block.label.name(), do_color))?;
 
-        while let Some(block_id) = queue.pop() {
-            if !visited.insert(block_id) {
-                continue;
-            }
-
-            if let Some(block) = self.blocks.get(&block_id) {
-                // Print block label
-                writeln!(f, "{}:", format_label(block.label.name(), do_color))?;
-
-                // Print instructions
-                for inst in &block.instructions {
-                    write!(f, "    ")?;
-                    match inst {
-                        Instruction::Assign { target, value } => {
-                            writeln!(
-                                f,
-                                "{} := {}",
-                                format_register(target, do_color),
-                                format_operand(value, do_color)
-                            )?;
-                        }
-                        Instruction::Binary {
-                            target,
-                            op,
-                            lhs,
-                            rhs,
-                        } => {
-                            writeln!(
-                                f,
-                                "{} := {} {} {}",
-                                format_register(target, do_color),
-                                format_operand(lhs, do_color),
-                                format_binop(op, do_color),
-                                format_operand(rhs, do_color)
-                            )?;
-                        }
-                        Instruction::Unary {
-                            target,
-                            op,
-                            operand,
-                        } => {
-                            writeln!(
-                                f,
-                                "{} := {}{}",
-                                format_register(target, do_color),
-                                format_unop(op, do_color),
-                                format_operand(operand, do_color)
-                            )?;
-                        }
-                        Instruction::Load { target, address } => {
-                            writeln!(
-                                f,
-                                "{} := {} {}",
-                                format_register(target, do_color),
-                                format_keyword("load", do_color),
-                                format_operand(address, do_color)
-                            )?;
-                        }
-                        Instruction::Store { address, value } => {
-                            writeln!(
-                                f,
-                                "{} {} <- {}",
-                                format_keyword("store", do_color),
-                                format_operand(address, do_color),
-                                format_operand(value, do_color)
-                            )?;
-                        }
-                        Instruction::Alloca { target } => {
-                            writeln!(
-                                f,
-                                "{} := {}",
-                                format_register(target, do_color),
-                                format_keyword("alloca", do_color),
-                            )?;
-                        }
-                        Instruction::Call { target, name, args } => {
-                            if let Some(target) = target {
-                                write!(f, "{} := ", format_register(target, do_color))?;
-                            }
-                            write!(f, "{} {}(", format_keyword("call", do_color), name)?;
-                            for (i, arg) in args.iter().enumerate() {
-                                if i > 0 {
-                                    write!(f, ", ")?;
-                                }
-                                write!(f, "{}", format_operand(arg, do_color))?;
-                            }
-                            writeln!(f, ")")?;
-                        }
-                        Instruction::Omega {
-                            target,
-                            writable_blocks,
-                        } => {
-                            write!(
-                                f,
-                                "{} := {} [",
-                                format_register(target, do_color),
-                                format_keyword("Ω", do_color)
-                            )?;
-                            for (i, block) in writable_blocks.iter().enumerate() {
-                                if i > 0 {
-                                    write!(f, ", ")?;
-                                }
-                                write!(f, "{}", format_label(block.name(), do_color))?;
-                            }
-                            writeln!(f, "]")?;
-                        }
-                    }
-                }
-
-                // Print terminator
+            // Print instructions
+            for inst in &block.instructions {
                 write!(f, "    ")?;
-                match &block.terminator {
-                    ControlFlow::Jump { target, writes } => {
+                match inst {
+                    Instruction::Assign { target, value } => {
                         writeln!(
                             f,
-                            "{} {} {}",
-                            format_keyword("jump", do_color),
-                            format_label(target.name(), do_color),
-                            format_omikron_writes(writes, do_color)
+                            "{} := {}",
+                            format_register(target, do_color),
+                            format_operand(value, do_color)
                         )?;
-                        queue.push(target.id());
                     }
-                    ControlFlow::Branch {
-                        condition,
-                        if_true: (true_label, true_writes),
-                        if_false: (false_label, false_writes),
+                    Instruction::Binary {
+                        target,
+                        op,
+                        lhs,
+                        rhs,
                     } => {
                         writeln!(
                             f,
-                            "{} {} ? {} {}, {} {}",
-                            format_keyword("branch", do_color),
-                            format_operand(condition, do_color),
-                            format_label(true_label.name(), do_color),
-                            format_omikron_writes(true_writes, do_color),
-                            format_label(false_label.name(), do_color),
-                            format_omikron_writes(false_writes, do_color)
+                            "{} := {} {} {}",
+                            format_register(target, do_color),
+                            format_operand(lhs, do_color),
+                            format_binop(op, do_color),
+                            format_operand(rhs, do_color)
                         )?;
-                        queue.push(true_label.id());
-                        queue.push(false_label.id());
                     }
-                    ControlFlow::Return(value) => {
-                        write!(f, "{}", format_keyword("return", do_color))?;
-                        if let Some(val) = value {
-                            write!(f, " {}", format_operand(val, do_color))?;
+                    Instruction::Unary {
+                        target,
+                        op,
+                        operand,
+                    } => {
+                        writeln!(
+                            f,
+                            "{} := {}{}",
+                            format_register(target, do_color),
+                            format_unop(op, do_color),
+                            format_operand(operand, do_color)
+                        )?;
+                    }
+                    Instruction::Load { target, address } => {
+                        writeln!(
+                            f,
+                            "{} := {} {}",
+                            format_register(target, do_color),
+                            format_keyword("load", do_color),
+                            format_operand(address, do_color)
+                        )?;
+                    }
+                    Instruction::Store { address, value } => {
+                        writeln!(
+                            f,
+                            "{} {} <- {}",
+                            format_keyword("store", do_color),
+                            format_operand(address, do_color),
+                            format_operand(value, do_color)
+                        )?;
+                    }
+                    Instruction::Alloca { target } => {
+                        writeln!(
+                            f,
+                            "{} := {}",
+                            format_register(target, do_color),
+                            format_keyword("alloca", do_color)
+                        )?;
+                    }
+                    Instruction::Call { target, name, args } => {
+                        if let Some(target) = target {
+                            write!(f, "{} := ", format_register(target, do_color))?;
                         }
-                        writeln!(f)?;
+                        write!(f, "{} {}(", format_keyword("call", do_color), name)?;
+                        for (i, arg) in args.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", format_operand(arg, do_color))?;
+                        }
+                        writeln!(f, ")")?;
+                    }
+                    Instruction::Omega {
+                        target,
+                        writable_blocks,
+                    } => {
+                        write!(
+                            f,
+                            "{} := {} [",
+                            format_register(target, do_color),
+                            format_keyword("Ω", do_color)
+                        )?;
+                        for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", format_label(block.name(), do_color))?;
+                        }
+                        writeln!(f, "]")?;
                     }
                 }
-                writeln!(f)?;
             }
+
+            // Print terminator
+            write!(f, "    ")?;
+            match &block.terminator {
+                ControlFlow::Jump { target, writes } => {
+                    writeln!(
+                        f,
+                        "{} {} {}",
+                        format_keyword("jump", do_color),
+                        format_label(target.name(), do_color),
+                        format_omikron_writes(writes, do_color)
+                    )?;
+                }
+                ControlFlow::Branch {
+                    condition,
+                    if_true: (true_label, true_writes),
+                    if_false: (false_label, false_writes),
+                } => {
+                    writeln!(
+                        f,
+                        "{} {} ? {} {}, {} {}",
+                        format_keyword("branch", do_color),
+                        format_operand(condition, do_color),
+                        format_label(true_label.name(), do_color),
+                        format_omikron_writes(true_writes, do_color),
+                        format_label(false_label.name(), do_color),
+                        format_omikron_writes(false_writes, do_color)
+                    )?;
+                }
+                ControlFlow::Return(value) => {
+                    write!(f, "{}", format_keyword("return", do_color))?;
+                    if let Some(val) = value {
+                        write!(f, " {}", format_operand(val, do_color))?;
+                    }
+                    writeln!(f)?;
+                }
+                ControlFlow::Fallthrough(writes) => {
+                    writeln!(
+                        f,
+                        "{} {}",
+                        format_keyword("fallthrough", do_color),
+                        format_omikron_writes(writes, do_color)
+                    )?;
+                }
+            }
+            writeln!(f)?;
         }
 
         writeln!(f, "}}")

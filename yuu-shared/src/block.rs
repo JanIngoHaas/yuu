@@ -71,6 +71,7 @@ pub enum FunctionOverloadError {
     BindingNotFound,
 }
 
+// TODO: Wrap this in a box; we have pointers to it. When the root block is moved, the pointers are invalidated and point to garbage / other data.
 pub struct RootBlock {
     arena: Vec<Block>,
     root: usize,
@@ -187,7 +188,10 @@ impl Block {
     ) -> Result<(), SemanticError> {
         match self.bindings.get_mut(&name) {
             Some(BindingInfoKind::Unique(_)) => {
-                panic!("User bug: Function {} already declared", name)
+                panic!(
+                    "Bug: Function {} already declared - not sure if this should ever happen",
+                    name
+                )
             }
             Some(BindingInfoKind::Ambiguous(funcs)) => {
                 funcs.push(BindingInfo {

@@ -48,7 +48,7 @@ impl Context {
             .insert(T::resource_name(), Arc::new(Mutex::new(pass_data)));
     }
 
-    pub fn require_pass_data<T: ResourceId>(&self, pass: &impl Pass) -> Arc<Mutex<T>> {
+    pub fn get_resource<T: ResourceId>(&self, pass: &impl Pass) -> Arc<Mutex<T>> {
         self.passes_data
             .get(T::resource_name())
             .map(|arc| {

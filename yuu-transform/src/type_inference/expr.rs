@@ -289,7 +289,7 @@ fn infer_if_expr(
     })?;
 
     if let Some(else_body) = expr.else_block.as_ref() {
-        let ty = infer_expr(else_body, block, data, None)?;
+        let ty = infer_block(else_body, block, data)?;
         if let Err(_) = out_ty.unify(ty) {
             panic!(
                 "User Error: Types of if expr branches don't coerce to same type: {} and {}",

@@ -28,7 +28,7 @@ impl Default for PassYirToColoredString {
 
 impl Pass for PassYirToColoredString {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.require_pass_data::<Module>(self);
+        let module = context.get_resource::<Module>(self);
         let module = module.lock().unwrap();
         let mut f = String::new();
         module.format_yir(true, &mut f)?;
@@ -60,7 +60,7 @@ impl ResourceId for YirTextualRepresentation {
 
 impl Pass for PassYirToString {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.require_pass_data::<Module>(self);
+        let module = context.get_resource::<Module>(self);
         let module = module.lock().unwrap();
         let ir_string = format!("{}", module);
         context.add_pass_data(YirTextualRepresentation(ir_string));
@@ -122,9 +122,9 @@ mod tests {
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 
-        // Print the pass dependency graph in DOT format for debugging
-        println!("Pass Dependencies:");
-        schedule.print_dot();
+        // // Print the pass dependency graph in DOT format for debugging
+        // println!("Pass Dependencies:");
+        // schedule.print_dot();
 
         // Run the schedule
         let scheduler = Scheduler::new();
@@ -133,7 +133,7 @@ mod tests {
             .expect("Failed to run schedule");
 
         // Get the YIR output
-        let yir_output = context.require_pass_data::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
         let yir_output = yir_output.lock().unwrap();
         println!("Generated YIR:\n{}", yir_output.0);
     }

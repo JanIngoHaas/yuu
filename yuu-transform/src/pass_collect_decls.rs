@@ -47,7 +47,7 @@ impl PassCollectDecls {
 
 impl Pass for PassCollectDecls {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let ast = context.require_pass_data::<AST>(self);
+        let ast = context.get_resource::<AST>(self);
 
         let mut type_info_table = TypeInfoTable::new();
         let mut root_block = RootBlock::new(&mut type_info_table);

@@ -6,7 +6,7 @@ pub struct ParsePass;
 
 impl Pass for ParsePass {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let code_info = context.require_pass_data::<UnprocessedCodeInfo>(self);
+        let code_info = context.get_resource::<UnprocessedCodeInfo>(self);
         let code_info = code_info.lock().unwrap();
         let code_info = &*code_info;
         let mut parser = Parser::new(code_info);

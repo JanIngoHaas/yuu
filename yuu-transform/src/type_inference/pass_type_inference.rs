@@ -20,9 +20,9 @@ impl PassTypeInference {
 
 impl Pass for PassTypeInference {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let root_block = context.require_pass_data::<Box<RootBlock>>(self);
-        let ast = context.require_pass_data::<AST>(self);
-        let type_info_table = context.require_pass_data::<TypeInfoTable>(self);
+        let root_block = context.get_resource::<Box<RootBlock>>(self);
+        let ast = context.get_resource::<AST>(self);
+        let type_info_table = context.get_resource::<TypeInfoTable>(self);
 
         let mut root_block = root_block.lock().unwrap();
         let ast = ast.lock().unwrap();

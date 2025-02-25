@@ -83,7 +83,7 @@ pub struct IfExpr {
     pub span: Span,
     pub if_block: ConditionWithBody,
     pub else_if_blocks: Vec<ConditionWithBody>,
-    pub else_block: Option<Box<ExprNode>>,
+    pub else_block: Option<BlockExpr>,
 }
 
 /// Represents a binary expression (e.g., a + b)

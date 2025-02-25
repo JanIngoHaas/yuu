@@ -241,7 +241,7 @@ impl<'a> Parser<'a> {
             let _ = self.lexer.next_token()?;
             let (body_span, block) = self.parse_block_expr()?;
             last_body_span = body_span;
-            Some(Box::new(ExprNode::Block(block)))
+            Some(block)
         } else {
             None
         };

@@ -176,31 +176,22 @@ impl<'a> TransientData<'a> {
         self.block_iter.descend();
 
         // For labeled blocks, create omega register
-        let omega = if let Some(label) = &block_expr.label {
-            let binding = self
-                .block_iter
-                .peek()
-                .get_unique_binding_forced(label)
-                .expect("Compiler bug: Block binding not found");
+        let omega_with_label =
+            if let Some((label, binding)) = &self.block_iter.peek().named_block_binding {
+                let omega = self
+                    .function
+                    .fresh_register("block_return".to_string(), self.get_type(block_expr.id));
+                self.function.make_omega(omega.clone());
 
-            let omega = self
-                .function
-                .fresh_register("block_return".to_string(), self.get_type(block_expr.id));
-            self.function.make_omega(omega.clone());
+                // Make a labeld_block_merge bb that we jump to...
+                let block = self.function.add_block(format!("{}_merge", label));
+                self.block_labels
+                    .insert(binding.id, (block.clone(), omega.clone())); // That's where we jump to from deep within the callstack
 
-            // Store for break targets
-            self.block_labels.insert(
-                binding.id,
-                (
-                    self.function.get_next_block_label_forced().clone(),
-                    omega.clone(),
-                ),
-            );
-
-            Some(omega)
-        } else {
-            None
-        };
+                Some((omega, block))
+            } else {
+                None
+            };
 
         // Process statements in current block
         for stmt in &block_expr.body {
@@ -211,23 +202,22 @@ impl<'a> TransientData<'a> {
         if let Some(last_expr) = &block_expr.last_expr {
             let value = self.lower_expr(last_expr);
 
-            match omega {
+            match omega_with_label {
                 // Labeled block: jump to next with value in omega
-                Some(omega) => {
+                Some((omega, label)) => {
                     self.function
-                        .make_jump_to_next_block_label(vec![(omega.clone(), value)]);
+                        .make_jump(label.clone(), vec![(omega.clone(), value)]);
+                    self.function.set_current_block(&label);
                     Operand::Register(omega)
                 }
-                // Unlabeled block:
-                _ => {
-                    // Jump to next block, pass operand back to caller
-                    self.function.make_jump_to_next_block_label(vec![]);
-                    value
-                }
+                // Unlabeled block: Just return the value, no jumping around needed
+                _ => value,
             }
+        // Doesnt have a last_expr, so... just jump to the next block, not writing anything
         } else {
-            if let Some(omega) = omega {
-                self.function.make_jump_to_next_block_label(vec![]);
+            if let Some((omega, label)) = omega_with_label {
+                self.function.make_jump(label.clone(), vec![]);
+                self.function.set_current_block(&label);
                 Operand::Register(omega)
             } else {
                 Operand::NoOp
@@ -247,9 +237,7 @@ impl<'a> TransientData<'a> {
             StmtNode::Break(exit_stmt) => {
                 let value = self.lower_expr(&exit_stmt.value);
 
-                if exit_stmt.target == FUNC_BLOCK_NAME {
-                    self.function.make_return(Some(value));
-                } else if let Some(target_binding) = self.block.get_name(&exit_stmt.target) {
+                if let Some(target_binding) = self.block.get_name(&exit_stmt.target) {
                     // Look up the target block's label and omega register
                     if let Some((target_label, omega_reg)) =
                         self.block_labels.get(&target_binding.id)
@@ -264,53 +252,46 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_if_expr(&mut self, if_expr: &IfExpr) -> Operand {
-        // 1. Evaluate condition
+        // Evaluate the condition
         let cond = self.lower_expr(&if_expr.if_block.condition);
 
-        // 2. Create then/else blocks
+        // Create all blocks first, merge will be the next block for both branches
         let (then_label, else_label) = self.function.make_branch(cond, vec![], vec![]);
         let merge_label = self.function.add_block("merge".to_string());
 
-        // 3. Create result register if needed
-        let omega_reg = if !self.get_type(if_expr.id).is_nil() {
-            let omega = self
-                .function
-                .fresh_register("if_result".to_string(), self.get_type(if_expr.id));
-            self.function.make_omega(omega.clone());
-            Some(omega)
-        } else {
-            None
-        };
+        // Create omega register and declare it in current block
+        let omega = self
+            .function
+            .fresh_register("if_result".to_string(), self.get_type(if_expr.id));
+        self.function.make_omega(omega.clone());
 
-        // 5. Lower then block
-        self.function
-            .set_current_block(&then_label, merge_label.clone());
+        // Lower the then block, setting merge as its next block
+        self.function.set_current_block(&then_label);
         let then_value = self.lower_block_expr(&if_expr.if_block.body);
-        if let Some(omega) = &omega_reg {
-            self.function
-                .make_jump(merge_label.clone(), vec![(omega.clone(), then_value)]);
-        } else {
-            self.function.make_jump(merge_label.clone(), vec![]);
-        }
-
-        // 6. Lower else block
+        println!(
+            "current block then: {}",
+            self.function.get_current_block_label()
+        );
         self.function
-            .set_current_block(&else_label, merge_label.clone());
-        if let Some(else_block) = &if_expr.else_block {
-            let value = self.lower_expr(else_block);
-            if let Some(omega) = &omega_reg {
-                self.function
-                    .make_jump(merge_label.clone(), vec![(omega.clone(), value)]);
-            } else {
-                self.function.make_jump(merge_label.clone(), vec![]);
-            }
-        } else {
-            self.function.make_jump(merge_label.clone(), vec![]);
-        };
+            .make_jump(merge_label.clone(), vec![(omega.clone(), then_value)]);
 
-        // 7. Continue in merge block
-        self.function.set_next_as_current();
-        omega_reg.map(Operand::Register).unwrap_or(Operand::NoOp)
+        // Lower the else block, also setting merge as its next block
+        self.function.set_current_block(&else_label);
+        let else_value = if let Some(else_block) = &if_expr.else_block {
+            self.lower_block_expr(else_block)
+        } else {
+            Operand::NoOp
+        };
+        println!(
+            "current block else: {}",
+            self.function.get_current_block_label()
+        );
+        self.function
+            .make_jump(merge_label.clone(), vec![(omega.clone(), else_value)]);
+
+        // Set merge block as current (no next block needed since it's the end)
+        self.function.set_current_block(&merge_label);
+        Operand::Register(omega)
     }
 }
 
@@ -358,7 +339,8 @@ impl PassAstToYir {
             }
 
             // Process the function body block
-            data.lower_block_expr(&func.body);
+            let final_out = data.lower_block_expr(&func.body);
+            data.function.make_return(Some(final_out));
             module.define_function(data.function);
         }
 
@@ -368,9 +350,9 @@ impl PassAstToYir {
 
 impl Pass for PassAstToYir {
     fn run(&self, context: &mut yuu_shared::context::Context) -> anyhow::Result<()> {
-        let ast = context.require_pass_data::<AST>(self);
-        let type_info_table = context.require_pass_data::<TypeInfoTable>(self);
-        let root_block = context.require_pass_data::<Box<RootBlock>>(self);
+        let ast = context.get_resource::<AST>(self);
+        let type_info_table = context.get_resource::<TypeInfoTable>(self);
+        let root_block = context.get_resource::<Box<RootBlock>>(self);
 
         let ast = ast.lock().unwrap();
         let type_info_table = type_info_table.lock().unwrap();

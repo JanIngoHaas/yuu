@@ -121,7 +121,7 @@ pub fn infer_structural(
             //     infer_stmt(stmt, func_block, data)?;
             // }
 
-            infer_block(&def.body, block, data)?;
+            infer_block(&def.body, func_block, data)?;
 
             Ok(())
         }

@@ -225,7 +225,7 @@ impl PassYirToC {
                 }
                 write!(data.output, "    goto ")?;
                 Self::write_label_name(true_label.name(), &mut data.output)?;
-                writeln!(data.output, "}}")?;
+                writeln!(data.output, ";}}")?;
 
                 writeln!(data.output, "else{{")?;
                 // Generate false branch writes
@@ -238,7 +238,7 @@ impl PassYirToC {
                 }
                 write!(data.output, "    goto ")?;
                 Self::write_label_name(false_label.name(), &mut data.output)?;
-                writeln!(data.output, "}}")?;
+                writeln!(data.output, ";}}")?;
             }
             ControlFlow::Return(value) => {
                 write!(data.output, "    return ")?;
@@ -247,17 +247,28 @@ impl PassYirToC {
                 }
                 writeln!(data.output, ";")?;
             }
+            ControlFlow::Fallthrough(writes) => {
+                // Generate Omikron writes
+                for (reg, value) in writes {
+                    write!(data.output, "    ")?;
+                    Self::write_register_name(reg, &mut data.output)?;
+                    write!(data.output, "=")?;
+                    self.gen_operand(data, value)?;
+                    writeln!(data.output, ";")?;
+                }
+                // We just fall-through to the next block... Nothing to do here
+            }
         }
         Ok(())
     }
 
     fn gen_function(&self, func: &Function, data: &mut TransientData) -> anyhow::Result<()> {
-        self.gen_block(&func.blocks[&func.entry_block], data)?;
+        // Ascending order of block IDs
+        let mut blocks: Vec<&BasicBlock> = func.blocks.iter().map(|(_, block)| block).collect();
+        blocks.sort_by_key(|block| block.label.id());
 
-        for (_, block) in &func.blocks {
-            if block.label.name() != "entry" {
-                self.gen_block(block, data)?;
-            }
+        for block in blocks {
+            self.gen_block(block, data)?;
         }
         Ok(())
     }
@@ -324,7 +335,7 @@ impl ResourceId for CSourceCode {
 
 impl Pass for PassYirToC {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.require_pass_data::<Module>(self);
+        let module = context.get_resource::<Module>(self);
         let module = module.lock().unwrap();
         let mut data = TransientData {
             module: &module,
@@ -370,14 +381,14 @@ mod tests {
         let code_info = UnprocessedCodeInfo {
             code: Arc::from(
                 r#"fn fac(n: i64) -> i64 {
-                    out if n == 0 {
-                        out 1;
-                    }
-                    else {
-                        let n_out = n * fac(n - 1);
-                        out n_out;
-                    };
-                }"#,
+                if n == 0 {
+                    1!
+                }
+                else {
+                    let n_out = n * fac(n - 1);
+                    return n_out;
+                }!
+            }"#,
             ),
             file_name: Arc::from("test.yuu"),
         };
@@ -403,7 +414,7 @@ mod tests {
             .expect("Failed to run schedule");
 
         // Get and print the generated C code
-        let c_code = context.require_pass_data::<CSourceCode>(&PassYirToC);
+        let c_code = context.get_resource::<CSourceCode>(&PassYirToC);
         let c_code = c_code.lock().unwrap();
         println!("Generated C code:\n\n```C\n{}\n```", c_code.0);
     }
