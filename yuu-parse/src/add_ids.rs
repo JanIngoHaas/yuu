@@ -101,7 +101,7 @@ impl AddId for StmtNode {
             StmtNode::Atomic(expr) => expr.add_id(gen),
             StmtNode::Break(exit_stmt) => {
                 exit_stmt.id = gen.next();
-                exit_stmt.value.add_id(gen);
+                exit_stmt.expr.add_id(gen);
             }
         }
     }

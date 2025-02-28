@@ -6,7 +6,7 @@ use yuu_shared::{
         BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, NodeId, StmtNode, StructuralNode, UnaryOp,
         AST,
     },
-    block::{self, Block, BlockIterator, RootBlock, FUNC_BLOCK_NAME},
+    block::{self, BindingTable, Block, RootBlock, FUNC_BLOCK_NAME},
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
     yir::{
@@ -18,19 +18,21 @@ use yuu_shared::{
 pub struct TransientData<'a> {
     pub function: Function,
     type_table: &'a TypeInfoTable,
-    block: &'a Block,
-    block_iter: BlockIterator<'a>, // Add iterator
+    binding_table: &'a BindingTable,
     register_bindings: hashbrown::HashMap<NodeId, Register>,
     block_labels: hashbrown::HashMap<NodeId, (yir::Label, Register)>, // Maps block ID to its label and omega register
 }
 
 impl<'a> TransientData<'a> {
-    fn new(function: Function, type_table: &'a TypeInfoTable, block: &'a Block) -> Self {
+    fn new(
+        function: Function,
+        type_table: &'a TypeInfoTable,
+        binding_table: &'a BindingTable,
+    ) -> Self {
         Self {
             function,
             type_table,
-            block,
-            block_iter: BlockIterator::new(block), // Initialize iterator
+            binding_table,
             register_bindings: hashbrown::HashMap::new(),
             block_labels: hashbrown::HashMap::new(),
         }
@@ -114,18 +116,22 @@ impl<'a> TransientData<'a> {
             ExprNode::If(if_expr) => self.lower_if_expr(if_expr),
 
             ExprNode::Ident(ident_expr) => {
-                if let Some(binding) = self.block.get_unique_binding_forced(&ident_expr.ident) {
-                    if let Some(reg) = self.register_bindings.get(&binding.id) {
-                        let ty = self.get_type(ident_expr.id);
-                        let result = self.function.make_load(
-                            "load_result".to_string(),
-                            Operand::Register(reg.clone()),
-                            ty,
-                        );
-                        Operand::Register(result)
-                    } else {
-                        Operand::NoOp
-                    }
+                debug_assert!(self.binding_table.contains_key(&ident_expr.id));
+                debug_assert!(self
+                    .register_bindings
+                    .contains_key(&self.binding_table[&ident_expr.id]));
+                if let Some(reg) = self
+                    .binding_table
+                    .get(&ident_expr.id)
+                    .and_then(|x| self.register_bindings.get(x))
+                {
+                    let ty = self.get_type(ident_expr.id);
+                    let result = self.function.make_load(
+                        "load_result".to_string(),
+                        Operand::Register(reg.clone()),
+                        ty,
+                    );
+                    Operand::Register(result)
                 } else {
                     Operand::NoOp
                 }
@@ -173,25 +179,22 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
-        self.block_iter.descend();
-
         // For labeled blocks, create omega register
-        let omega_with_label =
-            if let Some((label, binding)) = &self.block_iter.peek().named_block_binding {
-                let omega = self
-                    .function
-                    .fresh_register("block_return".to_string(), self.get_type(block_expr.id));
-                self.function.make_omega(omega.clone());
+        let omega_with_label = if let Some(label) = block_expr.label.as_ref() {
+            let omega = self
+                .function
+                .fresh_register("block_return".to_string(), self.get_type(block_expr.id));
+            self.function.make_omega(omega.clone());
 
-                // Make a labeld_block_merge bb that we jump to...
-                let block = self.function.add_block(format!("{}_merge", label));
-                self.block_labels
-                    .insert(binding.id, (block.clone(), omega.clone())); // That's where we jump to from deep within the callstack
+            // Make a labeld_block_merge bb that we jump to...
+            let block = self.function.add_block(format!("{}_merge", label));
+            self.block_labels
+                .insert(block_expr.id, (block.clone(), omega.clone())); // That's where we jump to from deep within the callstack
 
-                Some((omega, block))
-            } else {
-                None
-            };
+            Some((omega, block))
+        } else {
+            None
+        };
 
         // Process statements in current block
         for stmt in &block_expr.body {
@@ -206,7 +209,7 @@ impl<'a> TransientData<'a> {
                 // Labeled block: jump to next with value in omega
                 Some((omega, label)) => {
                     self.function
-                        .make_jump(label.clone(), vec![(omega.clone(), value)]);
+                        .make_jump_if_no_terminator(label.clone(), vec![(omega.clone(), value)]);
                     self.function.set_current_block(&label);
                     Operand::Register(omega)
                 }
@@ -216,7 +219,8 @@ impl<'a> TransientData<'a> {
         // Doesnt have a last_expr, so... just jump to the next block, not writing anything
         } else {
             if let Some((omega, label)) = omega_with_label {
-                self.function.make_jump(label.clone(), vec![]);
+                self.function
+                    .make_jump_if_no_terminator(label.clone(), vec![]);
                 self.function.set_current_block(&label);
                 Operand::Register(omega)
             } else {
@@ -235,17 +239,20 @@ impl<'a> TransientData<'a> {
                 let _ = self.lower_expr(expr);
             }
             StmtNode::Break(exit_stmt) => {
-                let value = self.lower_expr(&exit_stmt.value);
-
-                if let Some(target_binding) = self.block.get_name(&exit_stmt.target) {
-                    // Look up the target block's label and omega register
-                    if let Some((target_label, omega_reg)) =
-                        self.block_labels.get(&target_binding.id)
-                    {
-                        // Write the break value to the block's omega register
-                        self.function
-                            .make_jump(target_label.clone(), vec![(omega_reg.clone(), value)]);
-                    }
+                let value = self.lower_expr(&exit_stmt.expr);
+                // debug_assert!(self.binding_table.contains_key(&exit_stmt.id));
+                // debug_assert!(self
+                //     .block_labels
+                //     .contains_key(&self.binding_table[&exit_stmt.id]));
+                if let Some((target_label, omega_reg)) = self
+                    .binding_table
+                    .get(&exit_stmt.id)
+                    .and_then(|x| self.block_labels.get(x))
+                {
+                    println!("HI2");
+                    // Write the break value to the block's omega register
+                    self.function
+                        .make_jump(target_label.clone(), vec![(omega_reg.clone(), value)]);
                 }
             }
         }
@@ -268,12 +275,8 @@ impl<'a> TransientData<'a> {
         // Lower the then block, setting merge as its next block
         self.function.set_current_block(&then_label);
         let then_value = self.lower_block_expr(&if_expr.if_block.body);
-        println!(
-            "current block then: {}",
-            self.function.get_current_block_label()
-        );
         self.function
-            .make_jump(merge_label.clone(), vec![(omega.clone(), then_value)]);
+            .make_jump_if_no_terminator(merge_label.clone(), vec![(omega.clone(), then_value)]);
 
         // Lower the else block, also setting merge as its next block
         self.function.set_current_block(&else_label);
@@ -282,12 +285,9 @@ impl<'a> TransientData<'a> {
         } else {
             Operand::NoOp
         };
-        println!(
-            "current block else: {}",
-            self.function.get_current_block_label()
-        );
+
         self.function
-            .make_jump(merge_label.clone(), vec![(omega.clone(), else_value)]);
+            .make_jump_if_no_terminator(merge_label.clone(), vec![(omega.clone(), else_value)]);
 
         // Set merge block as current (no next block needed since it's the end)
         self.function.set_current_block(&merge_label);
@@ -308,7 +308,7 @@ impl PassAstToYir {
         Self
     }
 
-    fn lower_ast(&self, ast: &AST, tit: &TypeInfoTable, root_block: &RootBlock) -> Module {
+    fn lower_ast(&self, ast: &AST, tit: &TypeInfoTable, binding_table: &BindingTable) -> Module {
         let mut module = Module::new();
 
         // Define functions
@@ -324,7 +324,7 @@ impl PassAstToYir {
             let mut data = TransientData::new(
                 Function::new(func.decl.name.clone(), return_type),
                 tit,
-                root_block.root(), // Use root block from type inference
+                binding_table,
             );
 
             // Add parameters
@@ -352,13 +352,13 @@ impl Pass for PassAstToYir {
     fn run(&self, context: &mut yuu_shared::context::Context) -> anyhow::Result<()> {
         let ast = context.get_resource::<AST>(self);
         let type_info_table = context.get_resource::<TypeInfoTable>(self);
-        let root_block = context.get_resource::<Box<RootBlock>>(self);
+        let binding_table = context.get_resource::<BindingTable>(self);
 
         let ast = ast.lock().unwrap();
         let type_info_table = type_info_table.lock().unwrap();
-        let root_block = root_block.lock().unwrap();
+        let binding_table = binding_table.lock().unwrap();
 
-        let module = self.lower_ast(&ast, &type_info_table, &root_block);
+        let module = self.lower_ast(&ast, &type_info_table, &binding_table);
 
         context.add_pass_data(module);
         Ok(())
@@ -370,7 +370,7 @@ impl Pass for PassAstToYir {
     {
         schedule.requires_resource_read::<AST>(&self);
         schedule.requires_resource_read::<TypeInfoTable>(&self);
-        schedule.requires_resource_read::<Box<RootBlock>>(&self);
+        schedule.requires_resource_read::<BindingTable>(&self);
         schedule.produces_resource::<Module>(&self);
         schedule.add_pass(self);
     }

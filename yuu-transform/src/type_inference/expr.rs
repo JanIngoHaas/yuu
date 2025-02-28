@@ -17,7 +17,7 @@ use yuu_shared::{
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::{resolve_function_overload, TransientData};
+use super::{pass_type_inference::TransientData, resolve_function_overload};
 
 fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
@@ -83,13 +83,15 @@ fn infer_ident(
         );
     })?;
 
-    let out = match binding {
-        BindingInfoKind::Unique(var) => data
-            .type_info_table
-            .types
-            .get(&var.id)
-            .cloned()
-            .expect("Compiler Bug: Variable binding not found in type table"),
+    let (ty, nid) = match binding {
+        BindingInfoKind::Unique(var) => (
+            data.type_info_table
+                .types
+                .get(&var.id)
+                .cloned()
+                .expect("Compiler Bug: Variable binding not found in type table"),
+            var.id,
+        ),
         BindingInfoKind::Ambiguous(funcs) => {
             let binding_info = resolve_function_overload(
                 &funcs,
@@ -105,38 +107,28 @@ fn infer_ident(
                 .cloned()
                 .expect("Compiler Bug: Function binding not found in type table");
 
-            data.type_info_table
-                .types
-                .insert(ident_expr.id, resolved_func_type);
+            // data.type_info_table
+            //     .types
+            //     .insert(ident_expr.id, resolved_func_type);
 
-            resolved_func_type
+            (resolved_func_type, binding_info.id)
         }
     };
 
-    data.type_info_table.types.insert(ident_expr.id, out);
-    Ok(out)
+    data.type_info_table.types.insert(ident_expr.id, ty);
+    data.binding_table.insert(ident_expr.id, nid);
+    Ok(ty)
 }
 
-pub fn infer_block(
+pub fn infer_block_no_child_creation(
     block_expr: &BlockExpr,
-    parent_block: &mut Block,
+    root_func_block: &mut Block,
     data: &mut TransientData,
 ) -> Result<&'static TypeInfo, SemanticError> {
-    let child_block = if let Some(label) = &block_expr.label {
-        let binding = BindingInfo {
-            id: block_expr.id,
-            src_location: Some(block_expr.span.clone()),
-            is_mut: false,
-        };
-        parent_block.make_child(Some((label.clone(), binding)))
-    } else {
-        parent_block.make_child(None)
-    };
-
     let mut break_ty = None;
 
     for stmt in &block_expr.body {
-        let out = super::infer_stmt(stmt, child_block, data)?;
+        let out = super::infer_stmt(stmt, root_func_block, data)?;
         if let super::ExitKind::Break = out {
             // Store break type but keep processing - we'll unify with last expr
             break_ty = Some(inactive_type());
@@ -145,7 +137,7 @@ pub fn infer_block(
 
     // Get last expression type if it exists
     let last_expr_ty = if let Some(last_expr) = &block_expr.last_expr {
-        let expr = infer_expr(last_expr, child_block, data, None)?;
+        let expr = infer_expr(last_expr, root_func_block, data, None)?;
         Some(expr)
     } else {
         None
@@ -165,6 +157,25 @@ pub fn infer_block(
         .unify_and_insert(block_expr.id, block_ty)
         .expect("User bug: Couldn't unify block type");
     Ok(out)
+}
+
+pub fn infer_block(
+    block_expr: &BlockExpr,
+    parent_block: &mut Block,
+    data: &mut TransientData,
+) -> Result<&'static TypeInfo, SemanticError> {
+    let child_block = if let Some(label) = &block_expr.label {
+        let binding = BindingInfo {
+            id: block_expr.id,
+            src_location: Some(block_expr.span.clone()),
+            is_mut: false,
+        };
+        parent_block.make_child(Some((label.clone(), binding)))
+    } else {
+        parent_block.make_child(None)
+    };
+
+    infer_block_no_child_creation(block_expr, child_block, data)
 }
 
 fn infer_func_call(
@@ -250,24 +261,28 @@ fn infer_if_expr(
     block: &mut Block,
     data: &mut TransientData,
 ) -> Result<&'static TypeInfo, SemanticError> {
+    // Check condition
     let cond_ty = infer_expr(&expr.if_block.condition, block, data, None)?;
     if let Err(err) = cond_ty.unify(primitive_bool()) {
         panic!(
-            "User Error: Condition of if expression must be of type bool, got {}",
+            "User Error: Condition must be of type bool, got {}",
             err.from
         );
     }
 
+    // This creates block A
     let then_ty = infer_block(&expr.if_block.body, block, data)?;
+
+    // Process else-if blocks...
     let if_types = expr.else_if_blocks.iter().map(|x| {
         // First check if we have a bool - if not -> error!
         if let Err(err) = cond_ty.unify(primitive_bool()) {
             panic!(
-                "User Error: Condition of if expression must be of type bool, got {}",
+                "User Error: Condition must be of type bool, got {}",
                 err.from
             );
         }
-
+        // This creates block B
         let ty = infer_block(&x.body, block, data)?;
         Ok::<_, SemanticError>(ty)
     });
@@ -288,7 +303,10 @@ fn infer_if_expr(
         }
     })?;
 
+    // And here is where the extra block gets created - when we call infer_block
+    // on the else block even though we already have a block for the else path
     if let Some(else_body) = expr.else_block.as_ref() {
+        // This creates block C - even though we already have a block for the else path!
         let ty = infer_block(else_body, block, data)?;
         if let Err(_) = out_ty.unify(ty) {
             panic!(

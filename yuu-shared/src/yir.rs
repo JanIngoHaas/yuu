@@ -541,6 +541,19 @@ impl Function {
             .collect()
     }
 
+    pub fn has_terminator(&self, block_id: i64) -> bool {
+        self.blocks
+            .get(&block_id)
+            .map(|block| !matches!(block.terminator, ControlFlow::Fallthrough(_)))
+            .unwrap_or(false)
+    }
+
+    pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
+        if !self.has_terminator(self.current_block) {
+            self.make_jump(target, writes);
+        }
+    }
+
     pub fn make_jump(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
         let writes = self.gen_writes_if_not_nop(writes);
         self.update_omega_writes(writes.iter());
@@ -735,7 +748,7 @@ impl Function {
             BasicBlock {
                 label: false_label.clone(),
                 instructions: Vec::new(),
-                terminator: ControlFlow::Return(None),
+                terminator: ControlFlow::Fallthrough(Vec::new()),
             },
         );
 

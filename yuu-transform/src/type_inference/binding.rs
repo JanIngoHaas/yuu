@@ -1,28 +1,32 @@
 use yuu_shared::{
     ast::{BindingNode, IdentBinding, NodeId},
     binding_info::BindingInfo,
-    block::FunctionOverloadError,
+    block::{Block, FunctionOverloadError},
     semantic_error::SemanticError,
     type_info::{TypeInfo, TypeInfoTable},
+    Span,
 };
 
-use super::TransientData;
+use super::pass_type_inference::TransientData;
 
-pub fn match_binding_node_to_type<'a, T>(
+pub fn match_binding_node_to_type<'a>(
     binding: &BindingNode,
+    block: &mut Block,
     ty: &'static TypeInfo,
-    mut match_resolver: T,
     data: &'a mut TransientData,
-) -> Result<(), SemanticError>
-where
-    T: FnMut(&IdentBinding, &'static TypeInfo, &'a mut TypeInfoTable) -> Result<(), SemanticError>,
-{
+) -> Result<(), SemanticError> {
     match binding {
-        BindingNode::Ident(ident) => {
-            match_resolver(ident, ty, data.type_info_table)?;
+        BindingNode::Ident(ident_binding) => {
+            block.insert_variable(
+                ident_binding.name.clone(),
+                ident_binding.id,
+                ident_binding.span.clone(),
+                ident_binding.is_mut,
+            );
+            data.type_info_table.types.insert(ident_binding.id, ty);
+            Ok(())
         }
-    };
-    Ok(())
+    }
 }
 
 pub fn resolve_function_overload(

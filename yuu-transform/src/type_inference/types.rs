@@ -1,37 +1,19 @@
+use std::ops::{Deref, DerefMut};
+
 use hashbrown::HashMap;
 use yuu_parse::add_ids::GetId;
 use yuu_shared::{
     ast::{NodeId, TypeNode, AST},
     binding_info::BindingInfo,
     block::Block,
+    scheduler::{ResourceId, ResourceName},
     semantic_error::SemanticError,
     type_info::{
         primitive_bool, primitive_f32, primitive_f64, primitive_i64, TypeInfo, TypeInfoTable,
     },
 };
 
-pub struct BindingTable {
-    pub bindings: HashMap<NodeId, BindingInfo>,
-}
-
-impl Default for BindingTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BindingTable {
-    pub fn new() -> Self {
-        Self {
-            bindings: HashMap::new(),
-        }
-    }
-}
-
-pub struct TransientData<'a> {
-    pub type_info_table: &'a mut TypeInfoTable,
-    pub ast: &'a AST,
-}
+use super::pass_type_inference::TransientData;
 
 pub fn infer_type(
     ty: &TypeNode,

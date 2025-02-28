@@ -1,4 +1,6 @@
-use crate::scheduler::ResourceId;
+use std::ops::{Deref, DerefMut};
+
+use crate::scheduler::{ResourceId, ResourceName};
 use crate::Span;
 use crate::{
     ast::NodeId,
@@ -20,42 +22,6 @@ pub struct Block {
     pub named_block_binding: Option<(String, BindingInfo)>,
 }
 
-#[derive(Copy, Clone)]
-pub struct BlockIterator<'a> {
-    current: &'a Block,
-    root_block: &'a RootBlock,
-}
-
-impl<'a> BlockIterator<'a> {
-    pub fn new(start: &'a Block) -> Self {
-        Self {
-            current: start,
-            root_block: start.get_root_block(),
-        }
-    }
-
-    /// Simply move to next block in arena
-    pub fn descend(&mut self) {
-        let next_id = self.current.id + 1;
-        if let Some(next_block) = self.root_block.arena.get(next_id) {
-            self.current = next_block;
-        }
-    }
-
-    /// Get current block without advancing
-    pub fn peek(&self) -> &'a Block {
-        self.current
-    }
-}
-
-impl<'a> Iterator for BlockIterator<'a> {
-    type Item = &'a Block;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(self.current)
-    }
-}
-
 unsafe impl Send for RootBlock {}
 
 impl ResourceId for Box<RootBlock> {
@@ -75,6 +41,35 @@ pub enum FunctionOverloadError {
 pub struct RootBlock {
     arena: Vec<Block>,
     root: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct BindingTable(HashMap<NodeId, NodeId>);
+
+impl ResourceId for BindingTable {
+    fn resource_name() -> ResourceName {
+        "BindingTable"
+    }
+}
+
+impl Default for BindingTable {
+    fn default() -> Self {
+        Self(HashMap::new())
+    }
+}
+
+impl Deref for BindingTable {
+    type Target = HashMap<NodeId, NodeId>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for BindingTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl RootBlock {
@@ -150,18 +145,19 @@ impl Block {
         None
     }
 
-    pub fn get_name(&self, searched_name: &str) -> Option<BindingInfo> {
+    pub fn get_block_binding(&self, searched_name: &str) -> Option<BindingInfo> {
         if let Some((name, binding)) = self.named_block_binding.as_ref() {
             if name == searched_name {
                 return Some(binding.clone());
             }
         }
 
-        self.get_parent().and_then(|p| p.get_name(searched_name))
+        self.get_parent()
+            .and_then(|p| p.get_block_binding(searched_name))
     }
 
     pub fn get_fn_block_name(&self) -> BindingInfo {
-        self.get_name(FUNC_BLOCK_NAME).expect("Compiler bug: Every function has to have a root block and this is automatically assigned by the compiler. This one apparently doesn't have one.")
+        self.get_block_binding(FUNC_BLOCK_NAME).expect("Compiler bug: Every function has to have a root block and this is automatically assigned by the compiler. This one apparently doesn't have one.")
     }
 
     pub fn make_child(&mut self, name: Option<(String, BindingInfo)>) -> &mut Block {
@@ -361,10 +357,6 @@ impl Block {
         }
 
         result
-    }
-
-    pub fn iter(&self) -> BlockIterator {
-        BlockIterator::new(self)
     }
 }
 

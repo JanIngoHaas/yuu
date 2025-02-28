@@ -7,7 +7,10 @@ use yuu_shared::{
     Span,
 };
 
-use super::{infer_block, infer_stmt, infer_type, match_binding_node_to_type, TransientData};
+use super::{
+    infer_block, infer_block_no_child_creation, infer_stmt, infer_type, match_binding_node_to_type,
+    pass_type_inference::TransientData,
+};
 
 pub fn declare_function(
     name: &str,
@@ -27,22 +30,7 @@ pub fn declare_function(
         .map(|arg| {
             let semantic_arg_type = infer_type(&arg.ty, block, data)?;
 
-            match_binding_node_to_type(
-                &arg.binding,
-                semantic_arg_type,
-                |ident_binding, ty, ty_info_table| {
-                    block.insert_variable(
-                        ident_binding.name.clone(),
-                        ident_binding.id,
-                        ident_binding.span.clone(),
-                        ident_binding.is_mut,
-                    );
-                    ty_info_table.types.insert(ident_binding.id, ty);
-
-                    Ok(())
-                },
-                data,
-            )?;
+            match_binding_node_to_type(&arg.binding, block, semantic_arg_type, data)?;
 
             Ok::<_, SemanticError>(semantic_arg_type)
         })
@@ -121,7 +109,7 @@ pub fn infer_structural(
             //     infer_stmt(stmt, func_block, data)?;
             // }
 
-            infer_block(&def.body, func_block, data)?;
+            infer_block_no_child_creation(&def.body, func_block, data)?;
 
             Ok(())
         }

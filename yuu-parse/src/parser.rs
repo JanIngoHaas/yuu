@@ -644,7 +644,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse_func_def(&mut self) -> Result<(Span, FuncDefStructural), ParseError> {
         let (span, decl) = self.parse_func_decl()?;
-        let (block_span, block) = self.parse_block_expr()?;
+        let (block_span, mut block) = self.parse_block_expr()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
+        block.label = Some(FUNC_BLOCK_NAME.to_string()); // 🤡
         let span = span.start..block_span.end;
         Ok(self.make_func_def(span, decl, block))
     }
@@ -688,7 +689,7 @@ impl<'a> Parser<'a> {
             span.clone(),
             StmtNode::Break(BreakStmt {
                 span,
-                value: Box::new(expr),
+                expr: Box::new(expr),
                 target,
                 id: 0,
             }),
@@ -705,7 +706,7 @@ impl<'a> Parser<'a> {
             span.clone(),
             StmtNode::Break(BreakStmt {
                 span,
-                value: Box::new(expr),
+                expr: Box::new(expr),
                 target: FUNC_BLOCK_NAME.to_string(),
                 id: 0,
             }),

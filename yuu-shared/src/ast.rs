@@ -268,8 +268,8 @@ pub enum StructuralNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BreakStmt {
     pub span: Span,
-    pub value: Box<ExprNode>, // Optional for => ; case
-    pub target: String,       // None for => ; case, Some("blk1") for => blk1 case
+    pub expr: Box<ExprNode>, // Optional for => ; case
+    pub target: String,      // None for => ; case, Some("blk1") for => blk1 case
     pub id: NodeId,
 }
 
