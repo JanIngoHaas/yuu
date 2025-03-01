@@ -13,21 +13,16 @@ pub enum ExitKind {
     Proceed,
 }
 
-pub fn infer_stmt(
-    stmt: &StmtNode,
-    block: &mut Block,
-    data: &mut TransientData,
-) -> Result<ExitKind, SemanticError> {
+pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) -> ExitKind {
     match stmt {
         StmtNode::Let(let_stmt) => {
-            let ty_expr = infer_expr(&let_stmt.expr, block, data, None)?;
-            match_binding_node_to_type(&let_stmt.binding, block, ty_expr, data)?;
-            Ok(ExitKind::Proceed)
+            let ty_expr = infer_expr(&let_stmt.expr, block, data, None);
+            match_binding_node_to_type(&let_stmt.binding, block, ty_expr, data);
+            ExitKind::Proceed
         }
         StmtNode::Atomic(expr) => infer_expr(expr, block, data, None).map(|_| ExitKind::Proceed),
         StmtNode::Break(exit) => {
-            println!("HII");
-            let ty = infer_expr(&exit.expr, block, data, None)?;
+            let ty = infer_expr(&exit.expr, block, data, None);
 
             let target_block = block.get_block_binding(&exit.target).expect(
                 format!(
@@ -42,7 +37,8 @@ pub fn infer_stmt(
             data.type_info_table
                 .unify_and_insert(target_block.id, ty)
                 .expect("User error: Unification failed");
-            return Ok(ExitKind::Break);
+            return ExitKind::Break;
         }
+        StmtNode::Error(stmt) => todo!("Make Semantic Error from Syntax Error"),
     }
 }

@@ -103,6 +103,7 @@ impl AddId for StmtNode {
                 exit_stmt.id = gen.next();
                 exit_stmt.expr.add_id(gen);
             }
+            StmtNode::Error(e) => *e = gen.next(),
         }
     }
 }
@@ -161,6 +162,7 @@ impl AddId for StructuralNode {
                 def.id = gen.next();
                 def.body.add_id(gen);
             }
+            StructuralNode::Error(x) => *x = gen.next(),
         }
     }
 }
@@ -222,6 +224,7 @@ impl GetId for StmtNode {
             StmtNode::Let(let_stmt) => let_stmt.id,
             StmtNode::Atomic(expr) => expr.node_id(),
             StmtNode::Break(exit_stmt) => exit_stmt.id,
+            StmtNode::Error(x) => *x,
         }
     }
 }
@@ -248,6 +251,7 @@ impl GetId for StructuralNode {
         match self {
             StructuralNode::FuncDecl(fd) => fd.id,
             StructuralNode::FuncDef(def) => def.id,
+            StructuralNode::Error(x) => *x,
         }
     }
 }

@@ -53,11 +53,7 @@ pub fn declare_function(
     Ok(ret_type)
 }
 
-pub fn infer_structural(
-    structural: &StructuralNode,
-    block: &mut Block,
-    data: &mut TransientData,
-) -> Result<(), SemanticError> {
+pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &mut TransientData) {
     match structural {
         StructuralNode::FuncDecl(decl) => {
             let _ = declare_function(
@@ -69,7 +65,6 @@ pub fn infer_structural(
                 block,
                 data,
             )?;
-            Ok(())
         }
         StructuralNode::FuncDef(def) => {
             let ret_type = declare_function(
@@ -109,9 +104,8 @@ pub fn infer_structural(
             //     infer_stmt(stmt, func_block, data)?;
             // }
 
-            infer_block_no_child_creation(&def.body, func_block, data)?;
-
-            Ok(())
+            infer_block_no_child_creation(&def.body, func_block, data);
         }
+        StructuralNode::Error(_) => todo!("Make semantic error from syntax error"),
     }
 }

@@ -36,35 +36,35 @@ fn infer_binary(
     binary_expr: &BinaryExpr,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
-    let lhs = infer_expr(&binary_expr.left, block, data, None)?;
-    let rhs = infer_expr(&binary_expr.right, block, data, None)?;
+) -> &'static TypeInfo {
+    let lhs = infer_expr(&binary_expr.left, block, data, None);
+    let rhs = infer_expr(&binary_expr.right, block, data, None);
 
     let op_name = binary_expr.op.static_name();
     let ty = block
         .resolve_function(op_name, data.type_info_table, &[lhs, rhs], |_, func| {
             func.ret
         })
-        .map_err(|err| panic!("User bug: Function overload error: {:?}", err))?;
+        .map_err(|err| panic!("User bug: Function overload error: {:?}", err));
 
     data.type_info_table.types.insert(binary_expr.id, ty);
-    Ok(ty)
+    ty
 }
 
 fn infer_unary(
     unary_expr: &UnaryExpr,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
-    let ty = infer_expr(&unary_expr.operand, block, data, None)?;
+) -> &'static TypeInfo {
+    let ty = infer_expr(&unary_expr.operand, block, data, None);
     let op_name = unary_expr.op.static_name();
 
     let result_ty = block
         .resolve_function(op_name, data.type_info_table, &[ty], |_, func| func.ret)
-        .map_err(|_err| panic!("User bug: Function overload error"))?;
+        .map_err(|_err| panic!("User bug: Function overload error"));
 
     data.type_info_table.types.insert(unary_expr.id, result_ty);
-    Ok(result_ty)
+    result_ty
 }
 
 fn infer_ident(
@@ -72,7 +72,7 @@ fn infer_ident(
     block: &mut Block,
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let binding = block.get_binding(&ident_expr.ident).ok_or_else(|| {
         let similar_names =
             block.get_similar_names(&ident_expr.ident, MAX_SIMILAR_NAMES, MIN_DST_SIMILAR_NAMES);
@@ -81,7 +81,7 @@ fn infer_ident(
             "User bug: Cannot find identifier `{}`, similar names: {:?}",
             ident_expr.ident, similar_names
         );
-    })?;
+    });
 
     let (ty, nid) = match binding {
         BindingInfoKind::Unique(var) => (
@@ -117,18 +117,18 @@ fn infer_ident(
 
     data.type_info_table.types.insert(ident_expr.id, ty);
     data.binding_table.insert(ident_expr.id, nid);
-    Ok(ty)
+    ty
 }
 
 pub fn infer_block_no_child_creation(
     block_expr: &BlockExpr,
     root_func_block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let mut break_ty = None;
 
     for stmt in &block_expr.body {
-        let out = super::infer_stmt(stmt, root_func_block, data)?;
+        let out = super::infer_stmt(stmt, root_func_block, data);
         if let super::ExitKind::Break = out {
             // Store break type but keep processing - we'll unify with last expr
             break_ty = Some(inactive_type());
@@ -137,7 +137,7 @@ pub fn infer_block_no_child_creation(
 
     // Get last expression type if it exists
     let last_expr_ty = if let Some(last_expr) = &block_expr.last_expr {
-        let expr = infer_expr(last_expr, root_func_block, data, None)?;
+        let expr = infer_expr(last_expr, root_func_block, data, None);
         Some(expr)
     } else {
         None
@@ -156,14 +156,14 @@ pub fn infer_block_no_child_creation(
         .type_info_table
         .unify_and_insert(block_expr.id, block_ty)
         .expect("User bug: Couldn't unify block type");
-    Ok(out)
+    out
 }
 
 pub fn infer_block(
     block_expr: &BlockExpr,
     parent_block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let child_block = if let Some(label) = &block_expr.label {
         let binding = BindingInfo {
             id: block_expr.id,
@@ -182,14 +182,14 @@ fn infer_func_call(
     func_call_expr: &FuncCallExpr,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let actual_arg_types = func_call_expr
         .args
         .iter()
         .map(|arg| infer_expr(arg, block, data, None))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let actual_func_ident = infer_expr(&func_call_expr.lhs, block, data, Some(&actual_arg_types))?;
+    let actual_func_ident = infer_expr(&func_call_expr.lhs, block, data, Some(&actual_arg_types));
 
     let resolved_ret_type = match actual_func_ident {
         TypeInfo::Function(func) => func.ret,
@@ -210,7 +210,7 @@ fn infer_func_call(
         .types
         .insert(func_call_expr.id, resolved_ret_type);
 
-    Ok(resolved_ret_type)
+    resolved_ret_type
 }
 
 fn requires_mut(binding: &BindingInfo) -> bool {
@@ -221,7 +221,7 @@ fn infer_assignment(
     assignment_expr: &AssignmentExpr,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let binding = &assignment_expr.binding;
     let binding_ty = data
         .type_info_table
@@ -235,7 +235,7 @@ fn infer_assignment(
         panic!("User Error: Cannot assign to immutable binding");
     }
 
-    let value = infer_expr(&assignment_expr.rhs, block, data, None)?;
+    let value = infer_expr(&assignment_expr.rhs, block, data, None);
 
     // Prevent binding inactive types
     if matches!(value, TypeInfo::Inactive) {
@@ -253,16 +253,12 @@ fn infer_assignment(
         .unify_and_insert(assignment_expr.id, unified)
         .expect("User bug: Couldn't unify assignment type");
 
-    Ok(out)
+    out
 }
 
-fn infer_if_expr(
-    expr: &IfExpr,
-    block: &mut Block,
-    data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
     // Check condition
-    let cond_ty = infer_expr(&expr.if_block.condition, block, data, None)?;
+    let cond_ty = infer_expr(&expr.if_block.condition, block, data, None);
     if let Err(err) = cond_ty.unify(primitive_bool()) {
         panic!(
             "User Error: Condition must be of type bool, got {}",
@@ -271,7 +267,7 @@ fn infer_if_expr(
     }
 
     // This creates block A
-    let then_ty = infer_block(&expr.if_block.body, block, data)?;
+    let then_ty = infer_block(&expr.if_block.body, block, data);
 
     // Process else-if blocks...
     let if_types = expr.else_if_blocks.iter().map(|x| {
@@ -283,7 +279,7 @@ fn infer_if_expr(
             );
         }
         // This creates block B
-        let ty = infer_block(&x.body, block, data)?;
+        let ty = infer_block(&x.body, block, data);
         Ok::<_, SemanticError>(ty)
     });
 
@@ -301,13 +297,13 @@ fn infer_if_expr(
                 acc, ty
             ),
         }
-    })?;
+    });
 
     // And here is where the extra block gets created - when we call infer_block
     // on the else block even though we already have a block for the else path
     if let Some(else_body) = expr.else_block.as_ref() {
         // This creates block C - even though we already have a block for the else path!
-        let ty = infer_block(else_body, block, data)?;
+        let ty = infer_block(else_body, block, data);
         if let Err(_) = out_ty.unify(ty) {
             panic!(
                 "User Error: Types of if expr branches don't coerce to same type: {} and {}",
@@ -318,7 +314,7 @@ fn infer_if_expr(
 
     // Put that thing into the type info table
     data.type_info_table.types.insert(expr.id, out_ty);
-    Ok(out_ty)
+    out_ty
 }
 
 pub fn infer_expr(
@@ -326,9 +322,9 @@ pub fn infer_expr(
     block: &mut Block,
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     match expr {
-        ExprNode::Literal(lit) => Ok(infer_literal(lit, data)),
+        ExprNode::Literal(lit) => infer_literal(lit, data),
         ExprNode::Binary(binary) => infer_binary(binary, block, data),
         ExprNode::Unary(unary) => infer_unary(unary, block, data),
         ExprNode::Ident(ident) => infer_ident(ident, block, data, function_args),

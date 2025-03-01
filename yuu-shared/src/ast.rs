@@ -2,7 +2,10 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 
 use crate::{scheduler::ResourceId, token::Token};
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    i64::MIN,
+};
 
 /// Binary operators for arithmetic expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -63,8 +66,8 @@ impl Display for UnaryOp {
     }
 }
 
-/// Represents a literal value in the AST
-#[derive(Serialize, Deserialize, Clone)]
+/// Literal expression
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct LiteralExpr {
     pub lit: Token,
     pub id: NodeId,
@@ -131,6 +134,7 @@ pub enum ExprNode {
     FuncCall(FuncCallExpr),
     If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
     Assignment(AssignmentExpr),
+    //Error,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -263,6 +267,7 @@ pub struct FuncDefStructural {
 pub enum StructuralNode {
     FuncDecl(FuncDeclStructural),
     FuncDef(FuncDefStructural),
+    Error(NodeId),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -279,6 +284,7 @@ pub enum StmtNode {
     Atomic(ExprNode),
     //Return(ReturnStmt),
     Break(BreakStmt), // new variant
+    Error(NodeId),
 }
 
 /// Represents a node in the AST
@@ -347,6 +353,7 @@ impl Spanned for StmtNode {
             StmtNode::Atomic(expr_node) => expr_node.span(),
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
+            StmtNode::Error(_) => 0..0,
         }
     }
 }
@@ -365,6 +372,7 @@ impl Spanned for StructuralNode {
         match self {
             StructuralNode::FuncDecl(decl) => decl.span.clone(),
             StructuralNode::FuncDef(def) => def.span.clone(),
+            StructuralNode::Error(_) => 0..0,
         }
     }
 }

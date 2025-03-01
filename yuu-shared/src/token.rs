@@ -147,7 +147,8 @@ impl TokenKind {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+/// Token with kind and span
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: logos::Span,

@@ -1,222 +1,228 @@
 use std::sync::Arc;
 
 use logos::{Logos, Span};
-use thiserror::Error;
+use miette::MietteDiagnostic;
 use yuu_shared::{
+    error::{ErrorKind, YuuError},
     scheduler::ResourceId,
     token::{Token, TokenKind},
 };
 
-pub struct UnprocessedCodeInfo {
-    pub code: Arc<str>,
-    pub file_name: Arc<str>,
+// #[derive(Debug, Clone)]
+// pub struct Note {
+//     pub message: String,
+//     pub span: Option<Span>,
+// }
+
+// #[derive(Debug, Clone)]
+// pub struct GenericError {
+//     pub expected: String,
+//     pub found: String,
+//     pub note: Vec<Note>,
+//     pub span: Span,
+// }
+
+// Use our new YuuError type for parsing errors
+pub type ParseError = YuuError;
+
+// Enum for different synchronization points
+#[derive(Debug, Clone, Copy)]
+pub enum CatchIn {
+    Statement,
+    FunctionDecl,
 }
 
-impl ResourceId for UnprocessedCodeInfo {
-    fn resource_name() -> &'static str {
-        "UnprocessedCodeInfo"
-    }
+// Result type for parser functions
+pub type ParseResult<T> = std::result::Result<T, CatchIn>;
+
+pub struct Lexer {
+    tokens: Vec<Token>,
+    current: usize,
+    pub code_info: UnprocessedCodeInfo,
 }
 
-#[derive(Debug, Clone)]
-pub struct Note {
-    pub message: String,
-    pub span: Option<Span>,
-}
-
-#[derive(Debug, Clone)]
-pub struct GenericError {
-    pub expected: String,
-    pub found: String,
-    pub note: Vec<Note>,
-    pub span: Span,
-}
-
-// Parser Error with thiserror
-#[derive(Debug, Clone, Error)]
-pub enum ParseError {
-    #[error("")]
-    UnexpectedToken(Span),
-    #[error("")]
-    UnexpectedEOF,
-    #[error("")]
-    GenericSyntaxError(GenericError),
-}
-
-impl ParseError {
-    // pub fn print(&self, code_info: &UnprocessedCodeInfo) {
-    //     match self {
-    //         ParseError::UnexpectedToken(span) => {
-    //             Report::build(
-    //                 ReportKind::Error,
-    //                 (code_info.file_name.clone(), span.clone()),
-    //             )
-    //             .with_label(
-    //                 Label::new((code_info.file_name.clone(), span.clone()))
-    //                     .with_message("Unexpected token")
-    //                     .with_color(Color::Red),
-    //             )
-    //             .finish()
-    //             .print((
-    //                 code_info.file_name.clone(),
-    //                 Source::from(code_info.code.clone()),
-    //             ))
-    //             .unwrap();
-    //         }
-    //         ParseError::UnexpectedEOF => {
-    //             Report::build(
-    //                 ReportKind::Error,
-    //                 (
-    //                     code_info.file_name.clone(),
-    //                     code_info.code.len()..code_info.code.len(),
-    //                 ),
-    //             )
-    //             .with_message("Unexpected end of file")
-    //             .finish()
-    //             .print((
-    //                 code_info.file_name.clone(),
-    //                 Source::from(code_info.code.clone()),
-    //             ))
-    //             .unwrap();
-    //         }
-    //         ParseError::GenericSyntaxError(error) => {
-    //             let mut report = Report::build(
-    //                 ReportKind::Error,
-    //                 (code_info.file_name.clone(), error.span.clone()),
-    //             )
-    //             .with_message("Syntax error")
-    //             .with_label(
-    //                 Label::new((code_info.file_name.clone(), error.span.clone()))
-    //                     .with_message(format!(
-    //                         "Expected {}, but found '{}'",
-    //                         error.expected, error.found
-    //                     ))
-    //                     .with_color(Color::Red),
-    //             );
-
-    //             // Add all notes with their respective spans
-    //             for note in &error.note {
-    //                 report = report.with_label(
-    //                     Label::new((code_info.file_name.clone(), note.span.clone()))
-    //                         .with_message(&note.message)
-    //                         .with_color(Color::Blue),
-    //                 );
-    //             }
-
-    //             report
-    //                 .finish()
-    //                 .print((
-    //                     code_info.file_name.clone(),
-    //                     Source::from(code_info.code.clone()),
-    //                 ))
-    //                 .unwrap();
-    //         }
-    //     }
-    // }
-}
-
-pub struct Lexer<'a> {
-    lexer: logos::Lexer<'a, TokenKind>,
-    lookahead: Vec<Result<Token, ParseError>>,
-    buffer_size: usize,
-}
-
-impl<'a> Lexer<'a> {
-    pub fn new(code_info: &'a UnprocessedCodeInfo) -> Self {
+impl Lexer {
+    pub fn new(code_info: &UnprocessedCodeInfo) -> Self {
         let mut lexer = TokenKind::lexer(code_info.code.as_ref());
-        let mut lookahead = Vec::new();
+        let mut tokens = Vec::new();
 
-        // Initialize with one token by default
-        let t = lexer.next();
-        let span = lexer.span();
-        let first_token = match t {
-            Some(t) => match t {
-                Ok(tkn) => Ok(Token { kind: tkn, span }),
-                Err(()) => Err(ParseError::UnexpectedToken(span)),
-            },
-            None => Err(ParseError::UnexpectedEOF),
-        };
-        lookahead.push(first_token);
+        // Pre-lex the entire file at once
+        while let Some(token_result) = lexer.next() {
+            let span = lexer.span();
+            match token_result {
+                Ok(kind) => tokens.push(Token { kind, span }),
+                Err(_) => {
+                    panic!("Unknown Token lexed");
+                }
+            }
+        }
+
+        // Add an explicit EOF token at the end
+        let end_pos = code_info.code.len();
+        tokens.push(Token {
+            kind: TokenKind::EOF,
+            span: end_pos..end_pos,
+        });
 
         Self {
-            lexer,
-            lookahead,
-            buffer_size: 1,
+            tokens,
+            current: 0,
+            code_info: code_info.clone(),
         }
     }
 
-    pub fn set_lookahead(&mut self, size: usize) -> Result<(), ParseError> {
-        if size < 1 {
-            self.buffer_size = 1;
-            self.lookahead.truncate(1);
-            return Ok(());
-        }
-
-        self.buffer_size = size;
-        while self.lookahead.len() < size {
-            let next_token = self.next_token_internal();
-            self.lookahead.push(next_token);
-        }
-        Ok(())
+    pub fn peek(&self) -> &Token {
+        self.tokens.get(self.current).unwrap_or_else(|| {
+            // This should never happen since we always add an EOF token at the end,
+            // but just in case, return a reference to the last token (which should be EOF)
+            &self.tokens[self.tokens.len() - 1]
+        })
     }
 
-    fn next_token_internal(&mut self) -> Result<Token, ParseError> {
-        let t = self.lexer.next();
-        let span = self.lexer.span();
-        match t {
-            Some(t) => match t {
-                Ok(tkn) => Ok(Token { kind: tkn, span }),
-                Err(()) => Err(ParseError::UnexpectedToken(self.lexer.span())),
-            },
-            None => Ok(Token {
-                kind: TokenKind::EOF,
-                span,
-            }),
-        }
+    pub fn peek_at(&self, offset: usize) -> &Token {
+        self.tokens.get(self.current + offset).unwrap_or_else(|| {
+            // Return EOF token if we're past the end
+            &self.tokens[self.tokens.len() - 1]
+        })
     }
 
-    pub fn peek(&mut self) -> Result<&Token, ParseError> {
-        self.peek_at(0)
-    }
+    // get n tokens ahead
+    pub fn peek_n<const N: usize>(&self) -> [&Token; N] {
+        let mut result = [self.peek(); N];
 
-    pub fn peek_at(&mut self, n: usize) -> Result<&Token, ParseError> {
-        if n >= self.buffer_size {
-            return Err(ParseError::UnexpectedEOF);
+        for i in 0..N {
+            if let Some(token) = self.tokens.get(self.current + i) {
+                result[i] = token;
+            } else {
+                // Past the end, use EOF token
+                result[i] = &self.tokens[self.tokens.len() - 1];
+            }
         }
 
-        while self.lookahead.len() <= n {
-            let next_token = self.next_token_internal();
-            self.lookahead.push(next_token);
-        }
-
-        self.lookahead[n].as_ref().map_err(|x| x.clone())
-    }
-
-    pub fn peek_n<const N: usize>(&mut self) -> Result<&[Result<Token, ParseError>], ParseError> {
-        self.set_lookahead(N)?;
-
-        let slice = self.lookahead.as_slice();
-        Ok(&slice[..N])
-    }
-
-    pub fn expect(&mut self, expected: &[TokenKind], note: Vec<Note>) -> Result<Token, ParseError> {
-        let t = self.next_token()?;
-        if expected.contains(&t.kind) {
-            Ok(t)
-        } else {
-            Err(ParseError::GenericSyntaxError(GenericError {
-                expected: format!("{:?}", expected),
-                found: format!("{:?}", t.kind),
-                note,
-                span: t.span,
-            }))
-        }
-    }
-
-    pub fn next_token(&mut self) -> Result<Token, ParseError> {
-        let result = self.lookahead.remove(0);
-        let next_token = self.next_token_internal();
-        self.lookahead.push(next_token);
         result
+    }
+
+    // advance
+    pub fn next_token(&mut self) -> Token {
+        if self.current < self.tokens.len() {
+            let token = self.tokens[self.current].clone();
+            self.current += 1;
+            token
+        } else {
+            // Return EOF if we've reached the end
+            let end_pos = self.code_info.code.len();
+            Token {
+                kind: TokenKind::EOF,
+                span: end_pos..end_pos,
+            }
+        }
+    }
+
+    // nom
+    pub fn eat(&mut self) {
+        if self.current < self.tokens.len() {
+            self.current += 1;
+        }
+    }
+
+    // Check if the current token matches the expected kind, and consume it if it does
+    pub fn expect(
+        &mut self,
+        expected: &[TokenKind],
+        errors: &mut Vec<ParseError>,
+    ) -> ParseResult<Token> {
+        if let Some(token) = self.peek_maybe() {
+            if expected.contains(&token.kind) {
+                return Ok(self.next_token());
+            }
+
+            // Not found... )-:
+
+            let found = format!("{:?}", token.kind);
+            let expected_str = expected
+                .iter()
+                .map(|k| format!("{:?}", k))
+                .collect::<Vec<_>>()
+                .join(" or ");
+
+            let span = token.span.clone();
+
+            // Create a diagnostic with our new error system
+            let mut error = YuuError::unexpected_token(
+                span,
+                expected_str,
+                found,
+                self.code_info.code.clone(),
+                self.code_info.file_name.clone(),
+            );
+
+            // Add a help message if there are expected tokens
+            if !expected.is_empty() {
+                error = error.with_help(format!(
+                    "Expected one of the following tokens: {:?}",
+                    expected
+                ));
+            }
+
+            // Add related info for any notes
+
+            errors.push(error);
+            Err(self.synchronize())
+        } else {
+            // End of file
+            let span = if let Some(last) = self.tokens.last() {
+                last.span.clone()
+            } else {
+                0..0
+            };
+
+            let expected_str = expected
+                .iter()
+                .map(|k| format!("{:?}", k))
+                .collect::<Vec<_>>()
+                .join(" or ");
+
+            // Create an EOF error with our new error system
+            let error = YuuError::builder()
+                .kind(ErrorKind::UnexpectedEOF)
+                .message(format!("Unexpected end of file, expected {}", expected_str))
+                .source(
+                    self.code_info.code.clone(),
+                    self.code_info.file_name.clone(),
+                )
+                .span(span, "unexpected end of file")
+                .help("Unexpected end of file while parsing")
+                .build();
+
+            errors.push(error);
+            Err(self.synchronize())
+        }
+    }
+
+    // Get source code snippet for a span
+    pub fn get_source_snippet(&self, span: &Span) -> &str {
+        &self.code_info.code[span.start..span.end]
+    }
+
+    pub fn is_at_end(&self) -> bool {
+        self.current >= self.tokens.len() || self.tokens[self.current].kind == TokenKind::EOF
+    }
+
+    pub fn peek_maybe(&self) -> Option<&Token> {
+        return self.tokens.get(self.current);
+    }
+
+    // Synchronize after an error for error recovery
+    pub fn synchronize(&mut self) -> CatchIn {
+        while let Some(token) = self.peek_maybe() {
+            match token.kind {
+                TokenKind::Semicolon => return CatchIn::Statement,
+                TokenKind::Fn => return CatchIn::FunctionDecl,
+                _ => {
+                    self.eat();
+                }
+            }
+        }
+        return CatchIn::FunctionDecl; // That's basically nonsense, but yeah, critical error btw.
     }
 }

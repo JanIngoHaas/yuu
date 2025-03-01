@@ -1,7 +1,9 @@
+use yuu_parse::lexer::UnprocessedCodeInfo;
 use yuu_shared::{
     ast::AST,
     block::{BindingTable, RootBlock},
     context::Context,
+    error::YuuError,
     scheduler::Pass,
     type_info::TypeInfoTable,
 };
@@ -12,18 +14,17 @@ pub struct TransientData<'a> {
     pub type_info_table: &'a mut TypeInfoTable,
     pub ast: &'a AST,
     pub binding_table: BindingTable, // Maps reference IDs to their target binding IDs
+    pub errors: Vec<YuuError>,
+    pub src_code: UnprocessedCodeInfo,
 }
 
 impl<'a> TransientData<'a> {
-    pub fn new(
-        type_info_table: &'a mut TypeInfoTable,
-        ast: &'a AST,
-        binding_table: BindingTable,
-    ) -> Self {
+    pub fn new(type_info_table: &'a mut TypeInfoTable, ast: &'a AST) -> Self {
         Self {
             type_info_table,
             ast,
-            binding_table,
+            binding_table: BindingTable::default(),
+            errors: Vec::default(),
         }
     }
 }
@@ -55,11 +56,7 @@ impl Pass for PassTypeInference {
         let mut type_info_table = type_info_table.lock().unwrap();
         let type_info_table = &mut *type_info_table;
 
-        let mut data = TransientData {
-            ast,
-            type_info_table,
-            binding_table: Default::default(),
-        };
+        let mut data = TransientData::new(type_info_table, ast);
 
         for node in &ast.structurals {
             let _ = infer_structural(node, root_block.root_mut(), &mut data);

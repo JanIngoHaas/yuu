@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
+yuu-parse = { path = "../yuu-parse" }
+yuu-shared = { path = "../yuu-shared" }
+yuu-transform = { path = "../yuu-transform" }
+yuu-codegen = { path = "../yuu-codegen" }

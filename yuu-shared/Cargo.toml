@@ -13,3 +13,6 @@ rayon = "1.10.0"
 scc = "2.3.0"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
+miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
+thiserror = "2.0.3"
+syntect = "5.1.0"

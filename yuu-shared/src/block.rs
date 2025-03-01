@@ -1,5 +1,7 @@
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
+use crate::error::{ErrorKind, SourceInfo, YuuError};
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::Span;
 use crate::{
@@ -28,13 +30,6 @@ impl ResourceId for Box<RootBlock> {
     fn resource_name() -> &'static str {
         "RootBlock"
     }
-}
-
-#[derive(Debug)]
-pub enum FunctionOverloadError {
-    NotAFunction,
-    NoOverloadFound,
-    BindingNotFound,
 }
 
 // TODO: Wrap this in a box; we have pointers to it. When the root block is moved, the pointers are invalidated and point to garbage / other data.
@@ -240,26 +235,32 @@ impl Block {
     }
 
     pub fn predefine_builtins(&mut self, tyt: &mut TypeInfoTable) {
+        let mut counter: i64 = 0;
+        let mut next = || {
+            counter = counter - 1;
+            counter
+        };
+
         // F32 operations
-        self.register_binary_op(tyt, "add", -13, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(tyt, "sub", -14, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(tyt, "mul", -15, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(tyt, "div", -16, PrimitiveType::F32, PrimitiveType::F32);
-        self.register_binary_op(tyt, "eq", -17, PrimitiveType::F32, PrimitiveType::Bool);
+        self.register_binary_op(tyt, "add", next(), PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "sub", next(), PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "mul", next(), PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "div", next(), PrimitiveType::F32, PrimitiveType::F32);
+        self.register_binary_op(tyt, "eq", next(), PrimitiveType::F32, PrimitiveType::Bool);
 
         // I64 operations
-        self.register_binary_op(tyt, "add", -1, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(tyt, "sub", -3, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(tyt, "mul", -5, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(tyt, "div", -7, PrimitiveType::I64, PrimitiveType::I64);
-        self.register_binary_op(tyt, "eq", -20, PrimitiveType::I64, PrimitiveType::Bool);
+        self.register_binary_op(tyt, "add", next(), PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "sub", next(), PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "mul", next(), PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "div", next(), PrimitiveType::I64, PrimitiveType::I64);
+        self.register_binary_op(tyt, "eq", next(), PrimitiveType::I64, PrimitiveType::Bool);
 
         // F64 operations
-        self.register_binary_op(tyt, "add", -2, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(tyt, "sub", -4, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(tyt, "mul", -6, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(tyt, "div", -8, PrimitiveType::F64, PrimitiveType::F64);
-        self.register_binary_op(tyt, "eq", -9, PrimitiveType::F64, PrimitiveType::Bool);
+        self.register_binary_op(tyt, "add", next(), PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "sub", next(), PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "mul", next(), PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "div", next(), PrimitiveType::F64, PrimitiveType::F64);
+        self.register_binary_op(tyt, "eq", next(), PrimitiveType::F64, PrimitiveType::Bool);
     }
 
     pub fn resolve_function<T>(
@@ -268,45 +269,156 @@ impl Block {
         type_info_table: &TypeInfoTable,
         resolve_arg_types: &[&'static TypeInfo],
         resolve_ret_type: T,
-    ) -> Result<&'static TypeInfo, FunctionOverloadError>
+        src_info: Option<&SourceInfo>,
+        span: Option<Span>,
+    ) -> Result<&'static TypeInfo, YuuError>
     where
         T: Fn(&BindingInfo, &FunctionType) -> &'static TypeInfo,
     {
-        let binding = self
-            .get_binding(name)
-            .ok_or(FunctionOverloadError::BindingNotFound)?;
+        let binding = self.get_binding(name).ok_or_else(|| {
+            // Create a binding not found error
+            let mut builder = YuuError::builder()
+                .kind(ErrorKind::FunctionOverloadError)
+                .message(format!("Function '{}' not found", name));
+
+            if let (Some(src), Some(sp)) = (src_info, span) {
+                builder = builder
+                    .source(src.source.clone(), src.file_name.clone())
+                    .span(
+                        (sp.start as usize, (sp.end - sp.start) as usize),
+                        format!("'{}' is not defined", name),
+                    );
+
+                // Add suggestions for similar names
+                let similar = self.get_similar_names(name, 3, 3);
+                if !similar.is_empty() {
+                    builder = builder.help(format!("Did you mean: {}?", similar.join(", ")));
+                }
+            }
+
+            builder.build()
+        })?;
 
         match binding {
             BindingInfoKind::Unique(binding_info) => {
-                let func_type = type_info_table
-                    .types
-                    .get(&binding_info.id)
-                    .ok_or(FunctionOverloadError::NotAFunction)?;
+                let func_type = type_info_table.types.get(&binding_info.id).ok_or_else(|| {
+                    let mut builder = YuuError::builder()
+                        .kind(ErrorKind::FunctionOverloadError)
+                        .message(format!("'{}' is not a function", name));
+
+                    if let (Some(src), Some(sp)) = (src_info, span) {
+                        builder = builder
+                            .source(src.source.clone(), src.file_name.clone())
+                            .span(
+                                (sp.start as usize, (sp.end - sp.start) as usize),
+                                format!("'{}' is not a function", name),
+                            );
+                    }
+
+                    builder.build()
+                })?;
 
                 if let TypeInfo::Function(func) = &**func_type {
                     if func.args.len() != resolve_arg_types.len() {
-                        return Err(FunctionOverloadError::NoOverloadFound);
+                        let mut builder = YuuError::builder()
+                            .kind(ErrorKind::FunctionOverloadError)
+                            .message(format!(
+                                "Function '{}' expects {} arguments, but {} were provided",
+                                name,
+                                func.args.len(),
+                                resolve_arg_types.len()
+                            ));
+
+                        if let (Some(src), Some(sp)) = (src_info, span) {
+                            builder = builder
+                                .source(src.source.clone(), src.file_name.clone())
+                                .span(
+                                    (sp.start as usize, (sp.end - sp.start) as usize),
+                                    "incorrect number of arguments",
+                                );
+
+                            if let Some(decl_span) = binding_info.src_location {
+                                builder = builder.label(
+                                    (
+                                        decl_span.start as usize,
+                                        (decl_span.end - decl_span.start) as usize,
+                                    ),
+                                    format!("function '{}' defined here", name),
+                                );
+                            }
+                        }
+
+                        return Err(builder.build());
                     }
 
-                    for (expected, actual) in func.args.iter().zip(resolve_arg_types.iter()) {
+                    for (i, (expected, actual)) in
+                        func.args.iter().zip(resolve_arg_types.iter()).enumerate()
+                    {
                         if !actual.is_exact_same_type(expected) {
-                            return Err(FunctionOverloadError::NoOverloadFound);
+                            let mut builder = YuuError::builder()
+                                .kind(ErrorKind::FunctionOverloadError)
+                                .message(format!(
+                                    "Type mismatch in argument {} of function '{}': expected {}, found {}",
+                                    i + 1,
+                                    name,
+                                    expected,
+                                    actual
+                                ));
+
+                            if let (Some(src), Some(sp)) = (src_info, span) {
+                                builder = builder
+                                    .source(src.source.clone(), src.file_name.clone())
+                                    .span(
+                                        (sp.start as usize, (sp.end - sp.start) as usize),
+                                        format!("type mismatch in argument {}", i + 1),
+                                    );
+
+                                if let Some(decl_span) = binding_info.src_location {
+                                    builder = builder.label(
+                                        (
+                                            decl_span.start as usize,
+                                            (decl_span.end - decl_span.start) as usize,
+                                        ),
+                                        format!("function '{}' defined here", name),
+                                    );
+                                }
+                            }
+
+                            return Err(builder.build());
                         }
                     }
 
                     Ok(resolve_ret_type(&binding_info, func))
                 } else {
-                    Err(FunctionOverloadError::NotAFunction)
+                    let mut builder = YuuError::builder()
+                        .kind(ErrorKind::FunctionOverloadError)
+                        .message(format!("'{}' is not a function", name));
+
+                    if let (Some(src), Some(sp)) = (src_info, span) {
+                        builder = builder
+                            .source(src.source.clone(), src.file_name.clone())
+                            .span(
+                                (sp.start as usize, (sp.end - sp.start) as usize),
+                                format!("'{}' is not a function", name),
+                            );
+                    }
+
+                    Err(builder.build())
                 }
             }
             BindingInfoKind::Ambiguous(funcs) => {
+                let mut errors = Vec::new();
+                let mut candidates = Vec::new();
+
                 for func in funcs.iter() {
-                    let func_type = type_info_table
-                        .types
-                        .get(&func.id)
-                        .ok_or(FunctionOverloadError::NotAFunction)?;
+                    let func_type = match type_info_table.types.get(&func.id) {
+                        Some(ft) => ft,
+                        None => continue,
+                    };
 
                     if let TypeInfo::Function(func_type) = &**func_type {
+                        candidates.push((func, func_type));
+
                         if func_type.args.len() != resolve_arg_types.len() {
                             continue;
                         }
@@ -326,17 +438,86 @@ impl Block {
                         }
                     }
                 }
-                Err(FunctionOverloadError::NoOverloadFound)
+
+                // If we got here, no matching overload was found
+                let mut builder = YuuError::builder()
+                    .kind(ErrorKind::FunctionOverloadError)
+                    .message(format!(
+                        "No matching overload found for function '{}'",
+                        name
+                    ));
+
+                if let (Some(src), Some(sp)) = (src_info, span) {
+                    builder = builder
+                        .source(src.source.clone(), src.file_name.clone())
+                        .span(
+                            (sp.start as usize, (sp.end - sp.start) as usize),
+                            "no matching function overload",
+                        );
+
+                    // Add information about each candidate
+                    for (i, (func, func_type)) in candidates.iter().enumerate() {
+                        let arg_types = func_type
+                            .args
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        if let Some(decl_span) = func.src_location {
+                            builder = builder.label(
+                                (
+                                    decl_span.start as usize,
+                                    (decl_span.end - decl_span.start) as usize,
+                                ),
+                                format!("candidate {} with types ({})", i + 1, arg_types),
+                            );
+                        }
+                    }
+
+                    // Add more detailed help
+                    if !candidates.is_empty() {
+                        let mut help = format!("Function '{}' exists but arguments don't match.\nCandidate overloads:\n", name);
+                        for (i, (_, func_type)) in candidates.iter().enumerate() {
+                            let arg_types = func_type
+                                .args
+                                .iter()
+                                .map(|t| t.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+
+                            let ret_type = func_type.ret.to_string();
+                            help.push_str(&format!(
+                                "{}. fn {}({}) -> {}\n",
+                                i + 1,
+                                name,
+                                arg_types,
+                                ret_type
+                            ));
+                        }
+
+                        let given_types = resolve_arg_types
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        help.push_str(&format!("\nProvided argument types: ({})", given_types));
+                        builder = builder.help(help);
+                    }
+                }
+
+                Err(builder.build())
             }
         }
     }
 
-    pub fn get_similar_names(&self, name: &str, amount: u64, min_dst: u64) -> Vec<String> {
+    pub fn get_similar_names(&self, name: &str, amount: u64, max_dst: u64) -> Vec<String> {
         let mut similar_names = Vec::new();
 
         for key in self.bindings.keys() {
             let distance = levenshtein_distance(name, key);
-            if distance > 0 && distance <= min_dst as usize {
+            if distance > 0 && distance <= max_dst as usize {
                 similar_names.push((key.clone(), distance));
             }
         }
@@ -351,7 +532,7 @@ impl Block {
         if let Some(parent) = self.get_parent() {
             let remaining = amount - result.len() as u64;
             if remaining > 0 {
-                let mut parent_similar = parent.get_similar_names(name, remaining, min_dst);
+                let mut parent_similar = parent.get_similar_names(name, remaining, max_dst);
                 result.append(&mut parent_similar);
             }
         }

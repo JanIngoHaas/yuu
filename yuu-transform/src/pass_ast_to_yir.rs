@@ -255,6 +255,9 @@ impl<'a> TransientData<'a> {
                         .make_jump(target_label.clone(), vec![(omega_reg.clone(), value)]);
                 }
             }
+            StmtNode::Error(_) => unreachable!(
+                "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
+            ),
         }
     }
 

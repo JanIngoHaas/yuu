@@ -34,6 +34,7 @@ impl PassCollectDecls {
         match structural {
             StructuralNode::FuncDecl(decl) => Self::collect_func_decl(decl, block),
             StructuralNode::FuncDef(def) => Self::collect_func_decl(&def.decl, block),
+            StructuralNode::Error(_) => unreachable!("Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug")
         }
     }
 

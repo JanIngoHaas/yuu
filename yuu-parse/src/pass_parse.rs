@@ -10,7 +10,7 @@ impl Pass for ParsePass {
         let code_info = code_info.lock().unwrap();
         let code_info = &*code_info;
         let mut parser = Parser::new(code_info);
-        let ast = parser.parse_and_add_ids()?;
+        let ast = parser.parse_and_add_ids();
         context.add_pass_data(ast);
         Ok(())
     }
