@@ -87,14 +87,17 @@ mod tests {
         pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
         type_inference::PassTypeInference,
     };
-    use yuu_parse::{lexer::UnprocessedCodeInfo, pass_parse::ParsePass};
-    use yuu_shared::scheduler::{Schedule, Scheduler};
+    use yuu_parse::pass_parse::ParsePass;
+    use yuu_shared::{
+        ast::SourceInfo,
+        scheduler::{Schedule, Scheduler},
+    };
 
     #[test]
     fn test_fac_yir() {
         // Create the factorial function code
-        let code_info = UnprocessedCodeInfo {
-            code: Arc::from(
+        let code_info = SourceInfo {
+            source: Arc::from(
                 r#"fn fac(n: i64) -> i64 {
                 if n == 0 {
                     1!

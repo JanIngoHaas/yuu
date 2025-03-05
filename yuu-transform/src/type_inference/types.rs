@@ -19,7 +19,7 @@ pub fn infer_type(
     ty: &TypeNode,
     _block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> &'static TypeInfo {
     let semantic_type = match ty {
         TypeNode::BuiltIn(built_in) => match built_in.kind {
             yuu_shared::ast::BuiltInTypeKind::I64 => primitive_i64(),
@@ -33,5 +33,5 @@ pub fn infer_type(
     data.type_info_table
         .types
         .insert(ty.node_id(), semantic_type);
-    Ok(semantic_type)
+    semantic_type
 }

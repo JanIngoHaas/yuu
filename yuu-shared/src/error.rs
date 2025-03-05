@@ -8,19 +8,6 @@ use thiserror::Error;
 
 use crate::scheduler::ResourceId;
 
-/// Source code information for error reporting
-#[derive(Debug, Clone)]
-pub struct SourceInfo {
-    pub source: Arc<str>,
-    pub file_name: Arc<str>,
-}
-
-impl ResourceId for SourceInfo {
-    fn resource_name() -> &'static str {
-        "UnprocessedCodeInfo"
-    }
-}
-
 /// Error kind enum to categorize different errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {

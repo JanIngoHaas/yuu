@@ -20,7 +20,10 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
             match_binding_node_to_type(&let_stmt.binding, block, ty_expr, data);
             ExitKind::Proceed
         }
-        StmtNode::Atomic(expr) => infer_expr(expr, block, data, None).map(|_| ExitKind::Proceed),
+        StmtNode::Atomic(expr) => {
+            infer_expr(expr, block, data, None);
+            ExitKind::Proceed
+        }
         StmtNode::Break(exit) => {
             let ty = infer_expr(&exit.expr, block, data, None);
 

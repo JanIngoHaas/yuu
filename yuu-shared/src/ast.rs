@@ -5,7 +5,21 @@ use crate::{scheduler::ResourceId, token::Token};
 use std::{
     fmt::{self, Display, Formatter},
     i64::MIN,
+    sync::Arc,
 };
+
+/// Source code information
+#[derive(Debug, Clone)]
+pub struct SourceInfo {
+    pub source: Arc<str>,
+    pub file_name: Arc<str>,
+}
+
+impl ResourceId for SourceInfo {
+    fn resource_name() -> &'static str {
+        "SourceInfo"
+    }
+}
 
 /// Binary operators for arithmetic expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]

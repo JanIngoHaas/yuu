@@ -13,8 +13,8 @@ pub struct BindingInfo {
 
 #[derive(Clone, Debug)]
 pub enum BindingInfoKind {
-    Ambiguous(Vec<BindingInfo>), // Probably function overloading
-    Unique(BindingInfo),
+    Function(Vec<BindingInfo>), // Probably function overloading
+    Variable(BindingInfo),
 }
 
 pub fn is_prebuilt_node_id(id: NodeId) -> bool {

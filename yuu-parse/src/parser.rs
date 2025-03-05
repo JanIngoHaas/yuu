@@ -1,6 +1,6 @@
 use crate::{
     add_ids::add_ids,
-    lexer::{CatchIn, Lexer, ParseError, ParseResult, UnprocessedCodeInfo},
+    lexer::{CatchIn, Lexer, ParseError, ParseResult},
 };
 use logos::Span;
 use yuu_shared::{
@@ -16,7 +16,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(code_info: &UnprocessedCodeInfo) -> Self {
+    pub fn new(code_info: &SourceInfo) -> Self {
         Self {
             lexer: Lexer::new(code_info),
             errors: Vec::new(),
@@ -55,7 +55,7 @@ impl Parser {
                         .kind(ErrorKind::InvalidSyntax)
                         .message(format!("Expected an unary operator, found {:?}", op.kind))
                         .source(
-                            self.lexer.code_info.code.clone(),
+                            self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
                         .span(span.clone(), "invalid unary operator")
@@ -118,7 +118,7 @@ impl Parser {
                             must_be_rparen.span.clone(),
                             "a closing parenthesis ')'".to_string(),
                             format!("{:?}", must_be_rparen.kind),
-                            self.lexer.code_info.code.clone(),
+                            self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         );
 
@@ -143,7 +143,7 @@ impl Parser {
                     t.span.clone(),
                     "a primary expression".to_string(),
                     format!("{:?}", t.kind),
-                    self.lexer.code_info.code.clone(),
+                    self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
                 .with_help("Expected a primary expression (number, identifier, etc.)".to_string());
@@ -175,7 +175,7 @@ impl Parser {
                             token.kind
                         ))
                         .source(
-                            self.lexer.code_info.code.clone(),
+                            self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
                         .span(token.span.clone(), "invalid binary operator")
@@ -348,7 +348,7 @@ impl Parser {
                         t.span.clone(),
                         "a type".to_string(),
                         format!("{:?}", t.kind),
-                        self.lexer.code_info.code.clone(),
+                        self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
                     .with_help("Expected a type identifier".to_string()),
@@ -388,7 +388,7 @@ impl Parser {
                         t.span.clone(),
                         "an identifier".to_string(),
                         format!("{:?}", t.kind),
-                        self.lexer.code_info.code.clone(),
+                        self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
                     .with_help("Expected an identifier for the binding pattern".to_string()),
@@ -455,7 +455,7 @@ impl Parser {
                     la.span.clone(),
                     "a comma ',' or a closing parenthesis ')'".to_string(),
                     format!("{:?}", la.kind),
-                    self.lexer.code_info.code.clone(),
+                    self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 ).with_help("Function arguments should be separated by commas, with the list ending with a closing parenthesis".to_string()));
                 return Err(self.lexer.synchronize());
@@ -519,7 +519,7 @@ impl Parser {
                         func_name
                     ))
                     .source(
-                        self.lexer.code_info.code.clone(),
+                        self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
                     .span(la.span.clone(), format!("unexpected {:?}", la.kind))
@@ -555,7 +555,7 @@ impl Parser {
                         label_token.span.clone(),
                         "a label identifier".to_string(),
                         format!("{:?}", label_token.kind),
-                        self.lexer.code_info.code.clone(),
+                        self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     ).with_help("The preceding colon indicates a block label, so an identifier is expected".to_string()));
                     return Err(self.lexer.synchronize());
@@ -602,7 +602,7 @@ impl Parser {
                                 next.span.clone(),
                                 "a closing brace".to_string(),
                                 format!("{:?}", next.kind),
-                                self.lexer.code_info.code.clone(),
+                                self.lexer.code_info.source.clone(),
                                 self.lexer.code_info.file_name.clone(),
                             )
                             .with_help("Expected a closing brace after '!'".to_string()),
@@ -619,7 +619,7 @@ impl Parser {
                                 .kind(ErrorKind::InvalidSyntax)
                                 .message("Expected an expression before '!'".to_string())
                                 .source(
-                                    self.lexer.code_info.code.clone(),
+                                    self.lexer.code_info.source.clone(),
                                     self.lexer.code_info.file_name.clone(),
                                 )
                                 .span(span, "invalid expression")
@@ -635,7 +635,7 @@ impl Parser {
                             terminator.span.clone(),
                             "';' or '!'".to_string(),
                             format!("{:?}", terminator.kind),
-                            self.lexer.code_info.code.clone(),
+                            self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
                         .with_help("Expected ';' or '!' after statement/expression".to_string()),
@@ -688,7 +688,7 @@ impl Parser {
                     ident.span.clone(),
                     "an identifier".to_string(),
                     format!("{:?}", ident.kind),
-                    self.lexer.code_info.code.clone(),
+                    self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
                 .with_help("Expected an identifier naming the function".to_string());
@@ -753,7 +753,7 @@ impl Parser {
                     label_token.span.clone(),
                     "a label identifier".to_string(),
                     format!("{:?}", label_token.kind),
-                    self.lexer.code_info.code.clone(),
+                    self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
                 .with_help("Expected a label identifier after colon".to_string());
@@ -820,7 +820,7 @@ impl Parser {
                         t.span.clone(),
                         "fn".to_string(),
                         format!("{:?}", t.kind),
-                        self.lexer.code_info.code.clone(),
+                        self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
                     .with_help(
@@ -874,8 +874,8 @@ mod tests {
 
     #[test]
     fn test_parse_fac() {
-        let code_info = UnprocessedCodeInfo {
-            code: "fn fac(n: i64) -> i64 {
+        let code_info = SourceInfo {
+            source: "fn fac(n: i64) -> i64 {
             if n == 0 {
                 1!
             }
@@ -903,8 +903,8 @@ mod tests {
     #[test]
     fn test_parse_failure_1() {
         yuu_shared::error::setup_error_formatter(Some("base16-ocean.dark"), true).unwrap();
-        let x = UnprocessedCodeInfo {
-            code: "fn fac(n: i64) -> i64 {
+        let x = SourceInfo {
+            source: "fn fac(n: i64) -> i64 {
             if n == 0 {
                 1!
             }

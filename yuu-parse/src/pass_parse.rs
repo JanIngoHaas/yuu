@@ -1,12 +1,16 @@
-use yuu_shared::{ast::AST, context::Context, scheduler::Pass};
+use yuu_shared::{
+    ast::{SourceInfo, AST},
+    context::Context,
+    scheduler::Pass,
+};
 
-use crate::{lexer::UnprocessedCodeInfo, parser::Parser};
+use crate::parser::Parser;
 
 pub struct ParsePass;
 
 impl Pass for ParsePass {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let code_info = context.get_resource::<UnprocessedCodeInfo>(self);
+        let code_info = context.get_resource::<SourceInfo>(self);
         let code_info = code_info.lock().unwrap();
         let code_info = &*code_info;
         let mut parser = Parser::new(code_info);
@@ -19,7 +23,7 @@ impl Pass for ParsePass {
     where
         Self: Sized,
     {
-        schedule.requires_resource_read::<UnprocessedCodeInfo>(&self);
+        schedule.requires_resource_read::<SourceInfo>(&self);
         schedule.produces_resource::<AST>(&self);
         schedule.add_pass(self);
     }

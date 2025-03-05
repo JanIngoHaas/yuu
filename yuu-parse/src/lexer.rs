@@ -3,6 +3,7 @@ use std::sync::Arc;
 use logos::{Logos, Span};
 use miette::MietteDiagnostic;
 use yuu_shared::{
+    ast::SourceInfo,
     error::{ErrorKind, YuuError},
     scheduler::ResourceId,
     token::{Token, TokenKind},
@@ -38,12 +39,12 @@ pub type ParseResult<T> = std::result::Result<T, CatchIn>;
 pub struct Lexer {
     tokens: Vec<Token>,
     current: usize,
-    pub code_info: UnprocessedCodeInfo,
+    pub code_info: SourceInfo,
 }
 
 impl Lexer {
-    pub fn new(code_info: &UnprocessedCodeInfo) -> Self {
-        let mut lexer = TokenKind::lexer(code_info.code.as_ref());
+    pub fn new(code_info: &SourceInfo) -> Self {
+        let mut lexer = TokenKind::lexer(code_info.source.as_ref());
         let mut tokens = Vec::new();
 
         // Pre-lex the entire file at once
@@ -58,7 +59,7 @@ impl Lexer {
         }
 
         // Add an explicit EOF token at the end
-        let end_pos = code_info.code.len();
+        let end_pos = code_info.source.len();
         tokens.push(Token {
             kind: TokenKind::EOF,
             span: end_pos..end_pos,
@@ -110,7 +111,7 @@ impl Lexer {
             token
         } else {
             // Return EOF if we've reached the end
-            let end_pos = self.code_info.code.len();
+            let end_pos = self.code_info.source.len();
             Token {
                 kind: TokenKind::EOF,
                 span: end_pos..end_pos,
@@ -152,7 +153,7 @@ impl Lexer {
                 span,
                 expected_str,
                 found,
-                self.code_info.code.clone(),
+                self.code_info.source.clone(),
                 self.code_info.file_name.clone(),
             );
 
@@ -187,7 +188,7 @@ impl Lexer {
                 .kind(ErrorKind::UnexpectedEOF)
                 .message(format!("Unexpected end of file, expected {}", expected_str))
                 .source(
-                    self.code_info.code.clone(),
+                    self.code_info.source.clone(),
                     self.code_info.file_name.clone(),
                 )
                 .span(span, "unexpected end of file")
@@ -201,7 +202,7 @@ impl Lexer {
 
     // Get source code snippet for a span
     pub fn get_source_snippet(&self, span: &Span) -> &str {
-        &self.code_info.code[span.start..span.end]
+        &self.code_info.source[span.start..span.end]
     }
 
     pub fn is_at_end(&self) -> bool {

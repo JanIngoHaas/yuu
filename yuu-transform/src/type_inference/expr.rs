@@ -2,22 +2,22 @@ use yuu_parse::add_ids::GetId;
 use yuu_shared::{
     ast::{
         AssignmentExpr, BinaryExpr, BlockExpr, BreakStmt, ExprNode, FuncCallExpr, IdentExpr,
-        IfExpr, LiteralExpr, StmtNode, UnaryExpr,
+        IfExpr, LiteralExpr, Spanned, StmtNode, UnaryExpr,
     },
     binding_info::{BindingInfo, BindingInfoKind},
-    block::Block,
-    block::FUNC_BLOCK_NAME,
+    block::{Block, IdentResolutionKind, FUNC_BLOCK_NAME},
+    error::{ErrorKind, YuuError},
     semantic_error::SemanticError,
     type_info::{
-        inactive_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
-        TypeInfo,
+        error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
+        primitive_nil, TypeInfo,
     },
 };
 
 const MAX_SIMILAR_NAMES: u64 = 3;
 const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::{pass_type_inference::TransientData, resolve_function_overload};
+use super::{match_binding_node_to_type, pass_type_inference::TransientData};
 
 fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
@@ -41,14 +41,28 @@ fn infer_binary(
     let rhs = infer_expr(&binary_expr.right, block, data, None);
 
     let op_name = binary_expr.op.static_name();
-    let ty = block
-        .resolve_function(op_name, data.type_info_table, &[lhs, rhs], |_, func| {
-            func.ret
-        })
-        .map_err(|err| panic!("User bug: Function overload error: {:?}", err));
 
-    data.type_info_table.types.insert(binary_expr.id, ty);
-    ty
+    let resolution = match block.resolve_ident(
+        op_name,
+        Some(&[lhs, rhs]),
+        data.type_info_table,
+        &data.src_code,
+        binary_expr.span.clone(),
+    ) {
+        Ok(res) => res,
+        Err(err) => {
+            data.errors.push(err);
+            data.type_info_table
+                .types
+                .insert(binary_expr.id, error_type());
+            return error_type();
+        }
+    };
+
+    data.type_info_table
+        .types
+        .insert(binary_expr.id, resolution.contextual_appropriate_type);
+    resolution.contextual_appropriate_type
 }
 
 fn infer_unary(
@@ -59,12 +73,28 @@ fn infer_unary(
     let ty = infer_expr(&unary_expr.operand, block, data, None);
     let op_name = unary_expr.op.static_name();
 
-    let result_ty = block
-        .resolve_function(op_name, data.type_info_table, &[ty], |_, func| func.ret)
-        .map_err(|_err| panic!("User bug: Function overload error"));
+    // Replace resolve_function with resolve_function_call
+    let resolution = match block.resolve_ident(
+        op_name,
+        Some(&[ty]),
+        data.type_info_table,
+        &data.src_code,
+        unary_expr.span.clone(),
+    ) {
+        Ok(res) => res,
+        Err(err) => {
+            data.errors.push(err);
+            data.type_info_table
+                .types
+                .insert(unary_expr.id, error_type());
+            return error_type();
+        }
+    };
 
-    data.type_info_table.types.insert(unary_expr.id, result_ty);
-    result_ty
+    data.type_info_table
+        .types
+        .insert(unary_expr.id, resolution.contextual_appropriate_type);
+    resolution.contextual_appropriate_type
 }
 
 fn infer_ident(
@@ -73,50 +103,30 @@ fn infer_ident(
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
-    let binding = block.get_binding(&ident_expr.ident).ok_or_else(|| {
-        let similar_names =
-            block.get_similar_names(&ident_expr.ident, MAX_SIMILAR_NAMES, MIN_DST_SIMILAR_NAMES);
-
-        panic!(
-            "User bug: Cannot find identifier `{}`, similar names: {:?}",
-            ident_expr.ident, similar_names
-        );
-    });
-
-    let (ty, nid) = match binding {
-        BindingInfoKind::Unique(var) => (
+    let fr = match block.resolve_ident(
+        &ident_expr.ident,
+        function_args,
+        data.type_info_table,
+        &data.src_code,
+        ident_expr.span.clone(),
+    ) {
+        Ok(fr) => fr,
+        Err(err) => {
+            data.errors.push(err);
             data.type_info_table
                 .types
-                .get(&var.id)
-                .cloned()
-                .expect("Compiler Bug: Variable binding not found in type table"),
-            var.id,
-        ),
-        BindingInfoKind::Ambiguous(funcs) => {
-            let binding_info = resolve_function_overload(
-                &funcs,
-                data.type_info_table,
-                function_args.unwrap_or_default(),
-            )
-            .expect("User bug: Function overload error");
-
-            let resolved_func_type = data
-                .type_info_table
-                .types
-                .get(&binding_info.id)
-                .cloned()
-                .expect("Compiler Bug: Function binding not found in type table");
-
-            // data.type_info_table
-            //     .types
-            //     .insert(ident_expr.id, resolved_func_type);
-
-            (resolved_func_type, binding_info.id)
+                .insert(ident_expr.id, error_type());
+            return error_type();
         }
     };
 
+    let ty: &'static TypeInfo = match fr.kind {
+        IdentResolutionKind::ResolvedAsFunction { func_type } => func_type.into(),
+        IdentResolutionKind::ResolvedAsVariable { type_info } => type_info,
+    };
+
     data.type_info_table.types.insert(ident_expr.id, ty);
-    data.binding_table.insert(ident_expr.id, nid);
+    data.binding_table.insert(ident_expr.id, fr.binding.id);
     ty
 }
 
@@ -152,10 +162,57 @@ pub fn infer_block_no_child_creation(
     };
 
     // Unify with any existing type from breaks TO this block
-    let out = data
+    let out = match data
         .type_info_table
         .unify_and_insert(block_expr.id, block_ty)
-        .expect("User bug: Couldn't unify block type");
+    {
+        Ok(ty) => ty,
+        Err(err) => {
+            // Try to find a break statement that might be causing the issue
+            let break_with_value = block_expr.body.iter().find_map(|stmt| {
+                if let StmtNode::Break(br) = stmt {
+                    Some(br.span.clone())
+                } else {
+                    None
+                }
+            });
+
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message(format!(
+                    "Block has inconsistent return types: {} and {}",
+                    err.left, err.right
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    block_expr.span.clone(),
+                    "block with inconsistent return types",
+                );
+
+            // Add label for break statement if found
+            let err_msg = if let Some(span) = break_with_value {
+                err_msg.label(span, format!("break with value of type {}", err.left))
+                    .label(
+                        block_expr.last_expr.as_ref().map_or(
+                            block_expr.span.clone(),
+                            |expr| expr.span().clone()
+                        ),
+                        format!("block yields {}", err.right)
+                    )
+                    .help("Break statements with values must match the block's return type")
+            } else {
+                err_msg.help(
+                    "This can happen if you have a break statement returning a value that doesn't match the block's yield type"
+                )
+            }.build();
+
+            data.errors.push(err_msg);
+            error_type()
+        }
+    };
     out
 }
 
@@ -187,23 +244,48 @@ fn infer_func_call(
         .args
         .iter()
         .map(|arg| infer_expr(arg, block, data, None))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
 
     let actual_func_ident = infer_expr(&func_call_expr.lhs, block, data, Some(&actual_arg_types));
 
     let resolved_ret_type = match actual_func_ident {
         TypeInfo::Function(func) => func.ret,
-        TypeInfo::BuiltIn(_) => {
-            panic!("User bug: Cannot call a built-in type as a function")
+        TypeInfo::BuiltInPrimitive(prim) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Cannot call primitive type '{}' as a function",
+                    prim
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), "not callable")
+                .help("Only function types can be called with parentheses")
+                .build();
+            data.errors.push(err);
+            error_type()
         }
         TypeInfo::Pointer(_) => {
-            panic!("User bug: Cannot call a pointer type as a function")
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message("Cannot call a pointer as a function")
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), "pointer type")
+                .help("Function pointers are not supported yet")
+                .build();
+            data.errors.push(err);
+            error_type()
         }
         TypeInfo::Inactive => {
-            panic!(
-                "Compiler bug: Inactive type as return type of function - this should never happen"
-            )
+            // This is a compiler bug, so keep the panic
+            panic!("Compiler bug: Inactive type as return type of function")
         }
+        TypeInfo::Error => error_type(), // Propagate existing error
     };
 
     data.type_info_table
@@ -217,12 +299,15 @@ fn requires_mut(binding: &BindingInfo) -> bool {
     binding.is_mut
 }
 
+// This is WRONG: lhs needs to be an expression, not a binding!
+// TODO: Fix this
 fn infer_assignment(
     assignment_expr: &AssignmentExpr,
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
     let binding = &assignment_expr.binding;
+    // match_binding_node_to_type(binding, block, ty, data) -> we probably need to call this somehow
     let binding_ty = data
         .type_info_table
         .types
@@ -232,89 +317,209 @@ fn infer_assignment(
 
     // Check mutability
     if !binding.is_mut() {
-        panic!("User Error: Cannot assign to immutable binding");
+        let err = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message("Cannot assign to immutable binding")
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                assignment_expr.span.clone(),
+                "assignment to immutable binding",
+            )
+            .help("Consider adding 'mut' when declaring this binding")
+            .build();
+        data.errors.push(err);
+        return error_type();
     }
 
     let value = infer_expr(&assignment_expr.rhs, block, data, None);
 
     // Prevent binding inactive types
     if matches!(value, TypeInfo::Inactive) {
-        panic!("User Error: Cannot bind a value-less expression to a variable. This happens when all paths in the expression return or break");
+        let err = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message("Cannot bind a value-less expression to a variable")
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                assignment_expr.rhs.span().clone(),
+                "this expression doesn't produce a value",
+            )
+            .help("This happens when all paths in the expression return or break")
+            .build();
+        data.errors.push(err);
+        return error_type();
     }
 
     // First unify to check compatibility
-    let unified = value
-        .unify(binding_ty)
-        .expect("User bug: Couldn't unify assignment type");
+    let unified = match value.unify(binding_ty) {
+        Ok(unified) => unified,
+        Err(err) => {
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message(format!(
+                    "Cannot assign {} to binding of type {}",
+                    err.left, err.right
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    assignment_expr.rhs.span().clone(),
+                    format!("has type {}", err.left),
+                )
+                .label(
+                    binding.span().clone(),
+                    format!("expected type {}", err.right),
+                )
+                .help("The types must be compatible for assignment")
+                .build();
+            data.errors.push(err_msg);
+            error_type()
+        }
+    };
 
     // Then insert the unified type and return it
-    let out = data
+    let out = match data
         .type_info_table
         .unify_and_insert(assignment_expr.id, unified)
-        .expect("User bug: Couldn't unify assignment type");
+    {
+        Ok(ty) => ty,
+        Err(err) => {
+            // This should never happen if the previous unify worked, but just in case
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message("Type inconsistency in assignment")
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(assignment_expr.span.clone(), "inconsistent types")
+                .build();
+            data.errors.push(err_msg);
+            error_type()
+        }
+    };
 
     out
 }
 
 fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
     // Check condition
+    let src_code = data.src_code.clone();
+
     let cond_ty = infer_expr(&expr.if_block.condition, block, data, None);
     if let Err(err) = cond_ty.unify(primitive_bool()) {
-        panic!(
-            "User Error: Condition must be of type bool, got {}",
-            err.from
-        );
+        let err_msg = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "If condition must be of type bool, got {}",
+                err.left
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                expr.if_block.condition.span().clone(),
+                format!("has type {}", err.left),
+            )
+            .help("Conditions must evaluate to a boolean type")
+            .build();
+        data.errors.push(err_msg);
+        // Continue execution but mark as error
+        data.type_info_table.types.insert(expr.id, error_type());
+        return error_type();
     }
 
-    // This creates block A
     let then_ty = infer_block(&expr.if_block.body, block, data);
 
-    // Process else-if blocks...
     let if_types = expr.else_if_blocks.iter().map(|x| {
         // First check if we have a bool - if not -> error!
         if let Err(err) = cond_ty.unify(primitive_bool()) {
             panic!(
                 "User Error: Condition must be of type bool, got {}",
-                err.from
+                err.left
             );
         }
-        // This creates block B
         let ty = infer_block(&x.body, block, data);
-        Ok::<_, SemanticError>(ty)
+        ty
     });
 
-    let out_ty = if_types.into_iter().try_fold(then_ty, |acc, ty| {
-        if matches!(acc, TypeInfo::Inactive) {
-            return ty;
-        }
+    let (out_ty, errors) = if_types.into_iter().enumerate().fold(
+        (then_ty, Vec::new()),
+        move |(acc, mut errors), (block_index, ty)| {
+            if matches!(acc, TypeInfo::Inactive) {
+                return (ty, errors);
+            }
 
-        // Unify the types and use the unified type
-        let ty = ty?;
-        match acc.unify(ty) {
-            Ok(unified) => Ok(unified),
-            Err(_) => panic!(
-                "User Error: Types of if expr branches don't coerce to same type: {} and {}",
-                acc, ty
-            ),
-        }
-    });
+            // Unify the types and use the unified type
+            match acc.unify(ty) {
+                Ok(unified) => (unified, errors),
+                Err(_) => {
+                    let err_msg = YuuError::builder()
+                        .kind(ErrorKind::TypeMismatch)
+                        .message(format!("If expression branches have incompatible types"))
+                        .source(src_code.source.clone(), src_code.file_name.clone())
+                        .span(expr.span.clone(), "if with incompatible branch types")
+                        .label(
+                            expr.if_block.body.span.clone(),
+                            format!("this branch returns {}", acc),
+                        )
+                        .label(
+                            expr.else_if_blocks[block_index].body.span.clone(),
+                            format!("this branch returns {}", ty),
+                        )
+                        .help("All branches of an if expression must evaluate to compatible types")
+                        .build();
+                    errors.push(err_msg);
+                    (error_type(), errors)
+                }
+            }
+        },
+    );
 
-    // And here is where the extra block gets created - when we call infer_block
-    // on the else block even though we already have a block for the else path
+    data.errors.extend(errors);
+
     if let Some(else_body) = expr.else_block.as_ref() {
-        // This creates block C - even though we already have a block for the else path!
-        let ty = infer_block(else_body, block, data);
-        if let Err(_) = out_ty.unify(ty) {
-            panic!(
-                "User Error: Types of if expr branches don't coerce to same type: {} and {}",
-                out_ty, ty
-            );
+        let else_ty = infer_block(else_body, block, data);
+        match out_ty.unify(else_ty) {
+            Ok(unified) => {
+                data.type_info_table.types.insert(expr.id, unified);
+                unified
+            }
+            Err(err) => {
+                let err_msg = YuuError::builder()
+                    .kind(ErrorKind::TypeMismatch)
+                    .message("If expression branches have incompatible types")
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(expr.span.clone(), "if with incompatible branch types")
+                    .label(
+                        expr.if_block.body.span.clone(),
+                        format!("if branch returns {}", out_ty),
+                    )
+                    .label(
+                        else_body.span.clone(),
+                        format!("else branch returns {}", else_ty),
+                    )
+                    .help("All branches of an if expression must evaluate to compatible types")
+                    .build();
+                data.errors.push(err_msg);
+                error_type()
+            }
         }
-    };
-
-    // Put that thing into the type info table
-    data.type_info_table.types.insert(expr.id, out_ty);
-    out_ty
+    } else {
+        data.type_info_table.types.insert(expr.id, out_ty);
+        out_ty
+    }
 }
 
 pub fn infer_expr(

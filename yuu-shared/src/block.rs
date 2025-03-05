@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use crate::error::{ErrorKind, SourceInfo, YuuError};
+use crate::ast::SourceInfo;
+use crate::error::{ErrorKind, YuuError};
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::Span;
 use crate::{
@@ -129,7 +130,7 @@ impl Block {
 
     pub fn get_unique_binding_forced(&self, name: &str) -> Option<BindingInfo> {
         let binding = self.get_binding(name);
-        if let Some(BindingInfoKind::Unique(binding)) = binding {
+        if let Some(BindingInfoKind::Variable(binding)) = binding {
             return Some(binding.clone());
         }
         debug_assert!(
@@ -178,13 +179,13 @@ impl Block {
         span: Span,
     ) -> Result<(), SemanticError> {
         match self.bindings.get_mut(&name) {
-            Some(BindingInfoKind::Unique(_)) => {
+            Some(BindingInfoKind::Variable(_)) => {
                 panic!(
                     "Bug: Function {} already declared - not sure if this should ever happen",
                     name
                 )
             }
-            Some(BindingInfoKind::Ambiguous(funcs)) => {
+            Some(BindingInfoKind::Function(funcs)) => {
                 funcs.push(BindingInfo {
                     id,
                     src_location: Some(span),
@@ -198,8 +199,7 @@ impl Block {
                     src_location: Some(span),
                     is_mut: false,
                 }];
-                self.bindings
-                    .insert(name, BindingInfoKind::Ambiguous(funcs));
+                self.bindings.insert(name, BindingInfoKind::Function(funcs));
                 Ok(())
             }
         }
@@ -208,7 +208,7 @@ impl Block {
     pub fn insert_variable(&mut self, name: String, id: NodeId, span: Span, is_mut: bool) {
         self.bindings.insert(
             name,
-            BindingInfoKind::Unique(BindingInfo {
+            BindingInfoKind::Variable(BindingInfo {
                 id,
                 src_location: Some(span),
                 is_mut,
@@ -263,254 +263,253 @@ impl Block {
         self.register_binary_op(tyt, "eq", next(), PrimitiveType::F64, PrimitiveType::Bool);
     }
 
-    pub fn resolve_function<T>(
-        &self,
-        name: &str,
-        type_info_table: &TypeInfoTable,
-        resolve_arg_types: &[&'static TypeInfo],
-        resolve_ret_type: T,
-        src_info: Option<&SourceInfo>,
-        span: Option<Span>,
-    ) -> Result<&'static TypeInfo, YuuError>
-    where
-        T: Fn(&BindingInfo, &FunctionType) -> &'static TypeInfo,
-    {
-        let binding = self.get_binding(name).ok_or_else(|| {
-            // Create a binding not found error
-            let mut builder = YuuError::builder()
-                .kind(ErrorKind::FunctionOverloadError)
-                .message(format!("Function '{}' not found", name));
+    // pub fn resolve_function<T>(
+    //     &self,
+    //     name: &str,
+    //     type_info_table: &TypeInfoTable,
+    //     resolve_arg_types: &[&'static TypeInfo],
+    //     resolve_ret_type: T,
+    //     src_info: Option<&SourceInfo>,
+    //     span: Option<Span>,
+    // ) -> Result<&'static TypeInfo, YuuError>
+    // where
+    //     T: Fn(&BindingInfo, &FunctionType) -> &'static TypeInfo,
+    // {
+    //     let binding = self.get_binding(name).ok_or_else(|| {
+    //         // Create a binding not found error
+    //         let mut builder = YuuError::builder()
+    //             .kind(ErrorKind::FunctionOverloadError)
+    //             .message(format!("Function '{}' not found", name));
 
-            if let (Some(src), Some(sp)) = (src_info, span) {
-                builder = builder
-                    .source(src.source.clone(), src.file_name.clone())
-                    .span(
-                        (sp.start as usize, (sp.end - sp.start) as usize),
-                        format!("'{}' is not defined", name),
-                    );
+    //         if let (Some(src), Some(sp)) = (src_info, span) {
+    //             builder = builder
+    //                 .source(src.source.clone(), src.file_name.clone())
+    //                 .span(
+    //                     (sp.start as usize, (sp.end - sp.start) as usize),
+    //                     format!("'{}' is not defined", name),
+    //                 );
 
-                // Add suggestions for similar names
-                let similar = self.get_similar_names(name, 3, 3);
-                if !similar.is_empty() {
-                    builder = builder.help(format!("Did you mean: {}?", similar.join(", ")));
-                }
-            }
+    //             // Add suggestions for similar names
+    //             let similar = self.get_similar_names(name, 3, 3);
+    //             if !similar.is_empty() {
+    //                 builder = builder.help(format!("Did you mean: {}?", similar.join(", ")));
+    //             }
+    //         }
 
-            builder.build()
-        })?;
+    //         builder.build()
+    //     })?;
 
-        match binding {
-            BindingInfoKind::Unique(binding_info) => {
-                let func_type = type_info_table.types.get(&binding_info.id).ok_or_else(|| {
-                    let mut builder = YuuError::builder()
-                        .kind(ErrorKind::FunctionOverloadError)
-                        .message(format!("'{}' is not a function", name));
+    //     match binding {
+    //         BindingInfoKind::Unique(binding_info) => {
+    //             let func_type = type_info_table.types.get(&binding_info.id).ok_or_else(|| {
+    //                 let mut builder = YuuError::builder()
+    //                     .kind(ErrorKind::FunctionOverloadError)
+    //                     .message(format!("'{}' is not a function", name));
 
-                    if let (Some(src), Some(sp)) = (src_info, span) {
-                        builder = builder
-                            .source(src.source.clone(), src.file_name.clone())
-                            .span(
-                                (sp.start as usize, (sp.end - sp.start) as usize),
-                                format!("'{}' is not a function", name),
-                            );
-                    }
+    //                 if let (Some(src), Some(sp)) = (src_info, span) {
+    //                     builder = builder
+    //                         .source(src.source.clone(), src.file_name.clone())
+    //                         .span(
+    //                             (sp.start as usize, (sp.end - sp.start) as usize),
+    //                             format!("'{}' is not a function", name),
+    //                         );
+    //                 }
 
-                    builder.build()
-                })?;
+    //                 builder.build()
+    //             })?;
 
-                if let TypeInfo::Function(func) = &**func_type {
-                    if func.args.len() != resolve_arg_types.len() {
-                        let mut builder = YuuError::builder()
-                            .kind(ErrorKind::FunctionOverloadError)
-                            .message(format!(
-                                "Function '{}' expects {} arguments, but {} were provided",
-                                name,
-                                func.args.len(),
-                                resolve_arg_types.len()
-                            ));
+    //             if let TypeInfo::Function(func) = &**func_type {
+    //                 if func.args.len() != resolve_arg_types.len() {
+    //                     let mut builder = YuuError::builder()
+    //                         .kind(ErrorKind::FunctionOverloadError)
+    //                         .message(format!(
+    //                             "Function '{}' expects {} arguments, but {} were provided",
+    //                             name,
+    //                             func.args.len(),
+    //                             resolve_arg_types.len()
+    //                         ));
 
-                        if let (Some(src), Some(sp)) = (src_info, span) {
-                            builder = builder
-                                .source(src.source.clone(), src.file_name.clone())
-                                .span(
-                                    (sp.start as usize, (sp.end - sp.start) as usize),
-                                    "incorrect number of arguments",
-                                );
+    //                     if let (Some(src), Some(sp)) = (src_info, span) {
+    //                         builder = builder
+    //                             .source(src.source.clone(), src.file_name.clone())
+    //                             .span(
+    //                                 (sp.start as usize, (sp.end - sp.start) as usize),
+    //                                 "incorrect number of arguments",
+    //                             );
 
-                            if let Some(decl_span) = binding_info.src_location {
-                                builder = builder.label(
-                                    (
-                                        decl_span.start as usize,
-                                        (decl_span.end - decl_span.start) as usize,
-                                    ),
-                                    format!("function '{}' defined here", name),
-                                );
-                            }
-                        }
+    //                         if let Some(decl_span) = binding_info.src_location {
+    //                             builder = builder.label(
+    //                                 (
+    //                                     decl_span.start as usize,
+    //                                     (decl_span.end - decl_span.start) as usize,
+    //                                 ),
+    //                                 format!("function '{}' defined here", name),
+    //                             );
+    //                         }
+    //                     }
 
-                        return Err(builder.build());
-                    }
+    //                     return Err(builder.build());
+    //                 }
 
-                    for (i, (expected, actual)) in
-                        func.args.iter().zip(resolve_arg_types.iter()).enumerate()
-                    {
-                        if !actual.is_exact_same_type(expected) {
-                            let mut builder = YuuError::builder()
-                                .kind(ErrorKind::FunctionOverloadError)
-                                .message(format!(
-                                    "Type mismatch in argument {} of function '{}': expected {}, found {}",
-                                    i + 1,
-                                    name,
-                                    expected,
-                                    actual
-                                ));
+    //                 for (i, (expected, actual)) in
+    //                     func.args.iter().zip(resolve_arg_types.iter()).enumerate()
+    //                 {
+    //                     if !actual.is_exact_same_type(expected) {
+    //                         let mut builder = YuuError::builder()
+    //                             .kind(ErrorKind::FunctionOverloadError)
+    //                             .message(format!(
+    //                                 "Type mismatch in argument {} of function '{}': expected {}, found {}",
+    //                                 i + 1,
+    //                                 name,
+    //                                 expected,
+    //                                 actual
+    //                             ));
 
-                            if let (Some(src), Some(sp)) = (src_info, span) {
-                                builder = builder
-                                    .source(src.source.clone(), src.file_name.clone())
-                                    .span(
-                                        (sp.start as usize, (sp.end - sp.start) as usize),
-                                        format!("type mismatch in argument {}", i + 1),
-                                    );
+    //                         if let (Some(src), Some(sp)) = (src_info, span) {
+    //                             builder = builder
+    //                                 .source(src.source.clone(), src.file_name.clone())
+    //                                 .span(
+    //                                     (sp.start as usize, (sp.end - sp.start) as usize),
+    //                                     format!("type mismatch in argument {}", i + 1),
+    //                                 );
 
-                                if let Some(decl_span) = binding_info.src_location {
-                                    builder = builder.label(
-                                        (
-                                            decl_span.start as usize,
-                                            (decl_span.end - decl_span.start) as usize,
-                                        ),
-                                        format!("function '{}' defined here", name),
-                                    );
-                                }
-                            }
+    //                             if let Some(decl_span) = binding_info.src_location {
+    //                                 builder = builder.label(
+    //                                     (
+    //                                         decl_span.start as usize,
+    //                                         (decl_span.end - decl_span.start) as usize,
+    //                                     ),
+    //                                     format!("function '{}' defined here", name),
+    //                                 );
+    //                             }
+    //                         }
 
-                            return Err(builder.build());
-                        }
-                    }
+    //                         return Err(builder.build());
+    //                     }
+    //                 }
 
-                    Ok(resolve_ret_type(&binding_info, func))
-                } else {
-                    let mut builder = YuuError::builder()
-                        .kind(ErrorKind::FunctionOverloadError)
-                        .message(format!("'{}' is not a function", name));
+    //                 Ok(resolve_ret_type(&binding_info, func))
+    //             } else {
+    //                 let mut builder = YuuError::builder()
+    //                     .kind(ErrorKind::FunctionOverloadError)
+    //                     .message(format!("'{}' is not a function", name));
 
-                    if let (Some(src), Some(sp)) = (src_info, span) {
-                        builder = builder
-                            .source(src.source.clone(), src.file_name.clone())
-                            .span(
-                                (sp.start as usize, (sp.end - sp.start) as usize),
-                                format!("'{}' is not a function", name),
-                            );
-                    }
+    //                 if let (Some(src), Some(sp)) = (src_info, span) {
+    //                     builder = builder
+    //                         .source(src.source.clone(), src.file_name.clone())
+    //                         .span(
+    //                             (sp.start as usize, (sp.end - sp.start) as usize),
+    //                             format!("'{}' is not a function", name),
+    //                         );
+    //                 }
 
-                    Err(builder.build())
-                }
-            }
-            BindingInfoKind::Ambiguous(funcs) => {
-                let mut errors = Vec::new();
-                let mut candidates = Vec::new();
+    //                 Err(builder.build())
+    //             }
+    //         }
+    //         BindingInfoKind::Ambiguous(funcs) => {
+    //             let mut candidates = Vec::new();
 
-                for func in funcs.iter() {
-                    let func_type = match type_info_table.types.get(&func.id) {
-                        Some(ft) => ft,
-                        None => continue,
-                    };
+    //             for func in funcs.iter() {
+    //                 let func_type = match type_info_table.types.get(&func.id) {
+    //                     Some(ft) => ft,
+    //                     None => continue,
+    //                 };
 
-                    if let TypeInfo::Function(func_type) = &**func_type {
-                        candidates.push((func, func_type));
+    //                 if let TypeInfo::Function(func_type) = &**func_type {
+    //                     candidates.push((func, func_type));
 
-                        if func_type.args.len() != resolve_arg_types.len() {
-                            continue;
-                        }
+    //                     if func_type.args.len() != resolve_arg_types.len() {
+    //                         continue;
+    //                     }
 
-                        let mut all_args_match = true;
-                        for (expected, actual) in
-                            func_type.args.iter().zip(resolve_arg_types.iter())
-                        {
-                            if !actual.is_exact_same_type(expected) {
-                                all_args_match = false;
-                                break;
-                            }
-                        }
+    //                     let mut all_args_match = true;
+    //                     for (expected, actual) in
+    //                         func_type.args.iter().zip(resolve_arg_types.iter())
+    //                     {
+    //                         if !actual.is_exact_same_type(expected) {
+    //                             all_args_match = false;
+    //                             break;
+    //                         }
+    //                     }
 
-                        if all_args_match {
-                            return Ok(resolve_ret_type(func, func_type));
-                        }
-                    }
-                }
+    //                     if all_args_match {
+    //                         return Ok(resolve_ret_type(func, func_type));
+    //                     }
+    //                 }
+    //             }
 
-                // If we got here, no matching overload was found
-                let mut builder = YuuError::builder()
-                    .kind(ErrorKind::FunctionOverloadError)
-                    .message(format!(
-                        "No matching overload found for function '{}'",
-                        name
-                    ));
+    //             // If we got here, no matching overload was found
+    //             let mut builder = YuuError::builder()
+    //                 .kind(ErrorKind::FunctionOverloadError)
+    //                 .message(format!(
+    //                     "No matching overload found for function '{}'",
+    //                     name
+    //                 ));
 
-                if let (Some(src), Some(sp)) = (src_info, span) {
-                    builder = builder
-                        .source(src.source.clone(), src.file_name.clone())
-                        .span(
-                            (sp.start as usize, (sp.end - sp.start) as usize),
-                            "no matching function overload",
-                        );
+    //             if let (Some(src), Some(sp)) = (src_info, span) {
+    //                 builder = builder
+    //                     .source(src.source.clone(), src.file_name.clone())
+    //                     .span(
+    //                         (sp.start as usize, (sp.end - sp.start) as usize),
+    //                         "no matching function overload",
+    //                     );
 
-                    // Add information about each candidate
-                    for (i, (func, func_type)) in candidates.iter().enumerate() {
-                        let arg_types = func_type
-                            .args
-                            .iter()
-                            .map(|t| t.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
+    //                 // Add information about each candidate
+    //                 for (i, (func, func_type)) in candidates.iter().enumerate() {
+    //                     let arg_types = func_type
+    //                         .args
+    //                         .iter()
+    //                         .map(|t| t.to_string())
+    //                         .collect::<Vec<_>>()
+    //                         .join(", ");
 
-                        if let Some(decl_span) = func.src_location {
-                            builder = builder.label(
-                                (
-                                    decl_span.start as usize,
-                                    (decl_span.end - decl_span.start) as usize,
-                                ),
-                                format!("candidate {} with types ({})", i + 1, arg_types),
-                            );
-                        }
-                    }
+    //                     if let Some(decl_span) = &func.src_location {
+    //                         builder = builder.label(
+    //                             (
+    //                                 decl_span.start as usize,
+    //                                 (decl_span.end - decl_span.start) as usize,
+    //                             ),
+    //                             format!("candidate {} with types ({})", i + 1, arg_types),
+    //                         );
+    //                     }
+    //                 }
 
-                    // Add more detailed help
-                    if !candidates.is_empty() {
-                        let mut help = format!("Function '{}' exists but arguments don't match.\nCandidate overloads:\n", name);
-                        for (i, (_, func_type)) in candidates.iter().enumerate() {
-                            let arg_types = func_type
-                                .args
-                                .iter()
-                                .map(|t| t.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", ");
+    //                 // Add more detailed help
+    //                 if !candidates.is_empty() {
+    //                     let mut help = format!("Function '{}' exists but arguments don't match.\nCandidate overloads:\n", name);
+    //                     for (i, (_, func_type)) in candidates.iter().enumerate() {
+    //                         let arg_types = func_type
+    //                             .args
+    //                             .iter()
+    //                             .map(|t| t.to_string())
+    //                             .collect::<Vec<_>>()
+    //                             .join(", ");
 
-                            let ret_type = func_type.ret.to_string();
-                            help.push_str(&format!(
-                                "{}. fn {}({}) -> {}\n",
-                                i + 1,
-                                name,
-                                arg_types,
-                                ret_type
-                            ));
-                        }
+    //                         let ret_type = func_type.ret.to_string();
+    //                         help.push_str(&format!(
+    //                             "{}. fn {}({}) -> {}\n",
+    //                             i + 1,
+    //                             name,
+    //                             arg_types,
+    //                             ret_type
+    //                         ));
+    //                     }
 
-                        let given_types = resolve_arg_types
-                            .iter()
-                            .map(|t| t.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
+    //                     let given_types = resolve_arg_types
+    //                         .iter()
+    //                         .map(|t| t.to_string())
+    //                         .collect::<Vec<_>>()
+    //                         .join(", ");
 
-                        help.push_str(&format!("\nProvided argument types: ({})", given_types));
-                        builder = builder.help(help);
-                    }
-                }
+    //                     help.push_str(&format!("\nProvided argument types: ({})", given_types));
+    //                     builder = builder.help(help);
+    //                 }
+    //             }
 
-                Err(builder.build())
-            }
-        }
-    }
+    //             Err(builder.build())
+    //         }
+    //     }
+    // }
 
     pub fn get_similar_names(&self, name: &str, amount: u64, max_dst: u64) -> Vec<String> {
         let mut similar_names = Vec::new();
@@ -539,6 +538,281 @@ impl Block {
 
         result
     }
+
+    fn create_binding_not_found_error(
+        &self,
+        name: &str,
+        is_function: bool,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> YuuError {
+        let func_or_var = if is_function { "Function" } else { "Variable" };
+
+        let mut builder = YuuError::builder()
+            .kind(ErrorKind::FunctionOverloadError)
+            .message(format!("{} '{}' not found", func_or_var, name));
+
+        builder = builder
+            .source(src.source.clone(), src.file_name.clone())
+            .span(
+                (sp.start as usize, (sp.end - sp.start) as usize),
+                format!("'{}' is not defined", name),
+            );
+
+        // Add suggestions for similar names
+        let similar = self.get_similar_names(name, 3, 3);
+        if !similar.is_empty() {
+            builder = builder.help(format!("Did you mean: {}?", similar.join(", ")));
+        }
+
+        builder.build()
+    }
+
+    pub fn resolve_ident_as_function(
+        &self,
+        name: &str,
+        arg_types: &[&'static TypeInfo],
+        type_info_table: &TypeInfoTable,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> Result<IdentResolutionResult, YuuError> {
+        self.resolve_ident(name, Some(arg_types), type_info_table, src, sp)
+    }
+
+    pub fn resolve_ident(
+        &self,
+        name: &str,
+        arg_types: Option<&[&'static TypeInfo]>,
+        type_info_table: &TypeInfoTable,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> Result<IdentResolutionResult, YuuError> {
+        let binding = self.get_binding(name).ok_or_else(|| {
+            self.create_binding_not_found_error(name, arg_types.is_some(), src, sp.clone())
+        })?;
+
+        match binding {
+            BindingInfoKind::Variable(binding_info) if arg_types.is_none() => {
+                // Found a variable
+                let type_info = type_info_table
+                    .types
+                    .get(&binding_info.id)
+                    .expect("Compiler bug: Binding not found in type info table");
+
+                Ok(IdentResolutionResult {
+                    binding: binding_info,
+                    kind: IdentResolutionKind::ResolvedAsVariable {
+                        type_info: *type_info,
+                    },
+                    contextual_appropriate_type: *type_info,
+                })
+            }
+
+            BindingInfoKind::Function(funcs) if arg_types.is_some() => {
+                let arg_types = unsafe { arg_types.unwrap_unchecked() };
+                // Handle overloaded functions
+                let mut candidates = Vec::new();
+
+                // First pass: find an exact match
+                for func in funcs.iter() {
+                    if let Some(ft) = type_info_table.types.get(&func.id) {
+                        if let TypeInfo::Function(func_type) = &**ft {
+                            // Skip if argument count doesn't match
+                            if func_type.args.len() != arg_types.len() {
+                                continue;
+                            }
+
+                            // Check if all arguments match exactly
+                            let mut all_args_match = true;
+                            for (expected, actual) in func_type.args.iter().zip(arg_types.iter()) {
+                                if !actual.is_exact_same_type(expected) {
+                                    all_args_match = false;
+                                    break;
+                                }
+                            }
+
+                            // Found a match
+                            if all_args_match {
+                                return Ok(IdentResolutionResult {
+                                    binding: func.clone(),
+                                    kind: IdentResolutionKind::ResolvedAsFunction {
+                                        func_type: func_type,
+                                    },
+                                    contextual_appropriate_type: func_type.ret,
+                                });
+                            }
+
+                            candidates.push((func, func_type));
+                        }
+                    }
+                }
+
+                // No exact match found - create detailed error
+                Err(self.create_no_overload_error(name, candidates, arg_types, src, sp))
+            }
+
+            // No arguments given - that should never happen!
+            BindingInfoKind::Function(bi) => {
+                return Err(self.create_function_as_variable_error(name, &bi, src, sp));
+            }
+
+            // Error: We are looking for a variable, but it was called as a function!
+            BindingInfoKind::Variable(bi) => {
+                return Err(self.create_variable_as_function_error(name, &bi, src, sp));
+            }
+        }
+    }
+
+    fn create_variable_as_function_error(
+        &self,
+        name: &str,
+        binding: &BindingInfo,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> YuuError {
+        let mut builder = YuuError::builder()
+            .kind(ErrorKind::FunctionOverloadError)
+            .message(format!("Cannot call '{}' as a function", name))
+            .source(src.source.clone(), src.file_name.clone())
+            .span(
+                (sp.start as usize, (sp.end - sp.start) as usize),
+                format!("'{}' is a variable, not a function", name),
+            );
+
+        if let Some(decl_span) = &binding.src_location {
+            builder = builder.label(
+                (
+                    decl_span.start as usize,
+                    (decl_span.end - decl_span.start) as usize,
+                ),
+                format!("'{}' was defined here as a variable", name),
+            );
+        }
+
+        builder.build()
+    }
+
+    fn create_function_as_variable_error(
+        &self,
+        name: &str,
+        funcs: &Vec<BindingInfo>,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> YuuError {
+        let mut builder = YuuError::builder()
+            .kind(ErrorKind::FunctionOverloadError)
+            .message(format!(
+                "Identifier '{}' refers to a function, but used like a variable (no arguments were provided)",
+                name
+            ))
+            .source(src.source.clone(), src.file_name.clone())
+            .span(
+                (sp.start as usize, (sp.end - sp.start) as usize),
+                format!("'{}' is a function that needs to be called with arguments", name),
+            );
+
+        // If we have function definitions available, add more helpful information
+        if !funcs.is_empty() {
+            // Find the first function with location info to show where it was defined
+            if let Some(func) = funcs.iter().find(|f| f.src_location.is_some()) {
+                if let Some(decl_span) = &func.src_location {
+                    builder = builder.label(
+                        (
+                            decl_span.start as usize,
+                            (decl_span.end - decl_span.start) as usize,
+                        ),
+                        format!("'{}' was defined here as a function", name),
+                    );
+                }
+            }
+
+            builder = builder.help(format!(
+                "To use this function, call it with appropriate arguments: {}(...)",
+                name
+            ));
+        }
+
+        builder.build()
+    }
+
+    fn create_no_overload_error(
+        &self,
+        name: &str,
+        candidates: Vec<(&BindingInfo, &FunctionType)>,
+        provided_args: &[&'static TypeInfo],
+        src: &SourceInfo,
+        sp: Span,
+    ) -> YuuError {
+        let mut builder = YuuError::builder()
+            .kind(ErrorKind::FunctionOverloadError)
+            .message(format!(
+                "No matching overload found for function '{}'",
+                name
+            ));
+
+        builder = builder
+            .source(src.source.clone(), src.file_name.clone())
+            .span(
+                (sp.start as usize, (sp.end - sp.start) as usize),
+                "no matching function overload",
+            );
+
+        // Add information about each candidate
+        for (i, (func, func_type)) in candidates.iter().enumerate() {
+            let arg_types = func_type
+                .args
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if let Some(decl_span) = &func.src_location {
+                builder = builder.label(
+                    (
+                        decl_span.start as usize,
+                        (decl_span.end - decl_span.start) as usize,
+                    ),
+                    format!("candidate {} with types ({})", i + 1, arg_types),
+                );
+            }
+        }
+
+        // Add more detailed help
+        if !candidates.is_empty() {
+            let mut help = format!(
+                "Function '{}' exists but arguments don't match.\nCandidate overloads:\n",
+                name
+            );
+            for (i, (_, func_type)) in candidates.iter().enumerate() {
+                let arg_types = func_type
+                    .args
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let ret_type = func_type.ret.to_string();
+                help.push_str(&format!(
+                    "{}. fn {}({}) -> {}\n",
+                    i + 1,
+                    name,
+                    arg_types,
+                    ret_type
+                ));
+            }
+
+            let given_types = provided_args
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            help.push_str(&format!("\nProvided argument types: ({})", given_types));
+            builder = builder.help(help);
+        }
+
+        builder.build()
+    }
 }
 
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
@@ -563,4 +837,17 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     }
 
     matrix[len1][len2]
+}
+
+pub enum IdentResolutionKind {
+    ResolvedAsFunction { func_type: &'static FunctionType },
+    ResolvedAsVariable { type_info: &'static TypeInfo },
+}
+
+pub struct IdentResolutionResult {
+    pub binding: BindingInfo,
+    pub kind: IdentResolutionKind,
+    /// If resolved as a function, this is the RETURN type of the function - if you want the argument types or the function type itself, you have to match on the 'kind' field.
+    /// If resolved as a variable, this is the type of the variable.
+    pub contextual_appropriate_type: &'static TypeInfo,
 }

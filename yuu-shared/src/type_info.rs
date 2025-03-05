@@ -2,6 +2,8 @@ use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use std::hash::Hash;
 
+use crate::error::{YuuError, YuuErrorBuilder};
+use crate::Span;
 use crate::{
     ast::*,
     scheduler::{ResourceId, ResourceName},
@@ -30,6 +32,11 @@ impl<T> Deref for GiveMePtrHashes<T> {
     fn deref(&self) -> &Self::Target {
         self.0
     }
+}
+
+pub fn error_type() -> &'static TypeInfo {
+    const ERROR_TYPE: TypeInfo = TypeInfo::Error;
+    &ERROR_TYPE
 }
 
 impl<T> Eq for GiveMePtrHashes<T> {}
@@ -67,27 +74,27 @@ pub struct TypeInterner {
 }
 
 pub fn primitive_i64() -> &'static TypeInfo {
-    const PRIMITIVE_U64: TypeInfo = TypeInfo::BuiltIn(PrimitiveType::I64);
+    const PRIMITIVE_U64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I64);
     &PRIMITIVE_U64
 }
 
 pub fn primitive_f32() -> &'static TypeInfo {
-    const PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltIn(PrimitiveType::F32);
+    const PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
     &PRIMITIVE_F32
 }
 
 pub fn primitive_f64() -> &'static TypeInfo {
-    const PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltIn(PrimitiveType::F64);
+    const PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
     &PRIMITIVE_F64
 }
 
 pub fn primitive_nil() -> &'static TypeInfo {
-    const PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltIn(PrimitiveType::Nil);
+    const PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
     &PRIMITIVE_NIL
 }
 
 pub fn primitive_bool() -> &'static TypeInfo {
-    const PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltIn(PrimitiveType::Bool);
+    const PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
     &PRIMITIVE_BOOL
 }
 
@@ -135,9 +142,10 @@ impl TypeInterner {
     pub fn deref_ptr(ty: &'static TypeInfo) -> &'static TypeInfo {
         match ty {
             TypeInfo::Pointer(inner) => inner,
-            TypeInfo::BuiltIn(_) => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::BuiltInPrimitive(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Function(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Inactive => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
         }
     }
 
@@ -204,7 +212,10 @@ impl TypeInfoTable {
         Ok(unified)
     }
 
-    pub fn unify_nil_and_insert(&mut self, id: NodeId) -> Result<&'static TypeInfo, UnificationError> {
+    pub fn unify_nil_and_insert(
+        &mut self,
+        id: NodeId,
+    ) -> Result<&'static TypeInfo, UnificationError> {
         self.unify_and_insert(id, primitive_nil())
     }
 }
@@ -248,6 +259,12 @@ pub struct FunctionType {
     pub ret: &'static TypeInfo,
 }
 
+impl<'a> From<&'a FunctionType> for &'static TypeInfo {
+    fn from(value: &'a FunctionType) -> Self {
+        TYPE_CACHE.function_type(&value.args, value.ret)
+    }
+}
+
 impl From<FunctionType> for &'static TypeInfo {
     fn from(value: FunctionType) -> Self {
         TYPE_CACHE.function_type(&value.args, value.ret)
@@ -262,26 +279,28 @@ impl From<(&[&'static TypeInfo], &'static TypeInfo)> for &'static TypeInfo {
 
 #[derive(Clone, Debug)]
 pub enum TypeInfo {
-    BuiltIn(PrimitiveType),
+    BuiltInPrimitive(PrimitiveType),
     Function(FunctionType),
     Pointer(&'static TypeInfo),
     Inactive, // Used to represent a 'inactive' type, i.e. a an expression which produces __no__ value and thus has no type
-              // This happens for example when you 'unwind' in a block - the block does not have a value.
-              // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
+    // This happens for example when you 'unwind' in a block - the block does not have a value.
+    // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
+    Error,
 }
 
 impl TypeInfo {
     pub fn is_primitive(&self) -> bool {
         match self {
-            TypeInfo::BuiltIn(_) => true,
+            TypeInfo::BuiltInPrimitive(_) => true,
             TypeInfo::Pointer(inner) => inner.is_primitive(),
             TypeInfo::Function(_) => false,
             TypeInfo::Inactive => false,
+            TypeInfo::Error => false,
         }
     }
 
     pub fn is_nil(&self) -> bool {
-        matches!(self, TypeInfo::BuiltIn(PrimitiveType::Nil))
+        matches!(self, TypeInfo::BuiltInPrimitive(PrimitiveType::Nil))
     }
 
     pub fn ptr_to(&'static self) -> &'static Self {
@@ -296,16 +315,19 @@ impl TypeInfo {
         std::ptr::eq(self, other)
     }
 
-    pub fn unify(&'static self, target: &'static TypeInfo) -> Result<&'static TypeInfo, UnificationError> {
+    pub fn unify(
+        &'static self,
+        target: &'static TypeInfo,
+    ) -> Result<&'static TypeInfo, UnificationError> {
         // Unification with inactive yields the other type
         match (self, target) {
             (TypeInfo::Inactive, _) => Ok(target),
             (_, TypeInfo::Inactive) => Ok(self),
             _ if self.is_exact_same_type(target) => Ok(target),
             _ => Err(UnificationError {
-                from: self.to_string(),
-                to: target.to_string(),
-            })
+                left: self.to_string(),
+                right: target.to_string(),
+            }),
         }
     }
 
@@ -317,16 +339,32 @@ impl TypeInfo {
 impl Display for TypeInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeInfo::BuiltIn(built_in) => write!(f, "{}", built_in),
+            TypeInfo::BuiltInPrimitive(built_in) => write!(f, "{}", built_in),
             TypeInfo::Function(function_type) => write!(f, "{}", function_type),
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
             TypeInfo::Inactive => write!(f, "<no value>"),
+            TypeInfo::Error => write!(f, "<error>"),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct UnificationError {
-    pub from: String,
-    pub to: String,
+    pub left: String,
+    pub right: String,
+}
+
+impl UnificationError {
+    pub fn into_yuu_error(
+        &self,
+        info: SourceInfo,
+        span: impl Into<miette::SourceSpan>,
+    ) -> YuuError {
+        YuuError::builder().kind(crate::error::ErrorKind::TypeMismatch)
+            .message(format!("Type mismatch: cannot unify types"))
+            .source(info.source, info.file_name)
+            .span(span, format!("expected '{}', found '{}'", self.right, self.left))
+            .help(format!("These types are incompatible. Consider adding an explicit type conversion or changing your expression to match the expected type."))
+            .build()
+    }
 }

@@ -2,6 +2,7 @@ use yuu_shared::{
     ast::{BindingNode, FuncArg, NodeId, StructuralNode, TypeNode},
     binding_info::BindingInfo,
     block::{Block, FUNC_BLOCK_NAME},
+    error::{YuuError, YuuErrorBuilder},
     semantic_error::SemanticError,
     type_info::{primitive_nil, FunctionType, TypeInfo},
     Span,
@@ -20,7 +21,7 @@ pub fn declare_function(
     span: Span,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, SemanticError> {
+) -> Result<&'static TypeInfo, YuuError> {
     block
         .declare_function(name.to_string(), id, span.clone())
         .map_err(|_err| panic!("_"))?;
@@ -28,16 +29,16 @@ pub fn declare_function(
     let func_arg_types = args
         .iter()
         .map(|arg| {
-            let semantic_arg_type = infer_type(&arg.ty, block, data)?;
+            let semantic_arg_type = infer_type(&arg.ty, block, data);
 
-            match_binding_node_to_type(&arg.binding, block, semantic_arg_type, data)?;
+            match_binding_node_to_type(&arg.binding, block, semantic_arg_type, data);
 
-            Ok::<_, SemanticError>(semantic_arg_type)
+            semantic_arg_type
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
 
     let ret_type = if let Some(ty) = ret_ty {
-        infer_type(ty, block, data)?
+        infer_type(ty, block, data)
     } else {
         primitive_nil()
     };
@@ -64,7 +65,8 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 decl.span.clone(),
                 block,
                 data,
-            )?;
+            )
+            .expect("User error: Function declaration failed");
         }
         StructuralNode::FuncDef(def) => {
             let ret_type = declare_function(
@@ -75,7 +77,8 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 def.span.clone(),
                 block,
                 data,
-            )?;
+            )
+            .expect("User error: Function definition failed");
 
             let func_block = block.make_child(Some((
                 FUNC_BLOCK_NAME.to_string(),

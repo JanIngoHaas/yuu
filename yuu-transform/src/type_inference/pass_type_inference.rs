@@ -1,6 +1,5 @@
-use yuu_parse::lexer::UnprocessedCodeInfo;
 use yuu_shared::{
-    ast::AST,
+    ast::{SourceInfo, AST},
     block::{BindingTable, RootBlock},
     context::Context,
     error::YuuError,
@@ -15,16 +14,17 @@ pub struct TransientData<'a> {
     pub ast: &'a AST,
     pub binding_table: BindingTable, // Maps reference IDs to their target binding IDs
     pub errors: Vec<YuuError>,
-    pub src_code: UnprocessedCodeInfo,
+    pub src_code: SourceInfo,
 }
 
 impl<'a> TransientData<'a> {
-    pub fn new(type_info_table: &'a mut TypeInfoTable, ast: &'a AST) -> Self {
+    pub fn new(type_info_table: &'a mut TypeInfoTable, ast: &'a AST, src_code: SourceInfo) -> Self {
         Self {
             type_info_table,
             ast,
             binding_table: BindingTable::default(),
             errors: Vec::default(),
+            src_code,
         }
     }
 }
@@ -56,7 +56,10 @@ impl Pass for PassTypeInference {
         let mut type_info_table = type_info_table.lock().unwrap();
         let type_info_table = &mut *type_info_table;
 
-        let mut data = TransientData::new(type_info_table, ast);
+        let src_code = context.get_resource::<SourceInfo>(self);
+        let src_code = src_code.lock().unwrap();
+
+        let mut data = TransientData::new(type_info_table, ast, src_code.clone());
 
         for node in &ast.structurals {
             let _ = infer_structural(node, root_block.root_mut(), &mut data);
@@ -74,6 +77,7 @@ impl Pass for PassTypeInference {
         schedule.requires_resource_read::<AST>(&self);
         schedule.requires_resource_write::<Box<RootBlock>>(&self);
         schedule.requires_resource_write::<TypeInfoTable>(&self);
+        schedule.requires_resource_read::<SourceInfo>(&self);
         schedule.produces_resource::<BindingTable>(&self);
         schedule.add_pass(self);
     }
