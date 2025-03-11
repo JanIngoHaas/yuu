@@ -87,7 +87,7 @@ mod tests {
         pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
         type_inference::PassTypeInference,
     };
-    use yuu_parse::pass_parse::ParsePass;
+    use yuu_parse::pass_parse::PassParse;
     use yuu_shared::{
         ast::SourceInfo,
         scheduler::{Schedule, Scheduler},
@@ -118,10 +118,10 @@ mod tests {
         // Create and configure the schedule
         let mut schedule = Schedule::new();
 
-        // Add passes in the correct order
-        ParsePass.install(&mut schedule);
-        PassCollectDecls::new().install(&mut schedule);
-        PassTypeInference::new().install(&mut schedule);
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassCollectDecls.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 

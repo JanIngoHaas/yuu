@@ -1,14 +1,23 @@
 use yuu_shared::{
     ast::{SourceInfo, AST},
     context::Context,
-    scheduler::Pass,
+    error::YuuError,
+    scheduler::{Pass, ResourceId},
 };
 
 use crate::parser::Parser;
 
-pub struct ParsePass;
+pub struct SyntaxErrors(pub Vec<YuuError>);
 
-impl Pass for ParsePass {
+impl ResourceId for SyntaxErrors {
+    fn resource_name() -> &'static str {
+        "SyntaxErrors"
+    }
+}
+
+pub struct PassParse;
+
+impl Pass for PassParse {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
         let code_info = context.get_resource::<SourceInfo>(self);
         let code_info = code_info.lock().unwrap();
@@ -16,6 +25,11 @@ impl Pass for ParsePass {
         let mut parser = Parser::new(code_info);
         let ast = parser.parse_and_add_ids();
         context.add_pass_data(ast);
+
+        let (syntax_errors, _) = parser.dismantle();
+
+        context.add_pass_data(SyntaxErrors(syntax_errors));
+
         Ok(())
     }
 
@@ -25,10 +39,11 @@ impl Pass for ParsePass {
     {
         schedule.requires_resource_read::<SourceInfo>(&self);
         schedule.produces_resource::<AST>(&self);
+        schedule.produces_resource::<SyntaxErrors>(&self);
         schedule.add_pass(self);
     }
 
     fn get_name(&self) -> &'static str {
-        "Parse"
+        "ParsePass"
     }
 }

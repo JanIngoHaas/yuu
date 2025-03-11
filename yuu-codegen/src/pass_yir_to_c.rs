@@ -369,7 +369,7 @@ impl Pass for PassYirToC {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use yuu_parse::pass_parse::ParsePass;
+    use yuu_parse::pass_parse::PassParse;
     use yuu_shared::{
         ast::SourceInfo,
         scheduler::{Schedule, Scheduler},
@@ -405,7 +405,7 @@ mod tests {
         let mut schedule = Schedule::new();
 
         // Add passes in the correct order
-        ParsePass.install(&mut schedule);
+        PassParse.install(&mut schedule);
         PassCollectDecls::new().install(&mut schedule);
         PassTypeInference::new().install(&mut schedule);
         PassAstToYir.install(&mut schedule);

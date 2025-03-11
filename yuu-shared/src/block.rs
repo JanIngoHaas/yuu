@@ -12,8 +12,6 @@ use crate::{
 };
 use hashbrown::HashMap;
 
-use crate::semantic_error::SemanticError;
-
 pub const FUNC_BLOCK_NAME: &str = "_fn";
 
 #[derive(Clone)]
@@ -177,7 +175,7 @@ impl Block {
         name: String,
         id: NodeId,
         span: Span,
-    ) -> Result<(), SemanticError> {
+    ) -> Result<(), YuuError> {
         match self.bindings.get_mut(&name) {
             Some(BindingInfoKind::Variable(_)) => {
                 panic!(
@@ -635,9 +633,7 @@ impl Block {
                             if all_args_match {
                                 return Ok(IdentResolutionResult {
                                     binding: func.clone(),
-                                    kind: IdentResolutionKind::ResolvedAsFunction {
-                                        func_type: func_type,
-                                    },
+                                    kind: IdentResolutionKind::ResolvedAsFunction { func_type },
                                     contextual_appropriate_type: func_type.ret,
                                 });
                             }
@@ -758,21 +754,18 @@ impl Block {
             );
 
         // Add information about each candidate
-        for (i, (func, func_type)) in candidates.iter().enumerate() {
-            let arg_types = func_type
-                .args
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-
+        for (i, (func, _)) in candidates.iter().enumerate() {
             if let Some(decl_span) = &func.src_location {
-                builder = builder.label(
+                if decl_span.start == 0 && decl_span.end == 0 {
+                    continue;
+                }
+                builder = builder.related_info(
+                    Some(format!("Candidate Function {}", i + 1)),
                     (
                         decl_span.start as usize,
                         (decl_span.end - decl_span.start) as usize,
                     ),
-                    format!("candidate {} with types ({})", i + 1, arg_types),
+                    Some(format!("candidate {}", i + 1)),
                 );
             }
         }
@@ -807,7 +800,7 @@ impl Block {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            help.push_str(&format!("\nProvided argument types: ({})", given_types));
+            help.push_str(&format!("\nProvided argument types: ({})\n", given_types));
             builder = builder.help(help);
         }
 

@@ -3,7 +3,7 @@ use yuu_shared::{
     block::{BindingTable, RootBlock},
     context::Context,
     error::YuuError,
-    scheduler::Pass,
+    scheduler::{Pass, ResourceId},
     type_info::TypeInfoTable,
 };
 
@@ -15,6 +15,14 @@ pub struct TransientData<'a> {
     pub binding_table: BindingTable, // Maps reference IDs to their target binding IDs
     pub errors: Vec<YuuError>,
     pub src_code: SourceInfo,
+}
+
+pub struct TypeInferenceErrors(pub Vec<YuuError>);
+
+impl ResourceId for TypeInferenceErrors {
+    fn resource_name() -> &'static str {
+        "TypeInferenceErrors"
+    }
 }
 
 impl<'a> TransientData<'a> {
@@ -29,7 +37,7 @@ impl<'a> TransientData<'a> {
     }
 }
 
-pub struct PassTypeInference {}
+pub struct PassTypeInference;
 
 impl Default for PassTypeInference {
     fn default() -> Self {
@@ -67,6 +75,8 @@ impl Pass for PassTypeInference {
 
         context.add_pass_data(data.binding_table);
 
+        context.add_pass_data(TypeInferenceErrors(data.errors));
+
         Ok(())
     }
 
@@ -79,6 +89,7 @@ impl Pass for PassTypeInference {
         schedule.requires_resource_write::<TypeInfoTable>(&self);
         schedule.requires_resource_read::<SourceInfo>(&self);
         schedule.produces_resource::<BindingTable>(&self);
+        schedule.produces_resource::<TypeInferenceErrors>(&self);
         schedule.add_pass(self);
     }
 

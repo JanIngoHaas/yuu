@@ -218,12 +218,21 @@ impl Lexer {
         while let Some(token) = self.peek_maybe() {
             match token.kind {
                 TokenKind::Semicolon => return CatchIn::Statement,
-                TokenKind::Fn => return CatchIn::FunctionDecl,
+                TokenKind::FnKw => return CatchIn::FunctionDecl,
                 _ => {
                     self.eat();
                 }
             }
         }
         return CatchIn::FunctionDecl; // That's basically nonsense, but yeah, critical error btw.
+    }
+
+    pub fn sync_to(&mut self, tokens: &[TokenKind]) {
+        while let Some(t) = self.peek_maybe() {
+            if tokens.contains(&t.kind) {
+                return;
+            }
+            self.eat();
+        }
     }
 }

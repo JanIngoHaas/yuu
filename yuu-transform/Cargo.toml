@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.95"
 colored = "2.2.0"
 hashbrown = "0.15.1"
+miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
 serde_json = "1.0.134"
 thiserror = "2.0.3"
 yuu-parse = { path = "../yuu-parse" }

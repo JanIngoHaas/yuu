@@ -8,6 +8,7 @@ mod types;
 pub use binding::*;
 pub use expr::*;
 pub use pass_type_inference::PassTypeInference;
+pub use pass_type_inference::TypeInferenceErrors;
 pub use stmt::*;
 pub use structural::*;
 pub use types::*;

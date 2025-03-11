@@ -2,12 +2,12 @@ use yuu_shared::{
     ast::{FuncDeclStructural, StructuralNode, AST},
     block::{Block, RootBlock},
     context::Context,
+    error::YuuError,
     scheduler::Pass,
-    semantic_error::SemanticError,
     type_info::TypeInfoTable,
 };
 
-pub struct PassCollectDecls {}
+pub struct PassCollectDecls;
 
 impl Default for PassCollectDecls {
     fn default() -> Self {
@@ -20,25 +20,19 @@ impl PassCollectDecls {
         Self {}
     }
 
-    fn collect_func_decl(
-        decl: &FuncDeclStructural,
-        block: &mut Block,
-    ) -> Result<(), SemanticError> {
+    fn collect_func_decl(decl: &FuncDeclStructural, block: &mut Block) -> Result<(), YuuError> {
         block.declare_function(decl.name.clone(), decl.id, decl.span.clone())
     }
 
-    fn collect_structural(
-        structural: &StructuralNode,
-        block: &mut Block,
-    ) -> Result<(), SemanticError> {
+    fn collect_structural(structural: &StructuralNode, block: &mut Block) -> Result<(), YuuError> {
         match structural {
             StructuralNode::FuncDecl(decl) => Self::collect_func_decl(decl, block),
             StructuralNode::FuncDef(def) => Self::collect_func_decl(&def.decl, block),
-            StructuralNode::Error(_) => unreachable!("Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug")
+            StructuralNode::Error(_) => Ok(()), // Do nothing - we have a syntax error, so we can't collect this decl
         }
     }
 
-    fn collect_decls(ast: &AST, block: &mut Block) -> Result<(), SemanticError> {
+    fn collect_decls(ast: &AST, block: &mut Block) -> Result<(), YuuError> {
         for node in &ast.structurals {
             Self::collect_structural(node, block)?;
         }

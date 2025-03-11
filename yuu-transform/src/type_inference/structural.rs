@@ -1,10 +1,11 @@
+use core::error;
+
 use yuu_shared::{
     ast::{BindingNode, FuncArg, NodeId, StructuralNode, TypeNode},
     binding_info::BindingInfo,
     block::{Block, FUNC_BLOCK_NAME},
     error::{YuuError, YuuErrorBuilder},
-    semantic_error::SemanticError,
-    type_info::{primitive_nil, FunctionType, TypeInfo},
+    type_info::{error_type, primitive_nil, FunctionType, TypeInfo},
     Span,
 };
 
@@ -21,10 +22,13 @@ pub fn declare_function(
     span: Span,
     block: &mut Block,
     data: &mut TransientData,
-) -> Result<&'static TypeInfo, YuuError> {
-    block
-        .declare_function(name.to_string(), id, span.clone())
-        .map_err(|_err| panic!("_"))?;
+) -> &'static TypeInfo {
+    let fdec = block.declare_function(name.to_string(), id, span.clone());
+
+    if let Err(err) = fdec {
+        data.errors.push(err);
+        return primitive_nil();
+    }
 
     let func_arg_types = args
         .iter()
@@ -51,7 +55,7 @@ pub fn declare_function(
 
     data.type_info_table.types.insert(id, func);
 
-    Ok(ret_type)
+    ret_type
 }
 
 pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &mut TransientData) {
@@ -59,14 +63,13 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
         StructuralNode::FuncDecl(decl) => {
             let _ = declare_function(
                 &decl.name,
-                &decl.args,
+                &decl.args, 
                 &decl.ret_ty,
                 decl.id,
                 decl.span.clone(),
                 block,
                 data,
-            )
-            .expect("User error: Function declaration failed");
+            );
         }
         StructuralNode::FuncDef(def) => {
             let ret_type = declare_function(
@@ -74,11 +77,10 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 &def.decl.args,
                 &def.decl.ret_ty,
                 def.id,
-                def.span.clone(),
+                def.decl.span.clone(), // TODO: Should I change this to def.span?
                 block,
                 data,
-            )
-            .expect("User error: Function definition failed");
+            );
 
             let func_block = block.make_child(Some((
                 FUNC_BLOCK_NAME.to_string(),
@@ -109,6 +111,8 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
 
             infer_block_no_child_creation(&def.body, func_block, data);
         }
-        StructuralNode::Error(_) => todo!("Make semantic error from syntax error"),
+        StructuralNode::Error(estr) => {
+            data.type_info_table.types.insert(*estr, error_type());
+        }
     }
 }

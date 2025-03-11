@@ -2,8 +2,8 @@ use miette::{
     highlighters::{Highlighter, SyntectHighlighter},
     Diagnostic, LabeledSpan, MietteDiagnostic, NamedSource, SourceSpan,
 };
-use std::sync::Arc;
-use syntect::parsing::SyntaxSet;
+use std::{fmt::Display, str::FromStr, sync::Arc};
+use syntect::{highlighting::ThemeItem, parsing::SyntaxSet};
 use thiserror::Error;
 
 use crate::scheduler::ResourceId;
@@ -37,7 +37,7 @@ impl std::fmt::Display for ErrorKind {
 }
 
 /// A flexible error type that can be dynamically built
-#[derive(Error, Debug, Diagnostic)]
+#[derive(Clone, Error, Debug, Diagnostic)]
 #[error("{message}")]
 pub struct YuuError {
     /// The kind of error
@@ -49,14 +49,6 @@ pub struct YuuError {
     /// Source code where the error occurred
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-
-    /// Primary location of the error
-    #[label("{primary_label}")]
-    pub span: SourceSpan,
-
-    /// Label text for the primary location
-    #[allow(dead_code)]
-    primary_label: String,
 
     /// Additional labeled spans
     #[label(collection)]
@@ -80,30 +72,34 @@ impl YuuError {
     /// Quick way to create an unexpected token error
     pub fn unexpected_token(
         span: impl Into<SourceSpan>,
-        expected: impl Into<String>,
-        found: impl Into<String>,
+        expected: impl Display,
+        found: impl Display,
         source_code: Arc<str>,
         file_name: Arc<str>,
     ) -> Self {
         let span_clone = span.into();
-        let found_str = found.into();
 
         Self::builder()
             .kind(ErrorKind::UnexpectedToken)
-            .message(format!("Expected {}, found {}", expected.into(), found_str))
+            .message(format!("Expected {}, found {}", expected, found))
             .source(source_code.clone(), file_name)
             .span(
                 span_clone.clone(),
                 format!(
-                    "unexpected '{}'",
+                    "unexpected '{}', expected '{}'",
                     // Try to extract the actual token from source if possible
                     if span_clone.len() > 0
                         && span_clone.offset() + span_clone.len() <= source_code.len()
                     {
-                        &source_code[span_clone.offset()..span_clone.offset() + span_clone.len()]
+                        format!(
+                            "{}",
+                            &source_code
+                                [span_clone.offset()..span_clone.offset() + span_clone.len()]
+                        )
                     } else {
-                        &found_str
-                    }
+                        format!("{}", found)
+                    },
+                    expected
                 ),
             )
             .build()
@@ -175,12 +171,8 @@ impl YuuError {
 
     /// Add an additional labeled span
     pub fn with_label(mut self, span: impl Into<SourceSpan>, label: impl Into<String>) -> Self {
-        let span = span.into();
-        self.labels.push(LabeledSpan::new(
-            Some(label.into()),
-            span.offset(),
-            span.len(),
-        ));
+        self.labels
+            .push(LabeledSpan::new_with_span(Some(label.into()), span));
         self
     }
 }
@@ -248,12 +240,8 @@ impl YuuErrorBuilder {
 
     /// Add an additional labeled span
     pub fn label(mut self, span: impl Into<SourceSpan>, label: impl Into<String>) -> Self {
-        let span = span.into();
-        self.labels.push(LabeledSpan::new(
-            Some(label.into()),
-            span.offset(),
-            span.len(),
-        ));
+        self.labels
+            .push(LabeledSpan::new_with_span(Some(label.into()), span));
         self
     }
 
@@ -263,7 +251,28 @@ impl YuuErrorBuilder {
         self
     }
 
-    pub fn build(self) -> YuuError {
+    pub fn related_info(
+        mut self,
+        message: Option<String>,
+        span: impl Into<SourceSpan>,
+        label: Option<String>,
+    ) -> Self {
+        let span = span.into();
+        let label_str = label.map(|x| x.into());
+
+        let message = message
+            .map(|m| m.into())
+            .unwrap_or_else(|| "Related information".to_string());
+
+        let diagnostic = MietteDiagnostic::new(message)
+            .with_labels(vec![LabeledSpan::new(label_str, span.offset(), span.len())])
+            .with_severity(miette::Severity::Advice);
+
+        self.related.push(diagnostic);
+        self
+    }
+
+    pub fn build(mut self) -> YuuError {
         let kind = self.kind.unwrap_or(ErrorKind::InvalidSyntax);
         let message = self.message.unwrap_or_else(|| kind.to_string());
         let source_code = self.source_code.expect("Source code is required");
@@ -271,12 +280,16 @@ impl YuuErrorBuilder {
         let span = self.span.unwrap_or_else(|| (0, 0).into());
         let primary_label = self.span_label.unwrap_or_else(|| "here".to_string());
 
+        self.labels.push(LabeledSpan::new_primary_with_span(
+            Some(primary_label),
+            span.clone(),
+        ));
+
         YuuError {
             kind,
             message,
             src: NamedSource::new(file_name.as_ref(), source_code).with_language("Rust"),
-            span,
-            primary_label,
+            //span: LabeledSpan::new_primary_with_span(Some(primary_label), span),
             labels: self.labels,
             help: self.help,
             related: self.related,
@@ -285,20 +298,20 @@ impl YuuErrorBuilder {
 }
 
 // create related info
-pub fn related_info(
-    message: impl Into<String>,
-    location: Option<(impl Into<SourceSpan>, impl Into<String>)>,
-) -> MietteDiagnostic {
-    let mut diagnostic = MietteDiagnostic::new(message.into());
+// pub fn related_info(
+//     message: impl Into<String>,
+//     location: Option<(impl Into<SourceSpan>, impl Into<String>)>,
+// ) -> MietteDiagnostic {
+//     let mut diagnostic = MietteDiagnostic::new(message.into());
 
-    if let Some((span, label)) = location {
-        let span = span.into();
-        let label_span = LabeledSpan::new(Some(label.into()), span.offset(), span.len());
-        diagnostic = diagnostic.with_labels(vec![label_span]);
-    }
+//     if let Some((span, label)) = location {
+//         let span = span.into();
+//         let label_span = LabeledSpan::new(Some(label.into()), span.offset(), span.len());
+//         diagnostic = diagnostic.with_labels(vec![label_span]);
+//     }
 
-    diagnostic
-}
+//     diagnostic
+// }
 
 /// Configure miette with syntax highlighting and other nice features
 ///
@@ -342,22 +355,32 @@ pub fn setup_error_formatter(
     use syntect::highlighting::ThemeSet;
     use syntect::parsing::SyntaxSet;
 
-    // Load default theme set and syntax set
-    let theme_set = ThemeSet::load_defaults();
+    // Load syntax set
     let syntax_set = SyntaxSet::load_defaults_newlines();
 
-    // Select theme - either the specified one or the default
-    let theme = theme_name
-        .and_then(|name| theme_set.themes.get(name).cloned())
-        .unwrap_or_else(|| {
-            if let Some(name) = theme_name {
-                eprintln!(
-                    "Warning: Theme '{}' not found, falling back to base16-mocha.dark",
-                    name
-                );
-            }
-            theme_set.themes["base16-mocha.dark"].clone()
-        });
+    // Select the appropriate theme
+    let theme = match theme_name {
+        Some("Autumn") => create_autumn_rust_theme(),
+        Some("DeepOcean") => create_deep_ocean_theme(),
+        Some("WarmEmber") => create_autumn_rust_theme(), // Alias for Autumn
+        _ => {
+            // Load default theme set
+            let theme_set = ThemeSet::load_defaults();
+
+            // Select theme from built-in ones if not one of our custom themes
+            theme_name
+                .and_then(|name| theme_set.themes.get(name).cloned())
+                .unwrap_or_else(|| {
+                    if let Some(name) = theme_name {
+                        eprintln!(
+                            "Warning: Theme '{}' not found, falling back to base16-ocean.dark",
+                            name
+                        );
+                    }
+                    theme_set.themes["base16-ocean.dark"].clone()
+                })
+        }
+    };
 
     // Create a custom SyntectHighlighter
     let highlighter = SyntectHighlighter::new(syntax_set, theme, use_bg_color);
@@ -367,7 +390,8 @@ pub fn setup_error_formatter(
             MietteHandlerOpts::default()
                 .terminal_links(true)
                 .unicode(true)
-                .context_lines(4)
+                .show_related_errors_as_nested()
+                .context_lines(2)
                 .tab_width(2)
                 .wrap_lines(true)
                 .break_words(true)
@@ -381,6 +405,26 @@ pub fn setup_error_formatter(
         )
     }))?)
 }
+
+// /// Apply a theme from YIR color palettes
+// pub fn apply_yir_theme(palette: &str) -> Result<(), miette::Error> {
+//     match palette {
+//         "warm_ember" => setup_error_formatter(Some("AutumnRust"), true),
+//         "deep_ocean" => setup_error_formatter(Some("DeepOcean"), true),
+//         "cosmic_night" => {
+//             // We could create a specific cosmic_night theme in the future
+//             setup_error_formatter(Some("base16-mocha.dark"), true)
+//         }
+//         "mystic_forest" => {
+//             // We could create a specific mystic_forest theme in the future
+//             setup_error_formatter(Some("base16-ocean.dark"), true)
+//         }
+//         _ => {
+//             // Default to AutumnRust if not recognized
+//             setup_error_formatter(Some("AutumnRust"), true)
+//         }
+//     }
+// }
 
 /// Reset miette handler to default
 ///
@@ -408,6 +452,544 @@ pub fn reset_error_formatter() -> Result<(), miette::Error> {
 pub fn list_syntax_highlighting_themes() -> Vec<String> {
     use syntect::highlighting::ThemeSet;
 
-    let theme_set = ThemeSet::load_defaults();
-    theme_set.themes.keys().map(|k| k.to_string()).collect()
+    let mut themes = ThemeSet::load_defaults()
+        .themes
+        .keys()
+        .map(|k| k.to_string())
+        .collect::<Vec<_>>();
+
+    // Add our custom themes
+    themes.push("AutumnRust".to_string());
+    themes.push("DeepOcean".to_string());
+    themes.push("WarmEmber".to_string()); // Alias for AutumnRust
+
+    themes.sort();
+    themes
+}
+
+use syntect::highlighting::Color as SyntectColor;
+use syntect::highlighting::{FontStyle, Style, StyleModifier, Theme, ThemeSettings};
+use syntect::highlighting::{ScopeSelector, ScopeSelectors};
+
+/// Create a custom theme based on the warm_ember color palette
+pub fn create_autumn_rust_theme() -> Theme {
+    let background = SyntectColor {
+        r: 30,
+        g: 30,
+        b: 30,
+        a: 255,
+    };
+
+    let foreground = SyntectColor {
+        r: 230,
+        g: 230,
+        b: 230,
+        a: 255,
+    };
+
+    // Colors from warm_ember palette
+    let keyword_color = SyntectColor {
+        r: 255,
+        g: 140,
+        b: 85,
+        a: 255,
+    }; // Warm Orange
+    let type_color = SyntectColor {
+        r: 255,
+        g: 183,
+        b: 138,
+        a: 255,
+    }; // Peach
+    let function_color = SyntectColor {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    }; // White
+    let constant_color = SyntectColor {
+        r: 255,
+        g: 218,
+        b: 121,
+        a: 255,
+    }; // Warm Yellow
+    let operator_color = SyntectColor {
+        r: 255,
+        g: 110,
+        b: 74,
+        a: 255,
+    }; // Burnt Orange
+    let string_color = SyntectColor {
+        r: 152,
+        g: 224,
+        b: 178,
+        a: 255,
+    }; // Light Green (for strings)
+    let comment_color = SyntectColor {
+        r: 130,
+        g: 130,
+        b: 130,
+        a: 255,
+    }; // Grey for comments
+    let macro_color = SyntectColor {
+        r: 255,
+        g: 166,
+        b: 158,
+        a: 255,
+    }; // Coral Pink (for macros)
+
+    let settings = ThemeSettings {
+        background: Some(background),
+        foreground: Some(foreground),
+        caret: Some(foreground),
+        line_highlight: Some(SyntectColor {
+            r: 45,
+            g: 45,
+            b: 45,
+            a: 255,
+        }),
+        gutter: Some(background),
+        gutter_foreground: Some(SyntectColor {
+            r: 130,
+            g: 130,
+            b: 130,
+            a: 255,
+        }),
+        selection: Some(SyntectColor {
+            r: 55,
+            g: 55,
+            b: 55,
+            a: 255,
+        }),
+        selection_foreground: Some(foreground),
+        find_highlight: Some(SyntectColor {
+            r: 25,
+            g: 25,
+            b: 112,
+            a: 255,
+        }),
+        find_highlight_foreground: Some(foreground),
+        highlight: Some(SyntectColor {
+            r: 50,
+            g: 50,
+            b: 50,
+            a: 255,
+        }),
+        ..ThemeSettings::default()
+    };
+
+    // // Helper function to create a ThemeItem with proper scopes
+    // fn create_theme_item(scope_str: &str, style: Style) -> ThemeItem {
+    //     let selector = ScopeSelector::from_str(scope_str);
+    //     ThemeItem {
+    //         scope: ScopeSelectors {
+    //             selectors: vec![selector],
+    //         },
+    //         style,
+    //     }
+    // }
+
+    Theme {
+        name: Some("Autumn".to_string()),
+        author: Some("Hyperion + Claude 3.7".to_string()),
+        settings,
+        scopes: vec![
+            // General
+            create_theme_item(
+                "comment",
+                Style {
+                    foreground: comment_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+            create_theme_item(
+                "string",
+                Style {
+                    foreground: string_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "constant",
+                Style {
+                    foreground: constant_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "constant.numeric",
+                Style {
+                    foreground: constant_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Keywords and control flow
+            create_theme_item(
+                "keyword",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "keyword.control",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "keyword.operator",
+                Style {
+                    foreground: operator_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Rust specific
+            create_theme_item(
+                "entity.name.function",
+                Style {
+                    foreground: function_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "entity.name.struct",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "entity.name.enum",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "entity.name.trait",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+            create_theme_item(
+                "storage.type",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Macros
+            create_theme_item(
+                "support.macro",
+                Style {
+                    foreground: macro_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Other types
+            create_theme_item(
+                "storage.modifier",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "variable.language",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+            create_theme_item(
+                "variable.parameter",
+                Style {
+                    foreground: foreground,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Operators and punctuation
+            create_theme_item(
+                "punctuation.separator",
+                Style {
+                    foreground: operator_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "punctuation.terminator",
+                Style {
+                    foreground: operator_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Lifetime annotations
+            create_theme_item(
+                "storage.modifier.lifetime",
+                Style {
+                    foreground: operator_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+        ],
+    }
+}
+
+/// Create a custom theme based on the deep_ocean color palette from YIR
+pub fn create_deep_ocean_theme() -> Theme {
+    let background = SyntectColor {
+        r: 15,
+        g: 20,
+        b: 40,
+        a: 255,
+    };
+    let foreground = SyntectColor {
+        r: 230,
+        g: 230,
+        b: 250,
+        a: 255,
+    };
+
+    // Colors from deep_ocean palette
+    let function_color = SyntectColor {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    }; // White
+    let keyword_color = SyntectColor {
+        r: 255,
+        g: 215,
+        b: 0,
+        a: 255,
+    }; // Deep Gold
+    let type_color = SyntectColor {
+        r: 64,
+        g: 224,
+        b: 208,
+        a: 255,
+    }; // Turquoise
+
+    let constant_color = SyntectColor {
+        r: 46,
+        g: 139,
+        b: 87,
+        a: 255,
+    }; // Sea Green
+    let label_color = SyntectColor {
+        r: 125,
+        g: 249,
+        b: 255,
+        a: 255,
+    }; // Electric Blue
+    let operator_color = SyntectColor {
+        r: 250,
+        g: 128,
+        b: 114,
+        a: 255,
+    }; // Salmon
+    let string_color = SyntectColor {
+        r: 144,
+        g: 238,
+        b: 144,
+        a: 255,
+    }; // Light Green
+    let comment_color = SyntectColor {
+        r: 100,
+        g: 110,
+        b: 140,
+        a: 255,
+    }; // Muted Blue
+
+    let settings = ThemeSettings {
+        background: Some(background),
+        foreground: Some(foreground),
+        caret: Some(foreground),
+        line_highlight: Some(SyntectColor {
+            r: 25,
+            g: 30,
+            b: 50,
+            a: 255,
+        }),
+        gutter: Some(background),
+        gutter_foreground: Some(SyntectColor {
+            r: 100,
+            g: 110,
+            b: 140,
+            a: 255,
+        }),
+        selection: Some(SyntectColor {
+            r: 30,
+            g: 35,
+            b: 60,
+            a: 255,
+        }),
+        selection_foreground: Some(foreground),
+        find_highlight: Some(SyntectColor {
+            r: 35,
+            g: 35,
+            b: 95,
+            a: 255,
+        }),
+        find_highlight_foreground: Some(foreground),
+        highlight: Some(SyntectColor {
+            r: 30,
+            g: 40,
+            b: 60,
+            a: 255,
+        }),
+        ..ThemeSettings::default()
+    };
+
+    Theme {
+        name: Some("DeepOcean".to_string()),
+        author: Some("Hyperion + Claude 3.7".to_string()),
+        settings,
+        scopes: vec![
+            // General
+            create_theme_item(
+                "comment",
+                Style {
+                    foreground: comment_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+            create_theme_item(
+                "string",
+                Style {
+                    foreground: string_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "constant",
+                Style {
+                    foreground: constant_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "constant.numeric",
+                Style {
+                    foreground: constant_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Keywords and control flow
+            create_theme_item(
+                "keyword",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "keyword.control",
+                Style {
+                    foreground: keyword_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "keyword.operator",
+                Style {
+                    foreground: operator_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Rust specific
+            create_theme_item(
+                "entity.name.function",
+                Style {
+                    foreground: function_color,
+                    background,
+                    font_style: FontStyle::BOLD,
+                },
+            ),
+            create_theme_item(
+                "entity.name.struct",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "entity.name.enum",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            create_theme_item(
+                "entity.name.trait",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::ITALIC,
+                },
+            ),
+            create_theme_item(
+                "storage.type",
+                Style {
+                    foreground: type_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+            // Rest of the scope mappings
+            create_theme_item(
+                "support.macro",
+                Style {
+                    foreground: label_color,
+                    background,
+                    font_style: FontStyle::empty(),
+                },
+            ),
+        ],
+    }
+}
+
+// Helper function to create a ThemeItem with proper scopes
+fn create_theme_item(scope_str: &str, style: Style) -> ThemeItem {
+    let selector = ScopeSelector::from_str(scope_str).expect("Invalid scope selector - check path");
+    ThemeItem {
+        scope: ScopeSelectors {
+            selectors: vec![selector],
+        },
+        style: StyleModifier {
+            foreground: Some(style.foreground),
+            background: Some(style.background),
+            font_style: Some(style.font_style),
+        },
+    }
 }

@@ -2,7 +2,7 @@ use yuu_shared::{
     ast::{BindingNode, IdentBinding, NodeId},
     binding_info::BindingInfo,
     block::Block,
-    semantic_error::SemanticError,
+    error::YuuError,
     type_info::{TypeInfo, TypeInfoTable},
     Span,
 };
@@ -14,7 +14,7 @@ pub fn match_binding_node_to_type<'a>(
     block: &mut Block,
     ty: &'static TypeInfo,
     data: &'a mut TransientData,
-) -> Result<(), SemanticError> {
+) {
     match binding {
         BindingNode::Ident(ident_binding) => {
             block.insert_variable(
@@ -24,7 +24,6 @@ pub fn match_binding_node_to_type<'a>(
                 ident_binding.is_mut,
             );
             data.type_info_table.types.insert(ident_binding.id, ty);
-            Ok(())
         }
     }
 }

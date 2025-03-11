@@ -10,7 +10,6 @@ pub mod block;
 pub mod context;
 pub mod error;
 pub mod scheduler;
-pub mod semantic_error;
 
 #[cfg(test)]
 mod tests {

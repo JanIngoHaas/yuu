@@ -1,5 +1,6 @@
 use std::any::Any;
 
+use anyhow::{anyhow, bail};
 use hashbrown::HashMap;
 use petgraph::{
     dot::{Config, Dot},
@@ -165,12 +166,12 @@ impl Scheduler {
         Self
     }
 
-    pub fn run(&self, schedule: Schedule, mut context: Context) -> Result<Context, String> {
+    pub fn run(&self, schedule: Schedule, mut context: Context) -> anyhow::Result<Context> {
         let graph = schedule.build_dependency_graph();
 
         // Topologically sort the graph
         let topo_order = petgraph::algo::toposort(&graph, None)
-            .map_err(|e| format!("Cannot run schedule because it contains a cycle: {:?}", e))?;
+            .map_err(|e| anyhow!("Cannot run schedule because it contains a cycle: {:?}", e))?;
 
         // Group passes that can be run in parallel (those at the same depth)
         let mut layers: Vec<Vec<PassId>> = Vec::new();
@@ -194,25 +195,26 @@ impl Scheduler {
             layer.push(pass_id);
         }
 
-        // Execute passes layer by layer
         for layer in layers {
             // Execute all passes in the current layer in parallel using the global thread pool
-            let layer_result: Result<(), String> = layer
+            let layer_result: anyhow::Result<()> = layer
                 .into_par_iter()
                 .map(|pass_id| {
                     let mut splitted_context = context.split();
                     let pass = schedule.passes.get(pass_id).expect("Pass not found");
-                    let run_result = pass
-                        .run(&mut splitted_context)
-                        .map_err(|e| format!("Pass '{}' failed: {}", pass_id, e));
-                    run_result.map(|_| splitted_context)
+                    let run_result = pass.run(&mut splitted_context);
+                    match run_result {
+                        Ok(_) => Ok(splitted_context),
+                        Err(_) => Err(anyhow::anyhow!("Error in pass {}", pass_id)),
+                    }
                 })
-                .collect::<Result<Vec<_>, String>>()
+                .collect::<anyhow::Result<Vec<_>>>()
                 .map(|contexts| {
                     for ctx in contexts {
                         context.merge(ctx);
                     }
                 });
+            //panic!("Implement parallel execution");
             layer_result?;
         }
 

@@ -52,9 +52,9 @@ impl Context {
         self.passes_data
             .get(T::resource_name())
             .map(|arc| {
-                arc.clone()
-                    .downcast::<Mutex<T>>()
-                    .expect("Type mismatch in pass data")
+                arc.clone().downcast::<Mutex<T>>().expect(
+                    format!("Type mismatch in pass data of pass {}", pass.get_name()).as_str(),
+                )
             })
             .unwrap_or_else(|| {
                 panic!(

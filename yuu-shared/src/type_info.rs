@@ -321,8 +321,7 @@ impl TypeInfo {
     ) -> Result<&'static TypeInfo, UnificationError> {
         // Unification with inactive yields the other type
         match (self, target) {
-            (TypeInfo::Inactive, _) => Ok(target),
-            (_, TypeInfo::Inactive) => Ok(self),
+            (TypeInfo::Inactive, x) | (x, TypeInfo::Inactive) => Ok(x),
             _ if self.is_exact_same_type(target) => Ok(target),
             _ => Err(UnificationError {
                 left: self.to_string(),

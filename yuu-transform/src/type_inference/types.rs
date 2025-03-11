@@ -7,7 +7,6 @@ use yuu_shared::{
     binding_info::BindingInfo,
     block::Block,
     scheduler::{ResourceId, ResourceName},
-    semantic_error::SemanticError,
     type_info::{
         primitive_bool, primitive_f32, primitive_f64, primitive_i64, TypeInfo, TypeInfoTable,
     },

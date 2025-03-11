@@ -7,7 +7,6 @@ use yuu_shared::{
     binding_info::{BindingInfo, BindingInfoKind},
     block::{Block, IdentResolutionKind, FUNC_BLOCK_NAME},
     error::{ErrorKind, YuuError},
-    semantic_error::SemanticError,
     type_info::{
         error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
         primitive_nil, TypeInfo,
@@ -148,17 +147,17 @@ pub fn infer_block_no_child_creation(
     // Get last expression type if it exists
     let last_expr_ty = if let Some(last_expr) = &block_expr.last_expr {
         let expr = infer_expr(last_expr, root_func_block, data, None);
-        Some(expr)
+        Some((last_expr.span(), expr))
     } else {
         None
     };
 
     // Determine type from breaks and last expression
-    let block_ty = match (break_ty, last_expr_ty) {
-        (Some(brk), Some(last)) => brk.unify(last).unwrap_or(inactive_type()),
-        (Some(brk), None) => brk,
-        (None, Some(last)) => last,
-        (None, None) => primitive_nil(),
+    let (span, block_ty) = match (break_ty, last_expr_ty) {
+        (Some(brk), Some((span, last))) => (Some(span), brk.unify(last).unwrap_or(inactive_type())),
+        (Some(brk), None) => (None, brk),
+        (None, Some((span, last))) => (Some(span), last),
+        (None, None) => (None, primitive_nil()),
     };
 
     // Unify with any existing type from breaks TO this block
@@ -169,18 +168,18 @@ pub fn infer_block_no_child_creation(
         Ok(ty) => ty,
         Err(err) => {
             // Try to find a break statement that might be causing the issue
-            let break_with_value = block_expr.body.iter().find_map(|stmt| {
-                if let StmtNode::Break(br) = stmt {
-                    Some(br.span.clone())
-                } else {
-                    None
-                }
-            });
+            // let break_with_value = block_expr.body.iter().find_map(|stmt| {
+            //     if let StmtNode::Break(br) = stmt {
+            //         Some(br.span.clone())
+            //     } else {
+            //         None
+            //     }
+            // });
 
-            let err_msg = YuuError::builder()
+            let mut err_msg = YuuError::builder()
                 .kind(ErrorKind::TypeMismatch)
                 .message(format!(
-                    "Block has inconsistent return types: {} and {}",
+                    "Block has inconsistent return types: '{}' and '{}'",
                     err.left, err.right
                 ))
                 .source(
@@ -192,22 +191,30 @@ pub fn infer_block_no_child_creation(
                     "block with inconsistent return types",
                 );
 
+            if let Some(span) = span {
+                err_msg = err_msg.label(span, format!("block returns '{}' here", block_ty));
+            }
+
+            let err_msg = err_msg
+                .help("All branches of a block must evaluate to compatible types")
+                .build();
+
             // Add label for break statement if found
-            let err_msg = if let Some(span) = break_with_value {
-                err_msg.label(span, format!("break with value of type {}", err.left))
-                    .label(
-                        block_expr.last_expr.as_ref().map_or(
-                            block_expr.span.clone(),
-                            |expr| expr.span().clone()
-                        ),
-                        format!("block yields {}", err.right)
-                    )
-                    .help("Break statements with values must match the block's return type")
-            } else {
-                err_msg.help(
-                    "This can happen if you have a break statement returning a value that doesn't match the block's yield type"
-                )
-            }.build();
+            // let err_msg = if let Some(span) = break_with_value {
+            //     err_msg.label(span, format!("break with value of type {}", err.left))
+            //         .label(
+            //             block_expr.last_expr.as_ref().map_or(
+            //                 block_expr.span.clone(),
+            //                 |expr| expr.span().clone()
+            //             ),
+            //             format!("block yields {}", err.right)
+            //         )
+            //         .help("Break statements with values must match the block's return type")
+            // } else {
+            //     err_msg.help(
+            //         "This can happen if you have a break statement returning a value that doesn't match the block's yield type"
+            //     )
+            // }.build();
 
             data.errors.push(err_msg);
             error_type()
@@ -440,15 +447,36 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
     let then_ty = infer_block(&expr.if_block.body, block, data);
 
     let if_types = expr.else_if_blocks.iter().map(|x| {
-        // First check if we have a bool - if not -> error!
-        if let Err(err) = cond_ty.unify(primitive_bool()) {
-            panic!(
-                "User Error: Condition must be of type bool, got {}",
-                err.left
-            );
+        // Check if the else-if condition is a boolean
+        let else_if_cond_ty = infer_expr(&x.condition, block, data, None);
+        if let Err(err) = else_if_cond_ty.unify(primitive_bool()) {
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message(format!(
+                    "Else-if condition must be of type 'bool', got '{}'",
+                    err.left
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    x.condition.span().clone(),
+                    format!("has type '{}'", err.left),
+                )
+                .help("Conditions must evaluate to a boolean type")
+                .build();
+            data.errors.push(err_msg);
+
+            // We mark as error type.
+            data.type_info_table
+                .types
+                .insert(x.condition.node_id(), error_type());
+
+            return error_type();
         }
-        let ty = infer_block(&x.body, block, data);
-        ty
+
+        infer_block(&x.body, block, data)
     });
 
     let (out_ty, errors) = if_types.into_iter().enumerate().fold(
@@ -493,7 +521,7 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
                 data.type_info_table.types.insert(expr.id, unified);
                 unified
             }
-            Err(err) => {
+            Err(_) => {
                 let err_msg = YuuError::builder()
                     .kind(ErrorKind::TypeMismatch)
                     .message("If expression branches have incompatible types")

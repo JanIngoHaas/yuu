@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::{
     add_ids::add_ids,
     lexer::{CatchIn, Lexer, ParseError, ParseResult},
@@ -21,6 +23,10 @@ impl Parser {
             lexer: Lexer::new(code_info),
             errors: Vec::new(),
         }
+    }
+
+    pub fn dismantle(self) -> (Vec<ParseError>, Lexer) {
+        (self.errors, self.lexer)
     }
 
     fn get_infix_precedence(op: &TokenKind) -> (i32, i32) {
@@ -671,17 +677,27 @@ impl Parser {
     }
 
     pub fn parse_func_decl(&mut self) -> ParseResult<(Span, FuncDeclStructural)> {
-        let fn_tkn = self.lexer.expect(&[TokenKind::Fn], &mut self.errors)?;
+        let fn_tkn = self.lexer.expect(&[TokenKind::FnKw], &mut self.errors)?;
         let ident = self.lexer.next_token();
         match ident.kind {
             TokenKind::Ident(ident) => {
                 let _ = self.lexer.expect(&[TokenKind::LParen], &mut self.errors)?;
                 let args = self.parse_func_args()?;
                 let _rparen = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
-                let _arrow = self.lexer.expect(&[TokenKind::Arrow], &mut self.errors)?;
-                let ret_ty = Box::new(self.parse_type()?);
-                let span = fn_tkn.span.start..ret_ty.span().end;
-                Ok(self.make_func_decl(ident, span, args, Some(ret_ty)))
+
+                let arrow_maybe = self.lexer.peek();
+
+                let (span, ret_ty) = if let TokenKind::Arrow = arrow_maybe.kind {
+                    let _ = self.lexer.next_token(); // Consume arrow
+                    let ret_ty = Box::new(self.parse_type()?);
+                    let span = fn_tkn.span.start..ret_ty.span().end;
+                    (span, Some(ret_ty))
+                } else {
+                    let span = fn_tkn.span.start.._rparen.span.end;
+                    (span, None)
+                };
+
+                Ok(self.make_func_decl(ident, span, args, ret_ty))
             }
             _ => {
                 let mut error = YuuError::unexpected_token(
@@ -803,16 +819,9 @@ impl Parser {
     pub fn parse_structural(&mut self) -> ParseResult<(Span, StructuralNode)> {
         let t = self.lexer.peek();
         let x = match t.kind {
-            TokenKind::Fn => {
-                let res = self.parse_func_def(); // TODO: Here check CatchIn
-
-                match res {
-                    Ok((r, fds)) => Ok((r, StructuralNode::FuncDef(fds))),
-                    Err(e) if matches!(e, CatchIn::FunctionDecl) => {
-                        Ok((0..0, StructuralNode::Error(0)))
-                    }
-                    Err(x) => return Err(x),
-                }
+            TokenKind::FnKw => {
+                let (range, res) = self.parse_func_def()?;
+                (range, StructuralNode::FuncDef(res))
             }
             _ => {
                 self.errors.push(
@@ -831,7 +840,7 @@ impl Parser {
                 return Err(self.lexer.synchronize());
             }
         };
-        x
+        Ok(x)
     }
 
     pub fn parse(&mut self) -> AST {
@@ -842,11 +851,20 @@ impl Parser {
             if t.kind == TokenKind::EOF {
                 break;
             }
-            structural_nodes.push(Box::new(
-                self.parse_structural()
-                    .expect("Critical Error: Couldn't recover from syntax error - goodbye world")
-                    .1,
-            ));
+
+            let parsed_structural = self.parse_structural();
+            match parsed_structural {
+                Ok((_, structural)) => structural_nodes.push(Box::new(structural)),
+                Err(CatchIn::FunctionDecl) => {
+                    // Recover here
+                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    continue;
+                }
+                Err(_) => {
+                    self.lexer.sync_to(&[TokenKind::FnKw]);
+                    continue;
+                }
+            }
         }
 
         let ast = AST {
