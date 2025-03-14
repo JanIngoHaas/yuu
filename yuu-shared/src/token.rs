@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use logos::Logos;
 use serde::{Deserialize, Serialize};
+use ustr::{ustr, Ustr};
 
 // Helper function for parsing i64 with different bases
 fn parse_integer(s: &str) -> Option<Integer> {
@@ -58,8 +59,8 @@ pub enum TokenKind {
     #[logos(priority = 1)]
     Integer(Integer),
 
-    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
-    Ident(String),
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| ustr(lex.slice()))]
+    Ident(Ustr),
 
     #[token("i64")]
     I64Kw,
@@ -152,39 +153,39 @@ impl TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenKind::Bang => "!".fmt(f),
-            TokenKind::F32(x) => write!(f, "{}f", x),
-            TokenKind::F64(x) => write!(f, "{}ff", x),
-            TokenKind::Integer(Integer::I64(i)) => write!(f, "{}", i),
-            TokenKind::Ident(x) => write!(f, "{}", x),
-            TokenKind::I64Kw => "i64".fmt(f),
-            TokenKind::IfKw => "if".fmt(f),
-            TokenKind::ElseKw => "else".fmt(f),
-            TokenKind::F32Kw => "f32".fmt(f),
-            TokenKind::F64Kw => "f64".fmt(f),
-            TokenKind::LetKw => "let".fmt(f),
-            TokenKind::MutKw => "mut".fmt(f),
-            TokenKind::FnKw => "fn".fmt(f),
-            TokenKind::Arrow => "->".fmt(f),
-            TokenKind::Return => "return".fmt(f),
-            TokenKind::OutKw => "out".fmt(f),
-            TokenKind::Colon => ":".fmt(f),
-            TokenKind::Equal => "=".fmt(f),
-            TokenKind::EqEq => "==".fmt(f),
-            TokenKind::Comma => ",".fmt(f),
-            TokenKind::Semicolon => ";".fmt(f),
-            TokenKind::TrueKw => "true".fmt(f),
-            TokenKind::FalseKw => "false".fmt(f),
-            TokenKind::NilKw => "nil".fmt(f),
-            TokenKind::Plus => "+".fmt(f),
-            TokenKind::Minus => "-".fmt(f),
-            TokenKind::Asterix => "*".fmt(f),
-            TokenKind::Slash => "/".fmt(f),
-            TokenKind::LParen => "(".fmt(f),
-            TokenKind::RParen => ")".fmt(f),
-            TokenKind::LBrace => "{".fmt(f),
-            TokenKind::RBrace => "}".fmt(f),
-            TokenKind::EOF => "EOF".fmt(f),
+            TokenKind::Bang => "'!'".fmt(f),
+            TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
+            TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
+            TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
+            TokenKind::Ident(x) => write!(f, "'{}' (identifier)", x),
+            TokenKind::I64Kw => "'i64'".fmt(f),
+            TokenKind::IfKw => "'if'".fmt(f),
+            TokenKind::ElseKw => "'else'".fmt(f),
+            TokenKind::F32Kw => "'f32'".fmt(f),
+            TokenKind::F64Kw => "'f64'".fmt(f),
+            TokenKind::LetKw => "'let'".fmt(f),
+            TokenKind::MutKw => "'mut'".fmt(f),
+            TokenKind::FnKw => "'fn'".fmt(f),
+            TokenKind::Arrow => "'->'".fmt(f),
+            TokenKind::Return => "'return'".fmt(f),
+            TokenKind::OutKw => "'out'".fmt(f),
+            TokenKind::Colon => "':'".fmt(f),
+            TokenKind::Equal => "'='".fmt(f),
+            TokenKind::EqEq => "'=='".fmt(f),
+            TokenKind::Comma => "','".fmt(f),
+            TokenKind::Semicolon => "';'".fmt(f),
+            TokenKind::TrueKw => "'true'".fmt(f),
+            TokenKind::FalseKw => "'false'".fmt(f),
+            TokenKind::NilKw => "'nil'".fmt(f),
+            TokenKind::Plus => "'+'".fmt(f),
+            TokenKind::Minus => "'-'".fmt(f),
+            TokenKind::Asterix => "'*'".fmt(f),
+            TokenKind::Slash => "'/'".fmt(f),
+            TokenKind::LParen => "'('".fmt(f),
+            TokenKind::RParen => "')'".fmt(f),
+            TokenKind::LBrace => "'{'".fmt(f),
+            TokenKind::RBrace => "'}'".fmt(f),
+            TokenKind::EOF => "'EOF'".fmt(f),
         }
     }
 }

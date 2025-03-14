@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use anyhow::{anyhow, bail};
-use hashbrown::HashMap;
+use anyhow::anyhow;
+use indexmap::IndexMap;
 use petgraph::{
     dot::{Config, Dot},
     prelude::GraphMap,
@@ -32,10 +32,10 @@ pub trait ResourceId: Any + Send + 'static {
 
 #[derive(Default)]
 pub struct Schedule {
-    passes: HashMap<PassId, Box<dyn Pass>>,
-    read_resources: HashMap<PassId, Vec<ResourceName>>,
-    write_resources: HashMap<PassId, Vec<ResourceName>>,
-    resource_outputs: HashMap<PassId, Vec<ResourceName>>,
+    passes: IndexMap<PassId, Box<dyn Pass>>,
+    read_resources: IndexMap<PassId, Vec<ResourceName>>,
+    write_resources: IndexMap<PassId, Vec<ResourceName>>,
+    resource_outputs: IndexMap<PassId, Vec<ResourceName>>,
 }
 
 impl Schedule {
@@ -77,7 +77,7 @@ impl Schedule {
         }
 
         // Track the latest writer (producer or writer) for each resource
-        let mut latest_writer: HashMap<ResourceName, PassId> = HashMap::new();
+        let mut latest_writer: IndexMap<ResourceName, PassId> = IndexMap::new();
 
         // First, handle producers as they are the initial writers
         for (producer, produces) in &self.resource_outputs {
@@ -175,7 +175,7 @@ impl Scheduler {
 
         // Group passes that can be run in parallel (those at the same depth)
         let mut layers: Vec<Vec<PassId>> = Vec::new();
-        let mut visited: HashMap<PassId, usize> = HashMap::new();
+        let mut visited: IndexMap<PassId, usize> = IndexMap::new();
 
         // Calculate the layer for each pass
         for &pass_id in &topo_order {

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.95"
 colored = "2.1.0"
-hashbrown = "0.15.1"
+indexmap = { version = "2.8.0", features = ["serde"] }
 logos = "0.15.0"
 petgraph = "0.7.0"
 rayon = "1.10.0"
@@ -16,3 +16,4 @@ serde_json = "1.0.133"
 miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
 thiserror = "2.0.3"
 syntect = "5.1.0"
+ustr = { version = "1.1.0", features = ["serde"] }

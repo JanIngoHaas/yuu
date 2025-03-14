@@ -1,9 +1,8 @@
 use yuu_shared::{
-    ast::{IdentBinding, NodeId, Spanned, StmtNode},
+    ast::{Spanned, StmtNode},
     block::Block,
     error::{ErrorKind, YuuError},
-    type_info::{error_type, TypeInfo, TypeInfoTable},
-    Span,
+    type_info::error_type,
 };
 
 use super::{infer_expr, match_binding_node_to_type, pass_type_inference::TransientData};
@@ -17,7 +16,7 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
     match stmt {
         StmtNode::Let(let_stmt) => {
             let ty_expr = infer_expr(&let_stmt.expr, block, data, None);
-            match_binding_node_to_type(&let_stmt.binding, block, ty_expr, data);
+            match_binding_node_to_type(block, &let_stmt.binding, ty_expr, data);
             ExitKind::Proceed
         }
         StmtNode::Atomic(expr) => {
@@ -50,15 +49,15 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
                     data.errors.push(err);
 
                     // Set error type for this node
-                    data.type_info_table.types.insert(exit.id, error_type());
+                    data.type_registry.type_info_table.insert(exit.id, error_type());
 
                     return ExitKind::Proceed; // Continue analysis instead of breaking
                 }
             };
 
-            data.binding_table.insert(exit.id, target_block.id);
+            data.type_registry.bindings.insert(exit.id, target_block.id);
 
-            if let Err(unify_err) = data.type_info_table.unify_and_insert(target_block.id, ty) {
+            if let Err(unify_err) = data.type_registry.type_info_table.unify_and_insert(target_block.id, ty) {
                 let err = YuuError::builder()
                     .kind(ErrorKind::TypeMismatch)
                     .message(format!(
@@ -79,15 +78,15 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
                     .build();
                 
                 data.errors.push(err);
-                data.type_info_table.types.insert(exit.id, error_type());
+                data.type_registry.type_info_table.insert(exit.id, error_type());
                 // We still want to return Break to maintain control flow analysis
             }
-            return ExitKind::Break;
+            ExitKind::Break
         }
         StmtNode::Error(stmt) => {
             // Set error type
             let ty = error_type();
-            data.type_info_table.types.insert(*stmt, ty);
+            data.type_registry.type_info_table.insert(*stmt, ty);
             ExitKind::Proceed
         }
     }

@@ -1,12 +1,14 @@
+use crate::ast::InternUstr;
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
 };
 use colored::Colorize;
-use hashbrown::HashMap;
+use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
+use ustr::{Ustr, UstrMap};
 
 /*
 Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
@@ -14,6 +16,7 @@ Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
 
 // Color palette system
 #[derive(Clone)]
+#[allow(clippy::upper_case_acronyms)]
 struct RGB(u8, u8, u8);
 
 // Add color support detection
@@ -63,7 +66,7 @@ impl ColorSupport {
 }
 
 struct ColorPalette {
-    colors: HashMap<&'static str, RGB>,
+    colors: IndexMap<&'static str, RGB>,
     color_support: ColorSupport,
 }
 
@@ -105,8 +108,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn deep_ocean() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 215, 0)); // Deep Gold
         colors.insert("type", RGB(64, 224, 208)); // Turquoise
@@ -121,7 +125,7 @@ impl ColorPalette {
     }
 
     fn warm_ember() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 140, 85)); // Warm Orange
         colors.insert("type", RGB(255, 183, 138)); // Peach
@@ -135,8 +139,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn mystic_forest() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(144, 238, 144)); // Light Green
         colors.insert("type", RGB(152, 251, 152)); // Pale Green
@@ -150,8 +155,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn cosmic_night() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(147, 112, 219)); // Medium Purple
         colors.insert("type", RGB(138, 43, 226)); // Blue Violet
@@ -165,8 +171,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn neon_dreams() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 110, 199)); // Hot Pink
         colors.insert("type", RGB(0, 255, 255)); // Cyan
@@ -182,8 +189,9 @@ impl ColorPalette {
 
     // === Light Background Palettes ===
 
+    #[allow(dead_code)]
     fn summer_breeze() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(255, 110, 74)); // Burnt Orange
         colors.insert("type", RGB(0, 119, 182)); // Ocean Blue
@@ -197,8 +205,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn cherry_blossom() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(219, 68, 88)); // Deep Pink
         colors.insert("type", RGB(15, 76, 129)); // Navy Blue
@@ -212,8 +221,9 @@ impl ColorPalette {
         }
     }
 
+    #[allow(dead_code)]
     fn forest_morning() -> Self {
-        let mut colors = HashMap::new();
+        let mut colors = IndexMap::new();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(0, 102, 0)); // Dark Green
         colors.insert("type", RGB(0, 77, 122)); // Deep Blue
@@ -271,7 +281,7 @@ fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
 
 #[derive(Clone)]
 pub struct Register {
-    name: String,
+    name: Ustr,
     id: i64,
     ty: &'static TypeInfo,
 }
@@ -292,7 +302,7 @@ impl Eq for Register {}
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Label {
-    name: String,
+    name: Ustr,
     id: i64,
 }
 
@@ -303,7 +313,7 @@ impl fmt::Display for Label {
 }
 
 impl Register {
-    pub fn new(name: String, id: i64, ty: &'static TypeInfo) -> Self {
+    pub fn new(name: Ustr, id: i64, ty: &'static TypeInfo) -> Self {
         Self { name, id, ty }
     }
 
@@ -325,7 +335,7 @@ impl Register {
 }
 
 impl Label {
-    fn new(name: String, id: i64) -> Self {
+    fn new(name: Ustr, id: i64) -> Self {
         Self { name, id }
     }
 
@@ -405,7 +415,7 @@ pub enum Instruction {
     },
     Call {
         target: Option<Register>,
-        name: String,
+        name: Ustr,
         args: Vec<Operand>,
     },
     Omega {
@@ -447,35 +457,35 @@ impl BasicBlock {
 
 #[derive(Clone)]
 pub struct Function {
-    pub name: String,
+    pub name: Ustr,
     pub params: Vec<Register>,
     pub return_type: &'static TypeInfo,
-    pub blocks: hashbrown::HashMap<i64, BasicBlock>,
+    pub blocks: IndexMap<i64, BasicBlock>,
     pub entry_block: i64,
     current_block: i64,
     next_reg_id: i64,
     next_label_id: i64,
-    omega_blocks: HashMap<Register, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
+    omega_blocks: IndexMap<Register, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
 }
 
 impl Function {
-    pub fn new(name: String, return_type: &'static TypeInfo) -> Self {
+    pub fn new(name: Ustr, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
             name,
             params: Vec::new(),
             return_type,
-            blocks: hashbrown::HashMap::new(),
+            blocks: IndexMap::new(),
             entry_block: 0,
             current_block: 0,
             next_reg_id: 0,
             next_label_id: 0,
-            omega_blocks: HashMap::new(),
+            omega_blocks: IndexMap::new(),
         };
-        f.add_block("entry".to_string());
+        f.add_block("entry".intern());
         f
     }
 
-    pub fn fresh_register(&mut self, name: String, ty: &'static TypeInfo) -> Register {
+    pub fn fresh_register(&mut self, name: Ustr, ty: &'static TypeInfo) -> Register {
         let id = self.next_reg_id;
         self.next_reg_id += 1;
         Register::new(name, id, ty)
@@ -493,7 +503,7 @@ impl Function {
         self.blocks.get(&self.current_block)
     }
 
-    pub fn get_current_block_label<'a>(&'a self) -> &'a Label {
+    pub fn get_current_block_label(&self) -> &Label {
         &self.blocks.get(&self.current_block).unwrap().label
     }
 
@@ -501,13 +511,13 @@ impl Function {
         self.current_block
     }
 
-    fn fresh_label(&mut self, name: String) -> Label {
+    fn fresh_label(&mut self, name: Ustr) -> Label {
         let id = self.next_label_id;
         self.next_label_id += 1;
         Label::new(name, id)
     }
 
-    pub fn add_block(&mut self, name: String) -> Label {
+    pub fn add_block(&mut self, name: Ustr) -> Label {
         let label = self.fresh_label(name);
         self.blocks.insert(
             label.id(),
@@ -613,7 +623,7 @@ impl Function {
 
     pub fn make_binary(
         &mut self,
-        name: String,
+        name: Ustr,
         op: BinOp,
         lhs: Operand,
         rhs: Operand,
@@ -641,7 +651,7 @@ impl Function {
 
     pub fn make_load(
         &mut self,
-        name: String,
+        name: Ustr,
         address: Operand,
         value_type: &'static TypeInfo,
     ) -> Register {
@@ -655,7 +665,7 @@ impl Function {
         target
     }
 
-    pub fn make_alloca(&mut self, name: String, value_type: &'static TypeInfo) -> Register {
+    pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> Register {
         let ptr_type = value_type.ptr_to();
         let target = self.fresh_register(name, ptr_type);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
@@ -668,8 +678,8 @@ impl Function {
 
     pub fn make_call(
         &mut self,
-        name: String,
-        func_name: String,
+        name: Ustr,
+        func_name: Ustr,
         args: Vec<Operand>,
         return_type: &'static TypeInfo,
     ) -> Option<Register> {
@@ -716,8 +726,8 @@ impl Function {
         then_writes: Vec<(Register, Operand)>,
         else_writes: Vec<(Register, Operand)>,
     ) -> (Label, Label) {
-        let true_label = self.fresh_label("then".to_string());
-        let false_label = self.fresh_label("else".to_string());
+        let true_label = self.fresh_label("then".intern());
+        let false_label = self.fresh_label("else".intern());
 
         let then_writes = self.gen_writes_if_not_nop(then_writes);
         let else_writes = self.gen_writes_if_not_nop(else_writes);
@@ -957,7 +967,7 @@ impl Function {
 }
 
 pub struct Module {
-    pub functions: HashMap<String, FunctionDeclarationState>,
+    pub functions: UstrMap<FunctionDeclarationState>,
 }
 
 impl ResourceId for Module {
@@ -975,7 +985,7 @@ impl Default for Module {
 impl Module {
     pub fn new() -> Self {
         Self {
-            functions: HashMap::new(),
+            functions: UstrMap::default(),
         }
     }
 
@@ -1131,7 +1141,7 @@ fn format_unop(op: &UnaryOp, do_color: bool) -> String {
 // Add helper function for formatting Omikron writes
 fn format_omikron_writes(writes: &[(Register, Operand)], do_color: bool) -> String {
     if writes.is_empty() {
-        format!("ο{{}}")
+        "ο{}".to_string()
     } else {
         let writes_str = writes
             .iter()

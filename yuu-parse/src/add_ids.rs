@@ -10,9 +10,6 @@ impl IdGenerator {
     }
 
     fn next(&mut self) -> NodeId {
-        if self.next_id == 8 {
-            println!("Yo");
-        }
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -131,7 +128,7 @@ impl AddId for BindingNode {
     }
 }
 
-impl AddId for FuncArg {
+impl AddId for Arg {
     fn add_id(&mut self, gen: &mut IdGenerator) {
         self.binding.add_id(gen);
         self.ty.add_id(gen);
@@ -151,6 +148,12 @@ impl AddId for FuncDeclStructural {
     }
 }
 
+impl AddId for StructDeclStructural {
+    fn add_id(&mut self, gen: &mut IdGenerator) {
+        self.id = gen.next();
+    }
+}
+
 impl AddId for StructuralNode {
     fn add_id(&mut self, gen: &mut IdGenerator) {
         match self {
@@ -163,6 +166,16 @@ impl AddId for StructuralNode {
                 def.body.add_id(gen);
             }
             StructuralNode::Error(x) => *x = gen.next(),
+            StructuralNode::StructDecl(struct_decl_structural) => {
+                struct_decl_structural.id = gen.next();
+            }
+            StructuralNode::StructDef(struct_def_structural) => {
+                struct_def_structural.decl.add_id(gen);
+                struct_def_structural.id = gen.next();
+                for field in &mut struct_def_structural.fields {
+                    field.add_id(gen);
+                }
+            }
         }
     }
 }
@@ -252,6 +265,8 @@ impl GetId for StructuralNode {
             StructuralNode::FuncDecl(fd) => fd.id,
             StructuralNode::FuncDef(def) => def.id,
             StructuralNode::Error(x) => *x,
+            StructuralNode::StructDecl(struct_decl_structural) => struct_decl_structural.id,
+            StructuralNode::StructDef(struct_def_structural) => struct_def_structural.id,
         }
     }
 }

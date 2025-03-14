@@ -1,10 +1,10 @@
 use logos::Span;
 use serde::{Deserialize, Serialize};
+use ustr::Ustr;
 
 use crate::{scheduler::ResourceId, token::Token};
 use std::{
     fmt::{self, Display, Formatter},
-    i64::MIN,
     sync::Arc,
 };
 
@@ -44,7 +44,7 @@ impl Display for BinOp {
 }
 
 impl BinOp {
-    pub fn static_name(&self) -> &'static str {
+    pub fn static_name(&self) -> Ustr {
         match self {
             BinOp::Add => "add",
             BinOp::Subtract => "sub",
@@ -52,6 +52,7 @@ impl BinOp {
             BinOp::Divide => "div",
             BinOp::Eq => "eq",
         }
+        .intern()
     }
 }
 
@@ -63,11 +64,12 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub fn static_name(&self) -> &'static str {
+    pub fn static_name(&self) -> Ustr {
         match self {
             UnaryOp::Pos => "pos",
             UnaryOp::Negate => "neg",
         }
+        .intern()
     }
 }
 
@@ -124,7 +126,7 @@ pub struct UnaryExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IdentExpr {
-    pub ident: String,
+    pub ident: Ustr,
     pub span: Span,
     pub id: NodeId,
 }
@@ -171,7 +173,7 @@ pub struct LetStmt {
 pub struct IdentBinding {
     pub id: NodeId,
     pub span: Span,
-    pub name: String,
+    pub name: Ustr,
     pub is_mut: bool,
 }
 
@@ -200,7 +202,7 @@ impl Display for BindingNode {
 pub struct IdentType {
     pub id: NodeId,
     pub span: Span,
-    pub name: String,
+    pub name: Ustr,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -236,7 +238,7 @@ pub enum TypeNode {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct FuncArg {
+pub struct Arg {
     pub ty: TypeNode,
     pub binding: BindingNode,
     pub span: Span,
@@ -247,8 +249,8 @@ pub struct FuncArg {
 pub struct FuncDeclStructural {
     pub id: NodeId,
     pub span: Span,
-    pub name: String,
-    pub args: Vec<FuncArg>,
+    pub name: Ustr,
+    pub args: Vec<Arg>,
     pub ret_ty: Option<Box<TypeNode>>,
 }
 
@@ -257,7 +259,7 @@ pub struct BlockExpr {
     pub id: NodeId,
     pub span: Span,
     pub body: Vec<StmtNode>,
-    pub label: Option<String>,
+    pub label: Option<Ustr>,
     pub last_expr: Option<Box<ExprNode>>,
 }
 
@@ -278,9 +280,26 @@ pub struct FuncDefStructural {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct StructDeclStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ustr,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct StructDefStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub decl: StructDeclStructural,
+    pub fields: Vec<Arg>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StructuralNode {
     FuncDecl(FuncDeclStructural),
     FuncDef(FuncDefStructural),
+    StructDecl(StructDeclStructural),
+    StructDef(StructDefStructural),
     Error(NodeId),
 }
 
@@ -288,7 +307,7 @@ pub enum StructuralNode {
 pub struct BreakStmt {
     pub span: Span,
     pub expr: Box<ExprNode>, // Optional for => ; case
-    pub target: String,      // None for => ; case, Some("blk1") for => blk1 case
+    pub target: Ustr,        // None for => ; case, Some("blk1") for => blk1 case
     pub id: NodeId,
 }
 
@@ -387,6 +406,10 @@ impl Spanned for StructuralNode {
             StructuralNode::FuncDecl(decl) => decl.span.clone(),
             StructuralNode::FuncDef(def) => def.span.clone(),
             StructuralNode::Error(_) => 0..0,
+            StructuralNode::StructDecl(struct_decl_structural) => {
+                struct_decl_structural.span.clone()
+            }
+            StructuralNode::StructDef(struct_def_structural) => struct_def_structural.span.clone(),
         }
     }
 }
@@ -402,6 +425,7 @@ impl Spanned for BindingNode {
 pub type NodeId = i64;
 
 impl ExprNode {
+    #[allow(dead_code)]
     fn node_id(&self) -> NodeId {
         match self {
             ExprNode::Literal(lit) => lit.id,
@@ -413,5 +437,21 @@ impl ExprNode {
             ExprNode::If(if_expr) => if_expr.id,
             ExprNode::Assignment(assign) => assign.id,
         }
+    }
+}
+
+pub trait InternUstr {
+    fn intern(&self) -> Ustr;
+}
+
+impl InternUstr for str {
+    fn intern(&self) -> Ustr {
+        Ustr::from(self)
+    }
+}
+
+impl InternUstr for String {
+    fn intern(&self) -> Ustr {
+        Ustr::from(self.as_str())
     }
 }

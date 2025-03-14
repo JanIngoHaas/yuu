@@ -83,10 +83,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{
-        pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
-        type_inference::PassTypeInference,
-    };
+    use crate::{pass_ast_to_yir::PassAstToYir, type_inference::PassTypeInference};
     use yuu_parse::pass_parse::PassParse;
     use yuu_shared::{
         ast::SourceInfo,
@@ -120,7 +117,6 @@ mod tests {
 
         // Add passes
         PassParse.install(&mut schedule);
-        PassCollectDecls.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);

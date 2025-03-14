@@ -1,105 +1,74 @@
-use core::error;
-
+use ustr::Ustr;
 use yuu_shared::{
-    ast::{BindingNode, FuncArg, NodeId, StructuralNode, TypeNode},
+    ast::{Arg, BindingNode, InternUstr, NodeId, StructuralNode, TypeNode},
     binding_info::BindingInfo,
     block::{Block, FUNC_BLOCK_NAME},
-    error::{YuuError, YuuErrorBuilder},
     type_info::{error_type, primitive_nil, FunctionType, TypeInfo},
     Span,
 };
 
 use super::{
-    infer_block, infer_block_no_child_creation, infer_stmt, infer_type, match_binding_node_to_type,
+    infer_block_no_child_creation, infer_type, match_binding_node_to_type,
     pass_type_inference::TransientData,
 };
 
 pub fn declare_function(
-    name: &str,
-    args: &[FuncArg],
+    name: Ustr,
+    args: &[Arg],
     ret_ty: &Option<Box<TypeNode>>,
     id: NodeId,
     span: Span,
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let fdec = block.declare_function(name.to_string(), id, span.clone());
-
-    if let Err(err) = fdec {
-        data.errors.push(err);
-        return primitive_nil();
-    }
-
     let func_arg_types = args
         .iter()
         .map(|arg| {
-            let semantic_arg_type = infer_type(&arg.ty, block, data);
+            let semantic_arg_type = infer_type(&arg.ty, data);
 
-            match_binding_node_to_type(&arg.binding, block, semantic_arg_type, data);
+            match_binding_node_to_type(block, &arg.binding, semantic_arg_type, data);
 
             semantic_arg_type
         })
         .collect::<Vec<_>>();
 
     let ret_type = if let Some(ty) = ret_ty {
-        infer_type(ty, block, data)
+        infer_type(ty, data)
     } else {
         primitive_nil()
     };
 
-    let func = FunctionType {
-        args: func_arg_types,
-        ret: ret_type,
-    }
-    .into();
-
-    data.type_info_table.types.insert(id, func);
+    data.type_registry.add_function(
+        &func_arg_types,
+        ret_type,
+        name,
+        BindingInfo {
+            id: id,
+            src_location: Some(span),
+        },
+    );
 
     ret_type
 }
 
 pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &mut TransientData) {
     match structural {
-        StructuralNode::FuncDecl(decl) => {
-            let _ = declare_function(
-                &decl.name,
-                &decl.args, 
-                &decl.ret_ty,
-                decl.id,
-                decl.span.clone(),
-                block,
-                data,
-            );
-        }
+        StructuralNode::FuncDecl(_decl) => {}
         StructuralNode::FuncDef(def) => {
-            let ret_type = declare_function(
-                &def.decl.name,
-                &def.decl.args,
-                &def.decl.ret_ty,
-                def.id,
-                def.decl.span.clone(), // TODO: Should I change this to def.span?
-                block,
-                data,
-            );
-
             let func_block = block.make_child(Some((
-                FUNC_BLOCK_NAME.to_string(),
+                FUNC_BLOCK_NAME.intern(),
                 BindingInfo {
                     id: def.body.id,
                     src_location: Some(def.span.clone()),
-                    is_mut: false,
                 },
             )));
-
-            // Assign the return type to the _fn binding ID
-            data.type_info_table.types.insert(def.body.id, ret_type);
 
             for arg in &def.decl.args {
                 let BindingNode::Ident(ident) = &arg.binding;
                 func_block.insert_variable(
                     ident.name.clone(),
                     ident.id,
-                    ident.span.clone(),
+                    Some(ident.span.clone()),
                     ident.is_mut,
                 );
             }
@@ -112,7 +81,13 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
             infer_block_no_child_creation(&def.body, func_block, data);
         }
         StructuralNode::Error(estr) => {
-            data.type_info_table.types.insert(*estr, error_type());
+            data.type_registry
+                .type_info_table
+                .insert(*estr, error_type());
         }
+        StructuralNode::StructDecl(struct_decl) => {
+            todo!()
+        }
+        StructuralNode::StructDef(struct_def) => todo!(),
     }
 }

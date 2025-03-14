@@ -1,29 +1,22 @@
-use yuu_shared::{
-    ast::{BindingNode, IdentBinding, NodeId},
-    binding_info::BindingInfo,
-    block::Block,
-    error::YuuError,
-    type_info::{TypeInfo, TypeInfoTable},
-    Span,
-};
+use yuu_shared::{ast::BindingNode, block::Block, type_info::TypeInfo};
 
 use super::pass_type_inference::TransientData;
 
-pub fn match_binding_node_to_type<'a>(
-    binding: &BindingNode,
+pub fn match_binding_node_to_type(
     block: &mut Block,
+    binding: &BindingNode,
     ty: &'static TypeInfo,
-    data: &'a mut TransientData,
+    data: &mut TransientData,
 ) {
     match binding {
         BindingNode::Ident(ident_binding) => {
-            block.insert_variable(
-                ident_binding.name.clone(),
+            data.type_registry.add_variable(
+                block,
+                ident_binding.name,
                 ident_binding.id,
-                ident_binding.span.clone(),
-                ident_binding.is_mut,
+                Some(ident_binding.span.clone()),
+                ty,
             );
-            data.type_info_table.types.insert(ident_binding.id, ty);
         }
     }
 }

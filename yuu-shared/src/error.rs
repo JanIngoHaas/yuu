@@ -1,12 +1,10 @@
 use miette::{
-    highlighters::{Highlighter, SyntectHighlighter},
-    Diagnostic, LabeledSpan, MietteDiagnostic, NamedSource, SourceSpan,
+    highlighters::SyntectHighlighter, Diagnostic, LabeledSpan, MietteDiagnostic, NamedSource,
+    SourceSpan,
 };
 use std::{fmt::Display, str::FromStr, sync::Arc};
-use syntect::{highlighting::ThemeItem, parsing::SyntaxSet};
+use syntect::highlighting::ThemeItem;
 use thiserror::Error;
-
-use crate::scheduler::ResourceId;
 
 /// Error kind enum to categorize different errors
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,18 +82,15 @@ impl YuuError {
             .message(format!("Expected {}, found {}", expected, found))
             .source(source_code.clone(), file_name)
             .span(
-                span_clone.clone(),
+                span_clone,
                 format!(
-                    "unexpected '{}', expected '{}'",
+                    "unexpected {}, expected {}",
                     // Try to extract the actual token from source if possible
-                    if span_clone.len() > 0
+                    if !span_clone.is_empty()
                         && span_clone.offset() + span_clone.len() <= source_code.len()
                     {
-                        format!(
-                            "{}",
-                            &source_code
-                                [span_clone.offset()..span_clone.offset() + span_clone.len()]
-                        )
+                        (source_code[span_clone.offset()..span_clone.offset() + span_clone.len()])
+                            .to_string()
                     } else {
                         format!("{}", found)
                     },
@@ -190,6 +185,12 @@ pub struct YuuErrorBuilder {
     related: Vec<MietteDiagnostic>,
 }
 
+impl Default for YuuErrorBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YuuErrorBuilder {
     /// Create a new error builder
     pub fn new() -> Self {
@@ -258,14 +259,11 @@ impl YuuErrorBuilder {
         label: Option<String>,
     ) -> Self {
         let span = span.into();
-        let label_str = label.map(|x| x.into());
 
-        let message = message
-            .map(|m| m.into())
-            .unwrap_or_else(|| "Related information".to_string());
+        let message = message.unwrap_or_else(|| "Related information".to_string());
 
         let diagnostic = MietteDiagnostic::new(message)
-            .with_labels(vec![LabeledSpan::new(label_str, span.offset(), span.len())])
+            .with_labels(vec![LabeledSpan::new(label, span.offset(), span.len())])
             .with_severity(miette::Severity::Advice);
 
         self.related.push(diagnostic);
@@ -282,7 +280,7 @@ impl YuuErrorBuilder {
 
         self.labels.push(LabeledSpan::new_primary_with_span(
             Some(primary_label),
-            span.clone(),
+            span,
         ));
 
         YuuError {
@@ -363,6 +361,7 @@ pub fn setup_error_formatter(
         Some("Autumn") => create_autumn_rust_theme(),
         Some("DeepOcean") => create_deep_ocean_theme(),
         Some("WarmEmber") => create_autumn_rust_theme(), // Alias for Autumn
+        None => create_autumn_rust_theme(),
         _ => {
             // Load default theme set
             let theme_set = ThemeSet::load_defaults();
@@ -441,13 +440,11 @@ pub fn reset_error_formatter() -> Result<(), miette::Error> {
 ///
 /// # Example
 /// ```
-/// fn main() {
 ///     let themes = yuu_shared::error::list_syntax_highlighting_themes();
 ///     println!("Available themes:");
 ///     for theme in themes {
 ///         println!("  - {}", theme);
 ///     }
-/// }
 /// ```
 pub fn list_syntax_highlighting_themes() -> Vec<String> {
     use syntect::highlighting::ThemeSet;
@@ -470,6 +467,12 @@ pub fn list_syntax_highlighting_themes() -> Vec<String> {
 use syntect::highlighting::Color as SyntectColor;
 use syntect::highlighting::{FontStyle, Style, StyleModifier, Theme, ThemeSettings};
 use syntect::highlighting::{ScopeSelector, ScopeSelectors};
+
+use crate::ast::{InternUstr, SourceInfo};
+use crate::binding_info::BindingInfo;
+use crate::type_info::{FunctionType, TypeInfo};
+use crate::type_registry::{FunctionInfo, TypeRegistry};
+use crate::Span;
 
 /// Create a custom theme based on the warm_ember color palette
 pub fn create_autumn_rust_theme() -> Theme {
@@ -721,7 +724,7 @@ pub fn create_autumn_rust_theme() -> Theme {
             create_theme_item(
                 "variable.parameter",
                 Style {
-                    foreground: foreground,
+                    foreground,
                     background,
                     font_style: FontStyle::empty(),
                 },
@@ -992,4 +995,131 @@ fn create_theme_item(scope_str: &str, style: Style) -> ThemeItem {
             font_style: Some(style.font_style),
         },
     }
+}
+
+pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let len1 = s1.chars().count();
+    let len2 = s2.chars().count();
+    let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
+
+    for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
+        row[0] = i;
+    }
+    for j in 0..=len2 {
+        matrix[0][j] = j;
+    }
+
+    for (i, c1) in s1.chars().enumerate() {
+        for (j, c2) in s2.chars().enumerate() {
+            let substitution = if c1 == c2 { 0 } else { 1 };
+            matrix[i + 1][j + 1] = (matrix[i][j + 1] + 1)
+                .min(matrix[i + 1][j] + 1)
+                .min(matrix[i][j] + substitution);
+        }
+    }
+
+    matrix[len1][len2]
+}
+
+pub fn create_no_overload_error(
+    name: &str,
+    candidates: Vec<FunctionInfo>,
+    provided_args: &[&'static TypeInfo],
+    reg: &TypeRegistry,
+    src: &SourceInfo,
+    sp: Span,
+) -> YuuError {
+    // TODO: Add "did you mean" suggestions - should be easy, just do a levenstein distance check in type registry
+    if candidates.is_empty() {
+        let suggestions = reg.get_similar_names_func(name.intern(), 3);
+
+        let builder = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message(format!("Function '{}' not declared", name))
+            .source(src.source.clone(), src.file_name.clone())
+            .span((sp.start, (sp.end - sp.start)), "undefined function");
+
+        let mut help = format!(
+            "Function '{}' needs to be declared in the global scope before it can be used",
+            name
+        );
+
+        // Add suggestions if any were found
+        if !suggestions.is_empty() {
+            help.push_str("\n\nDid you mean:");
+            for (i, suggestion) in suggestions.iter().enumerate() {
+                if i > 0 {
+                    help.push_str(",");
+                }
+                help.push_str(&format!(" '{}'", suggestion));
+            }
+            help.push('?');
+        }
+
+        return builder.help(help).build();
+    }
+    let mut builder = YuuError::builder()
+        .kind(ErrorKind::FunctionOverloadError)
+        .message(format!(
+            "No matching overload found for function '{}'",
+            name
+        ));
+
+    builder = builder
+        .source(src.source.clone(), src.file_name.clone())
+        .span(
+            (sp.start, (sp.end - sp.start)),
+            "no matching function overload",
+        );
+
+    // Add information about each candidate
+    for (i, func) in candidates.iter().enumerate() {
+        if let Some(decl_span) = &func.binding_info.src_location {
+            if decl_span.start == 0 && decl_span.end == 0 {
+                continue;
+            }
+            builder = builder.related_info(
+                Some(format!("Candidate Function {}", i + 1)),
+                (decl_span.start, (decl_span.end - decl_span.start)),
+                Some(format!("candidate {}", i + 1)),
+            );
+        }
+    }
+
+    // Add more detailed help
+    if !candidates.is_empty() {
+        let mut help = format!(
+            "Function '{}' exists but arguments don't match.\nCandidate overloads:\n",
+            name
+        );
+        for (i, func) in candidates.iter().enumerate() {
+            let arg_types = func
+                .ty
+                .args
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let ret_type = func.ty.ret.to_string();
+            help.push_str(&format!(
+                "{}. fn {}({}) -> {}\n",
+                i + 1,
+                name,
+                arg_types,
+                ret_type
+            ));
+        }
+
+        let given_types = provided_args
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        help.push_str(&format!("\nProvided argument types: ({})\n", given_types));
+        builder = builder.help(help);
+    }
+
+    builder.build()
 }

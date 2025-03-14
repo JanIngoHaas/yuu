@@ -1,22 +1,22 @@
 use yuu_parse::add_ids::GetId;
 use yuu_shared::{
     ast::{
-        AssignmentExpr, BinaryExpr, BlockExpr, BreakStmt, ExprNode, FuncCallExpr, IdentExpr,
-        IfExpr, LiteralExpr, Spanned, StmtNode, UnaryExpr,
+        AssignmentExpr, BinaryExpr, BlockExpr, ExprNode, FuncCallExpr, IdentExpr, IfExpr,
+        LiteralExpr, Spanned, UnaryExpr,
     },
-    binding_info::{BindingInfo, BindingInfoKind},
-    block::{Block, IdentResolutionKind, FUNC_BLOCK_NAME},
-    error::{ErrorKind, YuuError},
+    binding_info::BindingInfo,
+    block::{Block, IdentResolutionKind},
+    error::{create_no_overload_error, ErrorKind, YuuError},
     type_info::{
         error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
         primitive_nil, TypeInfo,
     },
 };
 
-const MAX_SIMILAR_NAMES: u64 = 3;
-const MIN_DST_SIMILAR_NAMES: u64 = 3;
+// const MAX_SIMILAR_NAMES: u64 = 3;
+// const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::{match_binding_node_to_type, pass_type_inference::TransientData};
+use super::pass_type_inference::TransientData;
 
 fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
@@ -27,7 +27,7 @@ fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeIn
         yuu_shared::token::TokenKind::F64(_) => primitive_f64(),
         _ => unreachable!("Compiler bug: Literal not implemented"),
     };
-    data.type_info_table.types.insert(lit.id, out);
+    data.type_registry.add_literal(lit.id, out);
     out
 }
 
@@ -41,27 +41,33 @@ fn infer_binary(
 
     let op_name = binary_expr.op.static_name();
 
-    let resolution = match block.resolve_ident(
-        op_name,
-        Some(&[lhs, rhs]),
-        data.type_info_table,
-        &data.src_code,
-        binary_expr.span.clone(),
-    ) {
+    let resolution = match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
         Ok(res) => res,
         Err(err) => {
+            let err = create_no_overload_error(
+                &op_name,
+                err,
+                &[lhs, rhs],
+                &data.type_registry,
+                &data.src_code,
+                binary_expr.span.clone(),
+            );
+
             data.errors.push(err);
-            data.type_info_table
-                .types
+            data.type_registry
+                .type_info_table
                 .insert(binary_expr.id, error_type());
             return error_type();
         }
     };
 
-    data.type_info_table
-        .types
-        .insert(binary_expr.id, resolution.contextual_appropriate_type);
-    resolution.contextual_appropriate_type
+    data.type_registry
+        .bindings
+        .insert(binary_expr.id, resolution.binding_info.id);
+    data.type_registry
+        .type_info_table
+        .insert(binary_expr.id, resolution.ty.ret);
+    resolution.ty.ret
 }
 
 fn infer_unary(
@@ -73,27 +79,32 @@ fn infer_unary(
     let op_name = unary_expr.op.static_name();
 
     // Replace resolve_function with resolve_function_call
-    let resolution = match block.resolve_ident(
-        op_name,
-        Some(&[ty]),
-        data.type_info_table,
-        &data.src_code,
-        unary_expr.span.clone(),
-    ) {
+    let resolution = match data.type_registry.resolve_function(op_name, &[ty]) {
         Ok(res) => res,
         Err(err) => {
+            let err = create_no_overload_error(
+                &op_name,
+                err,
+                &[ty],
+                &data.type_registry,
+                &data.src_code,
+                unary_expr.span.clone(),
+            );
             data.errors.push(err);
-            data.type_info_table
-                .types
+            data.type_registry
+                .type_info_table
                 .insert(unary_expr.id, error_type());
             return error_type();
         }
     };
 
-    data.type_info_table
-        .types
-        .insert(unary_expr.id, resolution.contextual_appropriate_type);
-    resolution.contextual_appropriate_type
+    data.type_registry
+        .bindings
+        .insert(unary_expr.id, resolution.binding_info.id);
+    data.type_registry
+        .type_info_table
+        .insert(unary_expr.id, resolution.ty.ret);
+    resolution.ty.ret
 }
 
 fn infer_ident(
@@ -102,31 +113,53 @@ fn infer_ident(
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
-    let fr = match block.resolve_ident(
-        &ident_expr.ident,
-        function_args,
-        data.type_info_table,
-        &data.src_code,
-        ident_expr.span.clone(),
-    ) {
-        Ok(fr) => fr,
-        Err(err) => {
-            data.errors.push(err);
-            data.type_info_table
-                .types
-                .insert(ident_expr.id, error_type());
-            return error_type();
+    let err = match function_args {
+        Some(args) => match data.type_registry.resolve_function(ident_expr.ident, args) {
+            Ok(res) => {
+                data.type_registry
+                    .type_info_table
+                    .insert(ident_expr.id, res.ty.ret);
+                data.type_registry
+                    .bindings
+                    .insert(ident_expr.id, res.binding_info.id);
+                return res.ty.ret;
+            }
+            Err(err) => Box::new(create_no_overload_error(
+                &ident_expr.ident.as_str(),
+                err,
+                args,
+                &data.type_registry,
+                &data.src_code,
+                ident_expr.span.clone(),
+            )),
+        },
+        None => {
+            match block.resolve_variable(ident_expr.ident, &data.src_code, ident_expr.span.clone())
+            {
+                Ok(fr) => {
+                    let ty = data
+                        .type_registry
+                        .type_info_table
+                        .get(fr.binding_info.id)
+                        .expect(
+                        "Compiler bug: binding not found in type table - but it should be there",
+                    );
+
+                    data.type_registry.type_info_table.insert(ident_expr.id, ty);
+                    data.type_registry
+                        .bindings
+                        .insert(ident_expr.id, fr.binding_info.id);
+                    return ty;
+                }
+                Err(err) => err,
+            }
         }
     };
-
-    let ty: &'static TypeInfo = match fr.kind {
-        IdentResolutionKind::ResolvedAsFunction { func_type } => func_type.into(),
-        IdentResolutionKind::ResolvedAsVariable { type_info } => type_info,
-    };
-
-    data.type_info_table.types.insert(ident_expr.id, ty);
-    data.binding_table.insert(ident_expr.id, fr.binding.id);
-    ty
+    data.errors.push(*err);
+    data.type_registry
+        .type_info_table
+        .insert(ident_expr.id, error_type());
+    return error_type();
 }
 
 pub fn infer_block_no_child_creation(
@@ -161,7 +194,9 @@ pub fn infer_block_no_child_creation(
     };
 
     // Unify with any existing type from breaks TO this block
-    let out = match data
+
+    (match data
+        .type_registry
         .type_info_table
         .unify_and_insert(block_expr.id, block_ty)
     {
@@ -219,8 +254,7 @@ pub fn infer_block_no_child_creation(
             data.errors.push(err_msg);
             error_type()
         }
-    };
-    out
+    }) as _
 }
 
 pub fn infer_block(
@@ -232,7 +266,6 @@ pub fn infer_block(
         let binding = BindingInfo {
             id: block_expr.id,
             src_location: Some(block_expr.span.clone()),
-            is_mut: false,
         };
         parent_block.make_child(Some((label.clone(), binding)))
     } else {
@@ -292,18 +325,15 @@ fn infer_func_call(
             // This is a compiler bug, so keep the panic
             panic!("Compiler bug: Inactive type as return type of function")
         }
-        TypeInfo::Error => error_type(), // Propagate existing error
+        TypeInfo::Struct(struct_type) => todo!(),
+        TypeInfo::Error => error_type(),
     };
 
-    data.type_info_table
-        .types
+    data.type_registry
+        .type_info_table
         .insert(func_call_expr.id, resolved_ret_type);
 
     resolved_ret_type
-}
-
-fn requires_mut(binding: &BindingInfo) -> bool {
-    binding.is_mut
 }
 
 // This is WRONG: lhs needs to be an expression, not a binding!
@@ -316,10 +346,9 @@ fn infer_assignment(
     let binding = &assignment_expr.binding;
     // match_binding_node_to_type(binding, block, ty, data) -> we probably need to call this somehow
     let binding_ty = data
+        .type_registry
         .type_info_table
-        .types
-        .get(&binding.node_id())
-        .cloned()
+        .get(binding.node_id())
         .expect("Compiler bug: binding not found in type table");
 
     // Check mutability
@@ -392,12 +421,14 @@ fn infer_assignment(
     };
 
     // Then insert the unified type and return it
-    let out = match data
+
+    (match data
+        .type_registry
         .type_info_table
         .unify_and_insert(assignment_expr.id, unified)
     {
         Ok(ty) => ty,
-        Err(err) => {
+        Err(_err) => {
             // This should never happen if the previous unify worked, but just in case
             let err_msg = YuuError::builder()
                 .kind(ErrorKind::TypeMismatch)
@@ -411,9 +442,7 @@ fn infer_assignment(
             data.errors.push(err_msg);
             error_type()
         }
-    };
-
-    out
+    }) as _
 }
 
 fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
@@ -440,7 +469,9 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
             .build();
         data.errors.push(err_msg);
         // Continue execution but mark as error
-        data.type_info_table.types.insert(expr.id, error_type());
+        data.type_registry
+            .type_info_table
+            .insert(expr.id, error_type());
         return error_type();
     }
 
@@ -469,8 +500,8 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
             data.errors.push(err_msg);
 
             // We mark as error type.
-            data.type_info_table
-                .types
+            data.type_registry
+                .type_info_table
                 .insert(x.condition.node_id(), error_type());
 
             return error_type();
@@ -492,7 +523,7 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
                 Err(_) => {
                     let err_msg = YuuError::builder()
                         .kind(ErrorKind::TypeMismatch)
-                        .message(format!("If expression branches have incompatible types"))
+                        .message("If expression branches have incompatible types".to_string())
                         .source(src_code.source.clone(), src_code.file_name.clone())
                         .span(expr.span.clone(), "if with incompatible branch types")
                         .label(
@@ -518,7 +549,7 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
         let else_ty = infer_block(else_body, block, data);
         match out_ty.unify(else_ty) {
             Ok(unified) => {
-                data.type_info_table.types.insert(expr.id, unified);
+                data.type_registry.type_info_table.insert(expr.id, unified);
                 unified
             }
             Err(_) => {
@@ -545,7 +576,7 @@ fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> 
             }
         }
     } else {
-        data.type_info_table.types.insert(expr.id, out_ty);
+        data.type_registry.type_info_table.insert(expr.id, out_ty);
         out_ty
     }
 }

@@ -1,18 +1,18 @@
 use yuu_shared::{
-    ast::{SourceInfo, AST},
-    block::{BindingTable, RootBlock},
+    ast::{SourceInfo, StructuralNode, AST},
+    block::{BindingTable, Block, RootBlock},
     context::Context,
     error::YuuError,
     scheduler::{Pass, ResourceId},
     type_info::TypeInfoTable,
+    type_registry::TypeRegistry,
 };
 
-use super::infer_structural;
+use super::{declare_function, infer_structural};
 
 pub struct TransientData<'a> {
-    pub type_info_table: &'a mut TypeInfoTable,
+    pub type_registry: &'a mut TypeRegistry,
     pub ast: &'a AST,
-    pub binding_table: BindingTable, // Maps reference IDs to their target binding IDs
     pub errors: Vec<YuuError>,
     pub src_code: SourceInfo,
 }
@@ -26,11 +26,10 @@ impl ResourceId for TypeInferenceErrors {
 }
 
 impl<'a> TransientData<'a> {
-    pub fn new(type_info_table: &'a mut TypeInfoTable, ast: &'a AST, src_code: SourceInfo) -> Self {
+    pub fn new(type_registry: &'a mut TypeRegistry, ast: &'a AST, src_code: SourceInfo) -> Self {
         Self {
-            type_info_table,
+            type_registry,
             ast,
-            binding_table: BindingTable::default(),
             errors: Vec::default(),
             src_code,
         }
@@ -51,32 +50,63 @@ impl PassTypeInference {
     }
 }
 
+fn collect_structural(structural: &StructuralNode, data: &mut TransientData, block: &mut Block) {
+    match structural {
+        StructuralNode::FuncDecl(decl) => {
+            declare_function(
+                decl.name,
+                &decl.args,
+                &decl.ret_ty,
+                decl.id,
+                decl.span.clone(),
+                block,
+                data,
+            );
+        }
+        StructuralNode::FuncDef(def) => {
+            let ret = declare_function(
+                def.decl.name,
+                &def.decl.args,
+                &def.decl.ret_ty,
+                def.id,
+                def.decl.span.clone(),
+                block,
+                data,
+            );
+            data.type_registry.type_info_table.insert(def.body.id, ret);
+        }
+        StructuralNode::Error(_) => (),
+        StructuralNode::StructDecl(struct_decl) => todo!(),
+        StructuralNode::StructDef(struct_def) => {
+            todo!()
+        }
+    };
+}
+
 impl Pass for PassTypeInference {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let root_block = context.get_resource::<Box<RootBlock>>(self);
+        let mut root_block = RootBlock::new();
         let ast = context.get_resource::<AST>(self);
-        let type_info_table = context.get_resource::<TypeInfoTable>(self);
+        let mut type_registry = TypeRegistry::new();
 
-        let mut root_block = root_block.lock().unwrap();
         let ast = ast.lock().unwrap();
         let ast = &*ast;
-
-        let mut type_info_table = type_info_table.lock().unwrap();
-        let type_info_table = &mut *type_info_table;
 
         let src_code = context.get_resource::<SourceInfo>(self);
         let src_code = src_code.lock().unwrap();
 
-        let mut data = TransientData::new(type_info_table, ast, src_code.clone());
+        let mut data = TransientData::new(&mut type_registry, ast, src_code.clone());
 
         for node in &ast.structurals {
-            let _ = infer_structural(node, root_block.root_mut(), &mut data);
+            collect_structural(node, &mut data, root_block.root_mut());
         }
 
-        context.add_pass_data(data.binding_table);
+        for node in &ast.structurals {
+            infer_structural(node, root_block.root_mut(), &mut data);
+        }
 
         context.add_pass_data(TypeInferenceErrors(data.errors));
-
+        context.add_pass_data(type_registry);
         Ok(())
     }
 
@@ -84,12 +114,11 @@ impl Pass for PassTypeInference {
     where
         Self: Sized,
     {
-        schedule.requires_resource_read::<AST>(&self);
-        schedule.requires_resource_write::<Box<RootBlock>>(&self);
-        schedule.requires_resource_write::<TypeInfoTable>(&self);
-        schedule.requires_resource_read::<SourceInfo>(&self);
-        schedule.produces_resource::<BindingTable>(&self);
+        schedule.produces_resource::<Box<RootBlock>>(&self);
         schedule.produces_resource::<TypeInferenceErrors>(&self);
+        schedule.produces_resource::<TypeRegistry>(&self);
+        schedule.requires_resource_read::<AST>(&self);
+        schedule.requires_resource_read::<SourceInfo>(&self);
         schedule.add_pass(self);
     }
 

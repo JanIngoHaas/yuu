@@ -3,8 +3,8 @@ use yuu_shared::{
     scheduler::{Pass, ResourceId},
     type_info::{PrimitiveType, TypeInfo},
     yir::{
-        self, BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module,
-        Operand, Register,
+        BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module, Operand,
+        Register,
     },
 };
 
@@ -53,21 +53,22 @@ impl PassYirToC {
     ) -> Result<(), std::fmt::Error> {
         match ty {
             TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
-                        PrimitiveType::Bool => write!(data.output, "bool"),
-                        PrimitiveType::F64 => write!(data.output, "double"),
-                        PrimitiveType::F32 => write!(data.output, "float"),
-                        PrimitiveType::I64 => write!(data.output, "int64_t"),
-                        PrimitiveType::Nil => write!(data.output, "void"),
-                    },
+                                PrimitiveType::Bool => write!(data.output, "bool"),
+                                PrimitiveType::F64 => write!(data.output, "double"),
+                                PrimitiveType::F32 => write!(data.output, "float"),
+                                PrimitiveType::I64 => write!(data.output, "int64_t"),
+                                PrimitiveType::Nil => write!(data.output, "void"),
+                            },
             TypeInfo::Function(_function_type) => {
-                        todo!()
-                    }
+                                todo!()
+                            }
             TypeInfo::Pointer(type_info) => {
-                        self.gen_type(data, type_info)?;
-                        write!(data.output, "*")
-                    }
+                                self.gen_type(data, type_info)?;
+                                write!(data.output, "*")
+                            }
             TypeInfo::Inactive => panic!("Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"),
             TypeInfo::Error => panic!("Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"),
+TypeInfo::Struct(struct_type) => todo!(),
         }
     }
 
@@ -303,13 +304,13 @@ impl PassYirToC {
             match function_state {
                 // Predeclare all functions
                 FunctionDeclarationState::Declared(func) => {
-                    self.gen_func_decl(&func, data)?;
+                    self.gen_func_decl(func, data)?;
                     write!(data.output, ";")?;
                 }
                 FunctionDeclarationState::Defined(func) => {
-                    self.gen_func_decl(&func, data)?;
+                    self.gen_func_decl(func, data)?;
                     write!(data.output, "{{")?;
-                    self.gen_function(&func, data)?;
+                    self.gen_function(func, data)?;
                     write!(data.output, "}}")?;
                 }
             }
@@ -374,10 +375,7 @@ mod tests {
         ast::SourceInfo,
         scheduler::{Schedule, Scheduler},
     };
-    use yuu_transform::{
-        pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
-        type_inference::PassTypeInference,
-    };
+    use yuu_transform::{pass_ast_to_yir::PassAstToYir, type_inference::PassTypeInference};
 
     #[test]
     fn test_fac_to_c() {
@@ -406,7 +404,6 @@ mod tests {
 
         // Add passes in the correct order
         PassParse.install(&mut schedule);
-        PassCollectDecls::new().install(&mut schedule);
         PassTypeInference::new().install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToC.install(&mut schedule);

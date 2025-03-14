@@ -1,10 +1,9 @@
-use core::panic;
-
 use crate::{
     add_ids::add_ids,
     lexer::{CatchIn, Lexer, ParseError, ParseResult},
 };
 use logos::Span;
+use ustr::{ustr, Ustr};
 use yuu_shared::{
     ast::*,
     block::FUNC_BLOCK_NAME,
@@ -59,7 +58,7 @@ impl Parser {
                 self.errors.push(
                     YuuError::builder()
                         .kind(ErrorKind::InvalidSyntax)
-                        .message(format!("Expected an unary operator, found {:?}", op.kind))
+                        .message(format!("Expected an unary operator, found {}", op.kind))
                         .source(
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
@@ -86,7 +85,7 @@ impl Parser {
         (span, ExprNode::Literal(lit_expr))
     }
 
-    fn make_ident_expr(&mut self, ident: String, span: Span) -> (Span, ExprNode) {
+    fn make_ident_expr(&mut self, ident: Ustr, span: Span) -> (Span, ExprNode) {
         let span_clone = span.clone();
         let ident_expr = IdentExpr { ident, span, id: 0 };
         (span_clone, ExprNode::Ident(ident_expr))
@@ -123,7 +122,7 @@ impl Parser {
                         let mut error = YuuError::unexpected_token(
                             must_be_rparen.span.clone(),
                             "a closing parenthesis ')'".to_string(),
-                            format!("{:?}", must_be_rparen.kind),
+                            must_be_rparen.kind,
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         );
@@ -139,7 +138,7 @@ impl Parser {
                         );
 
                         self.errors.push(error);
-                        return Err(self.lexer.synchronize());
+                        Err(self.lexer.synchronize())
                     }
                 }
             }
@@ -148,13 +147,13 @@ impl Parser {
                 let x = YuuError::unexpected_token(
                     t.span.clone(),
                     "a primary expression".to_string(),
-                    format!("{:?}", t.kind),
+                    t.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
                 .with_help("Expected a primary expression (number, identifier, etc.)".to_string());
                 self.errors.push(x);
-                return Err(self.lexer.synchronize());
+                Err(self.lexer.synchronize())
             }
         }
     }
@@ -176,10 +175,7 @@ impl Parser {
                 self.errors.push(
                     YuuError::builder()
                         .kind(ErrorKind::InvalidSyntax)
-                        .message(format!(
-                            "Expected a binary operator, found {:?}",
-                            token.kind
-                        ))
+                        .message(format!("Expected a binary operator, found {}", token.kind))
                         .source(
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
@@ -353,7 +349,7 @@ impl Parser {
                     YuuError::unexpected_token(
                         t.span.clone(),
                         "a type".to_string(),
-                        format!("{:?}", t.kind),
+                        t.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
@@ -393,11 +389,11 @@ impl Parser {
                     YuuError::unexpected_token(
                         t.span.clone(),
                         "an identifier".to_string(),
-                        format!("{:?}", t.kind),
+                        t.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
-                    .with_help("Expected an identifier for the binding pattern".to_string()),
+                    .with_help("Expected an identifier denoting a binding".to_string()),
                 );
                 Err(self.lexer.synchronize())
             }
@@ -431,12 +427,12 @@ impl Parser {
         ))
     }
 
-    pub fn parse_func_arg(&mut self) -> ParseResult<FuncArg> {
+    pub fn parse_func_arg(&mut self) -> ParseResult<Arg> {
         let pattern = self.parse_binding()?;
         let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
         let ty = self.parse_type()?;
         let span = pattern.span().start..ty.span().end;
-        Ok(FuncArg {
+        Ok(Arg {
             span: span.clone(),
             binding: pattern,
             ty,
@@ -444,7 +440,7 @@ impl Parser {
         })
     }
 
-    pub fn parse_func_args(&mut self) -> ParseResult<Vec<FuncArg>> {
+    pub fn parse_func_args(&mut self) -> ParseResult<Vec<Arg>> {
         let mut args = Vec::new();
         loop {
             let la = self.lexer.peek();
@@ -460,7 +456,7 @@ impl Parser {
                 self.errors.push(YuuError::unexpected_token(
                     la.span.clone(),
                     "a comma ',' or a closing parenthesis ')'".to_string(),
-                    format!("{:?}", la.kind),
+                    la.kind.clone(),
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 ).with_help("Function arguments should be separated by commas, with the list ending with a closing parenthesis".to_string()));
@@ -473,7 +469,7 @@ impl Parser {
         &mut self,
         stmts: Vec<StmtNode>,
         span: Span,
-        label: Option<String>,
+        label: Option<Ustr>,
         last_expr: Option<Box<ExprNode>>,
     ) -> (Span, BlockExpr) {
         (
@@ -499,7 +495,7 @@ impl Parser {
         let opening_paren_span = op_token.span.clone();
         let func_name = match &lhs {
             ExprNode::Ident(ident) => ident.ident.clone(),
-            _ => "function".to_string(),
+            _ => ustr("function"),
         };
 
         loop {
@@ -560,7 +556,7 @@ impl Parser {
                     self.errors.push(YuuError::unexpected_token(
                         label_token.span.clone(),
                         "a label identifier".to_string(),
-                        format!("{:?}", label_token.kind),
+                        label_token.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     ).with_help("The preceding colon indicates a block label, so an identifier is expected".to_string()));
@@ -589,7 +585,7 @@ impl Parser {
 
             let (span, node) = match stmt_res {
                 Ok((a, b)) => (a, b),
-                Err(sw) if matches!(sw, CatchIn::Statement) => (0..0, StmtNode::Error(0)),
+                Err(CatchIn::Statement) => (0..0, StmtNode::Error(0)),
                 Err(x) => return Err(x),
             };
 
@@ -607,7 +603,7 @@ impl Parser {
                             YuuError::unexpected_token(
                                 next.span.clone(),
                                 "a closing brace".to_string(),
-                                format!("{:?}", next.kind),
+                                next.kind.clone(),
                                 self.lexer.code_info.source.clone(),
                                 self.lexer.code_info.file_name.clone(),
                             )
@@ -640,7 +636,7 @@ impl Parser {
                         YuuError::unexpected_token(
                             terminator.span.clone(),
                             "';' or '!'".to_string(),
-                            format!("{:?}", terminator.kind),
+                            terminator.kind,
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
@@ -659,9 +655,9 @@ impl Parser {
 
     pub fn make_func_decl(
         &mut self,
-        name: String,
+        name: Ustr,
         span: Span,
-        args: Vec<FuncArg>,
+        args: Vec<Arg>,
         ret_ty: Option<Box<TypeNode>>,
     ) -> (Span, FuncDeclStructural) {
         (
@@ -703,7 +699,7 @@ impl Parser {
                 let mut error = YuuError::unexpected_token(
                     ident.span.clone(),
                     "an identifier".to_string(),
-                    format!("{:?}", ident.kind),
+                    ident.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
@@ -740,7 +736,7 @@ impl Parser {
     pub fn parse_func_def(&mut self) -> ParseResult<(Span, FuncDefStructural)> {
         let (span, decl) = self.parse_func_decl()?;
         let (block_span, mut block) = self.parse_block_expr()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
-        block.label = Some(FUNC_BLOCK_NAME.to_string()); // 🤡
+        block.label = Some(ustr(FUNC_BLOCK_NAME)); // 🤡
         let span = span.start..block_span.end;
         Ok(self.make_func_def(span, decl, block))
     }
@@ -768,7 +764,7 @@ impl Parser {
                 let mut error = YuuError::unexpected_token(
                     label_token.span.clone(),
                     "a label identifier".to_string(),
-                    format!("{:?}", label_token.kind),
+                    label_token.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 )
@@ -810,7 +806,7 @@ impl Parser {
             StmtNode::Break(BreakStmt {
                 span,
                 expr: Box::new(expr),
-                target: FUNC_BLOCK_NAME.to_string(),
+                target: ustr(FUNC_BLOCK_NAME),
                 id: 0,
             }),
         ))
@@ -828,7 +824,7 @@ impl Parser {
                     YuuError::unexpected_token(
                         t.span.clone(),
                         "fn".to_string(),
-                        format!("{:?}", t.kind),
+                        t.kind.clone(),
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
@@ -867,11 +863,9 @@ impl Parser {
             }
         }
 
-        let ast = AST {
+        AST {
             structurals: structural_nodes,
-        };
-
-        ast
+        }
     }
 
     pub fn parse_and_add_ids(&mut self) -> AST {

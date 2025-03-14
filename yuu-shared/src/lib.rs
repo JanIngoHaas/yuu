@@ -10,6 +10,7 @@ pub mod block;
 pub mod context;
 pub mod error;
 pub mod scheduler;
+pub mod type_registry;
 
 #[cfg(test)]
 mod tests {
@@ -55,11 +56,10 @@ fn main() {
         println!("Available themes: {:?}", themes);
 
         // Try a different theme
-        error::setup_error_formatter(Some("InspiredGitHub"), false)?;
+        error::setup_error_formatter(Some("WarmEmber"), true)?;
 
         // Sample Rust code with syntax highlighting
-        let source_code = r#"
-struct Point {
+        let source_code = r#"struct Point {
     x: f64,
     y: f64,
 }
@@ -82,12 +82,13 @@ impl Point {
             .kind(error::ErrorKind::InvalidSyntax)
             .message("Example of syntax highlighting with a different theme")
             .source(Arc::from(source_code), Arc::from("point.rs"))
-            .span((208, 57), "this calculation is highlighted")
+            .span((0, 200), "this calculation is highlighted")
             .help("This is just a demonstration of syntax highlighting")
             .build();
 
         // Print the error with the custom theme
-        eprintln!("{:?}", err);
+        let report: miette::Report = err.into();
+        println!("{:?}", report);
 
         Ok(())
     }

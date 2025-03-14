@@ -11,3 +11,4 @@ serde = "1.0.215"
 thiserror = "2.0.3"
 miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
 yuu-shared = { path = "../yuu-shared" }
+ustr = { version = "1.1.0", features = ["serde"] }

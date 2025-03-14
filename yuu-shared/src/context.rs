@@ -3,12 +3,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use hashbrown::HashMap;
+use indexmap::IndexMap;
 
 use crate::scheduler::{Pass, ResourceId};
 
 pub struct Context {
-    passes_data: HashMap<&'static str, Arc<dyn Any + Send + Sync + 'static>>,
+    passes_data: IndexMap<&'static str, Arc<dyn Any + Send + Sync + 'static>>,
 }
 
 impl Default for Context {
@@ -20,7 +20,7 @@ impl Default for Context {
 impl Context {
     pub fn new() -> Self {
         Self {
-            passes_data: HashMap::new(),
+            passes_data: IndexMap::new(),
         }
     }
 
@@ -52,9 +52,9 @@ impl Context {
         self.passes_data
             .get(T::resource_name())
             .map(|arc| {
-                arc.clone().downcast::<Mutex<T>>().expect(
-                    format!("Type mismatch in pass data of pass {}", pass.get_name()).as_str(),
-                )
+                arc.clone().downcast::<Mutex<T>>().unwrap_or_else(|_| {
+                    panic!("Type mismatch in pass data of pass {}", pass.get_name())
+                })
             })
             .unwrap_or_else(|| {
                 panic!(

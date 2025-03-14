@@ -1,16 +1,18 @@
+use std::hint::unreachable_unchecked;
 use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use std::hash::Hash;
 
-use crate::error::{YuuError, YuuErrorBuilder};
-use crate::Span;
+use crate::error::YuuError;
 use crate::{
     ast::*,
     scheduler::{ResourceId, ResourceName},
 };
+use indexmap::IndexMap;
 use scc::HashMap;
+use ustr::Ustr;
 
-pub struct GiveMePtrHashes<T: 'static>(&'static T);
+pub struct GiveMePtrHashes<T: 'static>(pub &'static T);
 
 impl<T> Hash for GiveMePtrHashes<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -42,16 +44,19 @@ pub fn error_type() -> &'static TypeInfo {
 impl<T> Eq for GiveMePtrHashes<T> {}
 pub enum TypeCombination {
     Pointer(GiveMePtrHashes<TypeInfo>),
-    Function(Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>),
+    Function((Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>)),
+    Struct(Ustr),
 }
 
 impl Hash for TypeCombination {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             TypeCombination::Pointer(ptr) => ptr.hash(state),
-            TypeCombination::Function(args, ret) => {
+            TypeCombination::Function(args) => {
                 args.hash(state);
-                ret.hash(state);
+            }
+            TypeCombination::Struct(ustr) => {
+                (*ustr).hash(state);
             }
         }
     }
@@ -61,7 +66,8 @@ impl PartialEq for TypeCombination {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (TypeCombination::Pointer(a), TypeCombination::Pointer(b)) => a == b,
-            (TypeCombination::Function(a, b), TypeCombination::Function(c, d)) => a == c && b == d,
+            (TypeCombination::Function(a), TypeCombination::Function(c)) => a == c,
+            (TypeCombination::Struct(a), TypeCombination::Struct(b)) => a == b,
             _ => false,
         }
     }
@@ -103,6 +109,40 @@ pub fn inactive_type() -> &'static TypeInfo {
     &INACTIVE_TYPE
 }
 
+pub fn ptr_to(ty: &'static TypeInfo) -> &'static TypeInfo {
+    TYPE_CACHE.ptr_to(ty)
+}
+
+pub fn deref_ptr(ty: &'static TypeInfo) -> &'static TypeInfo {
+    TypeInterner::deref_ptr(ty)
+}
+
+pub fn function_type(
+    args: &[&'static TypeInfo],
+    ret: &'static TypeInfo,
+) -> (&'static FunctionType, &'static TypeInfo) {
+    TYPE_CACHE.function_type(args, ret)
+}
+
+// pub fn function_type_from_args(
+//     args: &[&'static TypeInfo],
+// ) -> Option<(&'static FunctionType, &'static TypeInfo)> {
+//     let key = TypeCombination::Function(args.iter().map(|arg| GiveMePtrHashes(*arg)).collect());
+//     let out = TYPE_CACHE.combination_to_type.get(&key).and_then(|ty| {
+//         let out = unsafe { &*(ty.as_ref() as *const TypeInfo) };
+//         if let TypeInfo::Function(f) = out {
+//             Some((f, out))
+//         } else {
+//             None
+//         }
+//     });
+//     return out;
+// }
+
+pub fn struct_type(name: Ustr) -> &'static TypeInfo {
+    TYPE_CACHE.struct_type(name)
+}
+
 impl From<PrimitiveType> for &'static TypeInfo {
     fn from(value: PrimitiveType) -> Self {
         match value {
@@ -128,6 +168,17 @@ impl TypeInterner {
         }
     }
 
+    pub fn struct_type(&'static self, struct_: Ustr) -> &'static TypeInfo {
+        let key = TypeCombination::Struct(struct_);
+        let out = self
+            .combination_to_type
+            .entry(key)
+            .or_insert_with(|| Box::new(TypeInfo::Struct(struct_)));
+
+        // SAFETY: The Box lives as long as TypeInterner and we never remove from the map
+        unsafe { &*(out.as_ref() as *const TypeInfo) }
+    }
+
     pub fn ptr_to(&'static self, ty: &'static TypeInfo) -> &'static TypeInfo {
         let key = TypeCombination::Pointer(GiveMePtrHashes(ty));
         let out = self
@@ -146,6 +197,9 @@ impl TypeInterner {
             TypeInfo::Function(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Inactive => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::Struct(struct_type) => {
+                panic!("Cannot dereference non-pointer type: {}", struct_type)
+            }
         }
     }
 
@@ -153,11 +207,11 @@ impl TypeInterner {
         &'static self,
         args: &[&'static TypeInfo],
         ret: &'static TypeInfo,
-    ) -> &'static TypeInfo {
-        let key = TypeCombination::Function(
+    ) -> (&'static FunctionType, &'static TypeInfo) {
+        let key = TypeCombination::Function((
             args.iter().map(|arg| GiveMePtrHashes(*arg)).collect(),
             GiveMePtrHashes(ret),
-        );
+        ));
 
         let out = self.combination_to_type.entry(key).or_insert_with(|| {
             Box::new(TypeInfo::Function(FunctionType {
@@ -167,7 +221,13 @@ impl TypeInterner {
         });
 
         // SAFETY: The Box lives as long as TypeInterner and we never remove from the map
-        unsafe { &*(out.as_ref() as *const TypeInfo) }
+        let type_info = unsafe { &*(out.as_ref() as *const TypeInfo) };
+
+        if let TypeInfo::Function(f) = type_info {
+            (f, type_info)
+        } else {
+            unreachable!("We just created this as a FunctionType")
+        }
     }
 }
 
@@ -175,7 +235,7 @@ static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(TypeInterner::new);
 
 #[derive(Clone, Debug)]
 pub struct TypeInfoTable {
-    pub types: hashbrown::HashMap<NodeId, &'static TypeInfo>,
+    pub types: IndexMap<NodeId, &'static TypeInfo>,
 }
 
 impl ResourceId for TypeInfoTable {
@@ -193,8 +253,16 @@ impl Default for TypeInfoTable {
 impl TypeInfoTable {
     pub fn new() -> Self {
         Self {
-            types: hashbrown::HashMap::new(),
+            types: IndexMap::new(),
         }
+    }
+
+    pub fn insert(&mut self, id: NodeId, ty: &'static TypeInfo) {
+        self.types.insert(id, ty);
+    }
+
+    pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {
+        self.types.get(&id).copied()
     }
 
     pub fn unify_and_insert(
@@ -261,19 +329,13 @@ pub struct FunctionType {
 
 impl<'a> From<&'a FunctionType> for &'static TypeInfo {
     fn from(value: &'a FunctionType) -> Self {
-        TYPE_CACHE.function_type(&value.args, value.ret)
+        TYPE_CACHE.function_type(&value.args, value.ret).1
     }
 }
 
 impl From<FunctionType> for &'static TypeInfo {
     fn from(value: FunctionType) -> Self {
-        TYPE_CACHE.function_type(&value.args, value.ret)
-    }
-}
-
-impl From<(&[&'static TypeInfo], &'static TypeInfo)> for &'static TypeInfo {
-    fn from(value: (&[&'static TypeInfo], &'static TypeInfo)) -> Self {
-        TYPE_CACHE.function_type(value.0, value.1)
+        TYPE_CACHE.function_type(&value.args, value.ret).1
     }
 }
 
@@ -286,6 +348,7 @@ pub enum TypeInfo {
     // This happens for example when you 'unwind' in a block - the block does not have a value.
     // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
     Error,
+    Struct(Ustr),
 }
 
 impl TypeInfo {
@@ -296,6 +359,7 @@ impl TypeInfo {
             TypeInfo::Function(_) => false,
             TypeInfo::Inactive => false,
             TypeInfo::Error => false,
+            TypeInfo::Struct(_) => false,
         }
     }
 
@@ -343,6 +407,7 @@ impl Display for TypeInfo {
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
             TypeInfo::Inactive => write!(f, "<no value>"),
             TypeInfo::Error => write!(f, "<error>"),
+            TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type),
         }
     }
 }
@@ -360,10 +425,10 @@ impl UnificationError {
         span: impl Into<miette::SourceSpan>,
     ) -> YuuError {
         YuuError::builder().kind(crate::error::ErrorKind::TypeMismatch)
-            .message(format!("Type mismatch: cannot unify types"))
+            .message("Type mismatch: cannot unify types".to_string())
             .source(info.source, info.file_name)
             .span(span, format!("expected '{}', found '{}'", self.right, self.left))
-            .help(format!("These types are incompatible. Consider adding an explicit type conversion or changing your expression to match the expected type."))
+            .help("These types are incompatible. Consider adding an explicit type conversion or changing your expression to match the expected type.".to_string())
             .build()
     }
 }

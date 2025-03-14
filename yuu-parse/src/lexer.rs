@@ -1,11 +1,7 @@
-use std::sync::Arc;
-
 use logos::{Logos, Span};
-use miette::MietteDiagnostic;
 use yuu_shared::{
     ast::SourceInfo,
     error::{ErrorKind, YuuError},
-    scheduler::ResourceId,
     token::{Token, TokenKind},
 };
 
@@ -91,12 +87,12 @@ impl Lexer {
     pub fn peek_n<const N: usize>(&self) -> [&Token; N] {
         let mut result = [self.peek(); N];
 
-        for i in 0..N {
+        for (i, item) in result.iter_mut().enumerate().take(N) {
             if let Some(token) = self.tokens.get(self.current + i) {
-                result[i] = token;
+                *item = token;
             } else {
                 // Past the end, use EOF token
-                result[i] = &self.tokens[self.tokens.len() - 1];
+                *item = &self.tokens[self.tokens.len() - 1];
             }
         }
 
@@ -139,10 +135,10 @@ impl Lexer {
 
             // Not found... )-:
 
-            let found = format!("{:?}", token.kind);
+            let found = format!("{}", token.kind);
             let expected_str = expected
                 .iter()
-                .map(|k| format!("{:?}", k))
+                .map(|k| format!("{}", k))
                 .collect::<Vec<_>>()
                 .join(" or ");
 
@@ -159,8 +155,14 @@ impl Lexer {
 
             // Add a help message if there are expected tokens
             if !expected.is_empty() {
+                let expected = expected
+                    .iter()
+                    .map(|k| format!("{}", k))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
                 error = error.with_help(format!(
-                    "Expected one of the following tokens: {:?}",
+                    "Expected one of the following tokens: {}",
                     expected
                 ));
             }
@@ -210,7 +212,7 @@ impl Lexer {
     }
 
     pub fn peek_maybe(&self) -> Option<&Token> {
-        return self.tokens.get(self.current);
+        self.tokens.get(self.current)
     }
 
     // Synchronize after an error for error recovery
@@ -224,7 +226,7 @@ impl Lexer {
                 }
             }
         }
-        return CatchIn::FunctionDecl; // That's basically nonsense, but yeah, critical error btw.
+        CatchIn::FunctionDecl // That's basically nonsense, but yeah, critical error btw.
     }
 
     pub fn sync_to(&mut self, tokens: &[TokenKind]) {

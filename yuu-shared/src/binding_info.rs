@@ -8,13 +8,12 @@ use crate::ast::NodeId;
 pub struct BindingInfo {
     pub id: NodeId,
     pub src_location: Option<Span>,
-    pub is_mut: bool,
 }
 
 #[derive(Clone, Debug)]
-pub enum BindingInfoKind {
-    Function(Vec<BindingInfo>), // Probably function overloading
-    Variable(BindingInfo),
+pub struct VariableBinding {
+    pub binding_info: BindingInfo,
+    pub is_mut: bool,
 }
 
 pub fn is_prebuilt_node_id(id: NodeId) -> bool {

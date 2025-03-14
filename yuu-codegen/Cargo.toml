@@ -8,5 +8,5 @@ yuu-shared = { path = "../yuu-shared" }
 yuu-transform = { path = "../yuu-transform" }
 yuu-parse = { path = "../yuu-parse" }
 anyhow = "1.0.95"
-hashbrown = "0.15.2"
+ustr = { version = "1.1.0", features = ["serde"] }
 #inkwell = "0.5.0"

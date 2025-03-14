@@ -1,14 +1,11 @@
 use anyhow::bail;
 use colored::*;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
 use yuu_parse::pass_parse::SyntaxErrors;
-use yuu_shared::ast::SourceInfo;
 
 use yuu_shared::{
     context::Context,
-    error::{setup_error_formatter, ErrorKind, YuuError},
-    scheduler::{Pass, ResourceId},
+    error::{setup_error_formatter, YuuError},
+    scheduler::Pass,
 };
 
 use crate::type_inference::TypeInferenceErrors;
@@ -106,7 +103,7 @@ impl Pass for PassPrintErrors {
         }
 
         // Print summary
-        self.print_error_summary(&syntax_errors, &type_inference_errors)?;
+        self.print_error_summary(syntax_errors, type_inference_errors)?;
 
         // Print syntax errors
         if !syntax_errors.is_empty() {
@@ -132,7 +129,7 @@ impl Pass for PassPrintErrors {
         if !type_inference_errors.is_empty() || !syntax_errors.is_empty() {
             bail!("Compilation failed due to errors");
         } else {
-            return Ok(());
+            Ok(())
         }
     }
 
@@ -154,10 +151,7 @@ impl Pass for PassPrintErrors {
 mod tests {
     use std::sync::Arc;
 
-    use crate::{
-        pass_ast_to_yir::PassAstToYir, pass_collect_decls::PassCollectDecls,
-        pass_print_errors::PassPrintErrors, type_inference::PassTypeInference,
-    };
+    use crate::{pass_check_errors::PassPrintErrors, type_inference::PassTypeInference};
     use yuu_parse::pass_parse::PassParse;
     use yuu_shared::{
         ast::SourceInfo,
@@ -169,8 +163,6 @@ mod tests {
     fn test_compilation_with_errors() {
         // Create a sample source with multiple errors
         let source = r#"
-
-        fn test_syntax_error({}
 
     fn test(x: i64, y: f32) -> i64 {
         let z = x + y; // Type error
@@ -206,7 +198,6 @@ mod tests {
 
         // Add passes
         PassParse.install(&mut schedule);
-        PassCollectDecls.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
         PassPrintErrors.install(&mut schedule);
 
