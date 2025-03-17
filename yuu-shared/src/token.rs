@@ -119,6 +119,9 @@ pub enum TokenKind {
     #[token("nil")]
     NilKw,
 
+    #[token("struct")]
+    StructKw,
+
     // Basic operators
     #[token("+")]
     Plus,
@@ -186,6 +189,7 @@ impl Display for TokenKind {
             TokenKind::LBrace => "'{'".fmt(f),
             TokenKind::RBrace => "'}'".fmt(f),
             TokenKind::EOF => "'EOF'".fmt(f),
+            TokenKind::StructKw => "'struct'".fmt(f)
         }
     }
 }

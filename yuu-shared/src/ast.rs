@@ -240,7 +240,7 @@ pub enum TypeNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Arg {
     pub ty: TypeNode,
-    pub binding: BindingNode,
+    pub name: Ustr,
     pub span: Span,
     pub id: NodeId,
 }

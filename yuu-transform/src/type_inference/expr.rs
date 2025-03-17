@@ -118,11 +118,11 @@ fn infer_ident(
             Ok(res) => {
                 data.type_registry
                     .type_info_table
-                    .insert(ident_expr.id, res.ty.ret);
+                    .insert(ident_expr.id, res.general_ty);
                 data.type_registry
                     .bindings
                     .insert(ident_expr.id, res.binding_info.id);
-                return res.ty.ret;
+                return res.general_ty;
             }
             Err(err) => Box::new(create_no_overload_error(
                 &ident_expr.ident.as_str(),
@@ -202,15 +202,6 @@ pub fn infer_block_no_child_creation(
     {
         Ok(ty) => ty,
         Err(err) => {
-            // Try to find a break statement that might be causing the issue
-            // let break_with_value = block_expr.body.iter().find_map(|stmt| {
-            //     if let StmtNode::Break(br) = stmt {
-            //         Some(br.span.clone())
-            //     } else {
-            //         None
-            //     }
-            // });
-
             let mut err_msg = YuuError::builder()
                 .kind(ErrorKind::TypeMismatch)
                 .message(format!(

@@ -5,10 +5,10 @@ use yuu_shared::{
     error::YuuError,
     scheduler::{Pass, ResourceId},
     type_info::TypeInfoTable,
-    type_registry::TypeRegistry,
+    type_registry::{StructFieldInfo, TypeRegistry},
 };
 
-use super::{declare_function, infer_structural};
+use super::{declare_function, infer_structural, infer_type};
 
 pub struct TransientData<'a> {
     pub type_registry: &'a mut TypeRegistry,
@@ -78,7 +78,15 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
         StructuralNode::Error(_) => (),
         StructuralNode::StructDecl(struct_decl) => todo!(),
         StructuralNode::StructDef(struct_def) => {
-            todo!()
+            for field in &struct_def.fields {
+                let ty = infer_type(&field.ty, data);
+                let 
+                let sfi = StructFieldInfo {
+                    name: field.name,
+                    ty,
+                    binding_info: todo!(),
+                };
+            }
         }
     };
 }

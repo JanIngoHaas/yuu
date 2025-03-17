@@ -428,7 +428,7 @@ impl Parser {
     }
 
     pub fn parse_func_arg(&mut self) -> ParseResult<Arg> {
-        let pattern = self.parse_binding()?;
+        let name = self.lexer.expect
         let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
         let ty = self.parse_type()?;
         let span = pattern.span().start..ty.span().end;
@@ -438,6 +438,31 @@ impl Parser {
             ty,
             id: 0,
         })
+    }
+
+    pub fn parse_struct_fields(&mut self) -> ParseResult<Vec<Arg>> {
+        let mut fields = Vec::new();
+        loop {
+            let la = self.lexer.peek();
+            if la.kind == TokenKind::RBrace {
+                return Ok(fields);
+            }
+            let arg = self.parse_func_arg()?;
+            fields.push(arg);
+            let la = self.lexer.peek();
+            if la.kind == TokenKind::Comma {
+                let _ = self.lexer.next_token();
+            } else if la.kind != TokenKind::RBrace {
+                self.errors.push(YuuError::unexpected_token(
+                    la.span.clone(),
+                    "a comma ',' or a closing brace '}'".to_string(),
+                    la.kind.clone(),
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                ).with_help("Struct fields should be separated by commas, with finalized by a closing brace".to_string()));
+                return Err(self.lexer.synchronize());
+            }
+        }
     }
 
     pub fn parse_func_args(&mut self) -> ParseResult<Vec<Arg>> {
@@ -672,6 +697,39 @@ impl Parser {
         )
     }
 
+    pub fn parse_struct_def(&mut self) -> ParseResult<(Span, StructDefStructural)> {
+        
+        let (span, decl) = self.parse_struct_decl()?;
+
+                let _ = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
+        
+                let fields = self.parse_struct_fields()?;
+        
+                let l = self.lexer.expect(&[TokenKind::RBrace], &mut self.errors)?;
+        
+        let span = span.start..l.span.end;
+        let out = StructDefStructural { id: 0, span: span.clone(), decl, fields };
+
+        Ok((span, out ))   
+    }
+
+    pub fn parse_struct_decl(&mut self) -> ParseResult<(Span, StructDeclStructural)> {
+        let struct_tkn = self.lexer.expect(&[TokenKind::StructKw], &mut self.errors)?;
+        let ident = self.lexer.expect(&[TokenKind::Ident("an identifier, naming the struct".intern())], &mut self.errors)?; // TODO: Make this lazy evaluated
+        let name = match ident.kind {
+            TokenKind::Ident(ident) => ident,
+            _ => unreachable!("We should have an identifier here")
+        };
+
+        let span = struct_tkn.span.start .. ident.span.end;
+
+        Ok((span.clone(), StructDeclStructural {
+            id: 0,
+            span,
+            name,
+        }))
+    }
+
     pub fn parse_func_decl(&mut self) -> ParseResult<(Span, FuncDeclStructural)> {
         let fn_tkn = self.lexer.expect(&[TokenKind::FnKw], &mut self.errors)?;
         let ident = self.lexer.next_token();
@@ -818,6 +876,10 @@ impl Parser {
             TokenKind::FnKw => {
                 let (range, res) = self.parse_func_def()?;
                 (range, StructuralNode::FuncDef(res))
+            },
+            TokenKind::StructKw => {
+                let (range, struct_) = self.parse_struct_def()?;
+                (range, StructuralNode::StructDef(struct_))
             }
             _ => {
                 self.errors.push(

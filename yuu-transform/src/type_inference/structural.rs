@@ -86,7 +86,7 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 .insert(*estr, error_type());
         }
         StructuralNode::StructDecl(struct_decl) => {
-            todo!()
+            
         }
         StructuralNode::StructDef(struct_def) => todo!(),
     }

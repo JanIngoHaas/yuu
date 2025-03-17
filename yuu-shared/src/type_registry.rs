@@ -38,6 +38,7 @@ pub struct StructInfo {
 pub struct FunctionInfo {
     pub name: Ustr,
     pub ty: &'static FunctionType,
+    pub general_ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
 }
 
@@ -250,6 +251,7 @@ impl TypeRegistry {
         let info = FunctionInfo {
             name,
             ty: func_type,
+            general_ty: general_type,
             binding_info,
         };
 
