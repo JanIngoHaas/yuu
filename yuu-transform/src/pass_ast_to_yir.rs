@@ -1,10 +1,11 @@
 use std::vec;
 
 use indexmap::IndexMap;
+use ustr::Ustr;
 use yuu_shared::{
     ast::{
-        BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
-        StructuralNode, UnaryOp, AST,
+        AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
+        StructuralNode, UnaryOp,
     },
     block::BindingTable,
     scheduler::Pass,
@@ -43,14 +44,22 @@ impl<'a> TransientData<'a> {
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
     }
 
+    fn allocate_and_initialize_ident_binding(&mut self, ident: Ustr, id: NodeId, value: Operand) {
+        let ty = self.get_type(id);
+        let target = self.function.make_alloca(ident, ty);
+        self.function
+            .make_store(Operand::Register(target.clone()), value);
+        self.register_bindings.insert(id, target);
+    }
+
     fn allocate_and_initialize_binding(&mut self, binding: &BindingNode, value: Operand) {
         match binding {
             BindingNode::Ident(ident_binding) => {
-                let ty = self.get_type(ident_binding.id);
-                let target = self.function.make_alloca(ident_binding.name.clone(), ty);
-                self.function
-                    .make_store(Operand::Register(target.clone()), value);
-                self.register_bindings.insert(ident_binding.id, target);
+                self.allocate_and_initialize_ident_binding(
+                    ident_binding.name.clone(),
+                    ident_binding.id,
+                    value,
+                );
             }
         }
     }
@@ -76,7 +85,6 @@ impl<'a> TransientData<'a> {
                 } => Operand::NoOp,
                 _ => todo!("Other literals not implemented yet"),
             },
-
             ExprNode::Binary(bin_expr) => {
                 let lhs = self.lower_expr(&bin_expr.left);
                 let rhs = self.lower_expr(&bin_expr.right);
@@ -95,7 +103,6 @@ impl<'a> TransientData<'a> {
                     .make_binary("bin_result".intern(), op, lhs, rhs, ty);
                 Operand::Register(result)
             }
-
             ExprNode::Unary(un_expr) => {
                 let operand = self.lower_expr(&un_expr.operand);
                 let ty = self.get_type(un_expr.id);
@@ -110,14 +117,13 @@ impl<'a> TransientData<'a> {
                     UnaryOp::Pos => operand,
                 }
             }
-
             ExprNode::If(if_expr) => self.lower_if_expr(if_expr),
-
             ExprNode::Ident(ident_expr) => {
                 debug_assert!(self.binding_table.contains_key(&ident_expr.id));
-                debug_assert!(self
-                    .register_bindings
-                    .contains_key(&self.binding_table[&ident_expr.id]));
+                debug_assert!(
+                    self.register_bindings
+                        .contains_key(&self.binding_table[&ident_expr.id])
+                );
                 if let Some(reg) = self
                     .binding_table
                     .get(&ident_expr.id)
@@ -134,9 +140,7 @@ impl<'a> TransientData<'a> {
                     Operand::NoOp
                 }
             }
-
             ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
-
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
                     ExprNode::Ident(ident) => ident.ident.clone(),
@@ -170,6 +174,7 @@ impl<'a> TransientData<'a> {
                     }
                 }
             }
+            ExprNode::StructInstantiation(struct_instantiation_expr) => todo!(),
         }
     }
 
@@ -327,13 +332,15 @@ impl PassAstToYir {
 
             // Add parameters
             for arg in &func.decl.args {
-                let (ty, name) = match &arg.binding {
-                    BindingNode::Ident(id) => (data.get_type(id.id), id.name.clone()),
-                };
+                let (ty, name) = (data.get_type(arg.id), arg.name.clone());
                 let param = data.function.fresh_register(name.clone(), ty);
                 data.function.params.push(param.clone());
-                // Use allocate_and_initialize_binding to handle parameter storage consistently
-                data.allocate_and_initialize_binding(&arg.binding, Operand::Register(param));
+                // Use allocate_and_initialize_ident_binding to handle parameter storage consistently
+                data.allocate_and_initialize_ident_binding(
+                    arg.name,
+                    arg.id,
+                    Operand::Register(param),
+                );
             }
 
             // Process the function body block

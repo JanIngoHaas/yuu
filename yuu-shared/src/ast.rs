@@ -105,6 +105,21 @@ pub struct IfExpr {
     pub else_block: Option<BlockExpr>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Field {
+    pub name: Ustr,
+    pub span: Span,
+}
+
+/// Represents an instantiation of a struct
+#[derive(Serialize, Deserialize, Clone)]
+pub struct StructInstantiationExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub struct_name: Ustr,
+    pub fields: Vec<(Field, ExprNode)>,
+}
+
 /// Represents a binary expression (e.g., a + b)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BinaryExpr {
@@ -150,6 +165,7 @@ pub enum ExprNode {
     FuncCall(FuncCallExpr),
     If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
     Assignment(AssignmentExpr),
+    StructInstantiation(StructInstantiationExpr),
     //Error,
 }
 
@@ -243,6 +259,7 @@ pub struct Arg {
     pub name: Ustr,
     pub span: Span,
     pub id: NodeId,
+    pub is_mut: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -375,6 +392,9 @@ impl Spanned for ExprNode {
             ExprNode::FuncCall(func_call_expr) => func_call_expr.span.clone(),
             ExprNode::If(if_expr) => if_expr.span.clone(),
             ExprNode::Assignment(assign) => assign.span.clone(),
+            ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                struct_instantiation_expr.span.clone()
+            }
         }
     }
 }
@@ -436,6 +456,9 @@ impl ExprNode {
             ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
             ExprNode::If(if_expr) => if_expr.id,
             ExprNode::Assignment(assign) => assign.id,
+            ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                struct_instantiation_expr.id
+            }
         }
     }
 }

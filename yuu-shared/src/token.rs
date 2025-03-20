@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use logos::Logos;
 use serde::{Deserialize, Serialize};
-use ustr::{ustr, Ustr};
+use ustr::{Ustr, ustr};
 
 // Helper function for parsing i64 with different bases
 fn parse_integer(s: &str) -> Option<Integer> {
@@ -98,6 +98,9 @@ pub enum TokenKind {
     #[token(":")]
     Colon,
 
+    #[token("::")]
+    DoubleColon,
+
     #[token("=")]
     Equal,
 
@@ -140,6 +143,9 @@ pub enum TokenKind {
     #[token("}")]
     RBrace,
 
+    #[token("#")]
+    Hash,
+
     EOF,
 }
 
@@ -173,6 +179,7 @@ impl Display for TokenKind {
             TokenKind::Return => "'return'".fmt(f),
             TokenKind::OutKw => "'out'".fmt(f),
             TokenKind::Colon => "':'".fmt(f),
+            TokenKind::DoubleColon => "'::'".fmt(f),
             TokenKind::Equal => "'='".fmt(f),
             TokenKind::EqEq => "'=='".fmt(f),
             TokenKind::Comma => "','".fmt(f),
@@ -189,7 +196,8 @@ impl Display for TokenKind {
             TokenKind::LBrace => "'{'".fmt(f),
             TokenKind::RBrace => "'}'".fmt(f),
             TokenKind::EOF => "'EOF'".fmt(f),
-            TokenKind::StructKw => "'struct'".fmt(f)
+            TokenKind::StructKw => "'struct'".fmt(f),
+            TokenKind::Hash => "'#'".fmt(f),
         }
     }
 }

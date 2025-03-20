@@ -53,22 +53,26 @@ impl PassYirToC {
     ) -> Result<(), std::fmt::Error> {
         match ty {
             TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
-                                PrimitiveType::Bool => write!(data.output, "bool"),
-                                PrimitiveType::F64 => write!(data.output, "double"),
-                                PrimitiveType::F32 => write!(data.output, "float"),
-                                PrimitiveType::I64 => write!(data.output, "int64_t"),
-                                PrimitiveType::Nil => write!(data.output, "void"),
-                            },
+                PrimitiveType::Bool => write!(data.output, "bool"),
+                PrimitiveType::F64 => write!(data.output, "double"),
+                PrimitiveType::F32 => write!(data.output, "float"),
+                PrimitiveType::I64 => write!(data.output, "int64_t"),
+                PrimitiveType::Nil => write!(data.output, "void"),
+            },
             TypeInfo::Function(_function_type) => {
-                                todo!()
-                            }
+                todo!()
+            }
             TypeInfo::Pointer(type_info) => {
-                                self.gen_type(data, type_info)?;
-                                write!(data.output, "*")
-                            }
-            TypeInfo::Inactive => panic!("Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"),
-            TypeInfo::Error => panic!("Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"),
-TypeInfo::Struct(struct_type) => todo!(),
+                self.gen_type(data, type_info)?;
+                write!(data.output, "*")
+            }
+            TypeInfo::Inactive => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"
+            ),
+            TypeInfo::Error => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
+            ),
+            TypeInfo::Struct(struct_type) => todo!(),
         }
     }
 

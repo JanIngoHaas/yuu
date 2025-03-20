@@ -3,15 +3,16 @@ use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
 };
-use colored::Colorize;
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
+use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 use ustr::{Ustr, UstrMap};
 
 /*
-Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
+Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5 /
 */
 
 // Color palette system
@@ -19,94 +20,23 @@ Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5
 #[allow(clippy::upper_case_acronyms)]
 struct RGB(u8, u8, u8);
 
-// Add color support detection
-#[derive(PartialEq)]
-enum ColorSupport {
-    NoColor,
-    Basic,     // 16 colors
-    Color256,  // 256 colors
-    TrueColor, // 16.7M colors
-}
-
-impl ColorSupport {
-    fn detect() -> Self {
-        // Check NO_COLOR first - respect user preferences
-        if std::env::var("NO_COLOR").is_ok() {
-            return ColorSupport::NoColor;
-        }
-
-        // Check for true color support via COLORTERM
-        if let Ok(colorterm) = std::env::var("COLORTERM") {
-            if colorterm.contains("truecolor") || colorterm.contains("24bit") {
-                return ColorSupport::TrueColor;
-            }
-        }
-
-        // On Windows, check for Windows Terminal or ConEmu
-        #[cfg(windows)]
-        {
-            if std::env::var("WT_SESSION").is_ok() || std::env::var("ConEmuANSI").is_ok() {
-                return ColorSupport::TrueColor;
-            }
-        }
-
-        // Check for TERM that might indicate advanced color support
-        if let Ok(term) = std::env::var("TERM") {
-            if term.contains("24bit") || term.contains("direct") {
-                return ColorSupport::TrueColor;
-            }
-            if term.contains("256color") {
-                return ColorSupport::Color256;
-            }
-        }
-
-        // Default to basic colors if no better support detected
-        ColorSupport::Basic
-    }
-}
-
 struct ColorPalette {
     colors: IndexMap<&'static str, RGB>,
-    color_support: ColorSupport,
+    color_choice: ColorChoice,
 }
 
 impl ColorPalette {
-    // Add fallback colors for terminals with limited color support
-    fn get_fallback_color(&self, rgb: RGB) -> colored::Color {
-        match self.color_support {
-            ColorSupport::NoColor => colored::Color::White,
-            ColorSupport::Basic => {
-                // Map RGB to the closest basic color
-                let RGB(r, g, b) = rgb;
-                if r > 200 && g > 200 && b > 200 {
-                    colored::Color::White
-                } else if r > 200 {
-                    colored::Color::Red
-                } else if g > 200 {
-                    colored::Color::Green
-                } else if b > 200 {
-                    colored::Color::Blue
-                } else if r > 200 && g > 200 {
-                    colored::Color::Yellow
-                } else if g > 200 && b > 200 {
-                    colored::Color::Cyan
-                } else if r > 200 && b > 200 {
-                    colored::Color::Magenta
-                } else {
-                    colored::Color::White
-                }
-            }
-            ColorSupport::Color256 => {
-                // You could implement more sophisticated 256-color mapping here
-                let RGB(r, g, b) = rgb;
-                colored::Color::TrueColor { r, g, b }
-            }
-            ColorSupport::TrueColor => {
-                let RGB(r, g, b) = rgb;
-                colored::Color::TrueColor { r, g, b }
-            }
+    fn detect_color_choice() -> ColorChoice {
+        // Check NO_COLOR first - respect user preferences
+        if std::env::var("NO_COLOR").is_ok() {
+            return ColorChoice::Never;
         }
+
+        // Use termcolor's auto detection
+        ColorChoice::Auto
     }
+
+    // No need for fallback color method, as termcolor handles this automatically
 
     #[allow(dead_code)]
     fn deep_ocean() -> Self {
@@ -118,9 +48,10 @@ impl ColorPalette {
         colors.insert("constant", RGB(46, 139, 87)); // Sea Green
         colors.insert("label", RGB(125, 249, 255)); // Electric Blue
         colors.insert("operator", RGB(250, 128, 114)); // Salmon
+
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -133,9 +64,10 @@ impl ColorPalette {
         colors.insert("constant", RGB(255, 218, 121)); // Warm Yellow
         colors.insert("label", RGB(255, 166, 158)); // Coral Pink
         colors.insert("operator", RGB(255, 110, 74)); // Burnt Orange
+
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -151,7 +83,7 @@ impl ColorPalette {
         colors.insert("operator", RGB(34, 139, 34)); // Forest Green
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -167,7 +99,7 @@ impl ColorPalette {
         colors.insert("operator", RGB(186, 85, 211)); // Medium Orchid
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -183,7 +115,7 @@ impl ColorPalette {
         colors.insert("operator", RGB(255, 69, 0)); // Red-Orange
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -201,7 +133,7 @@ impl ColorPalette {
         colors.insert("operator", RGB(220, 47, 2)); // Deep Red
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -217,7 +149,7 @@ impl ColorPalette {
         colors.insert("operator", RGB(140, 20, 84)); // Dark Magenta
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
@@ -233,12 +165,16 @@ impl ColorPalette {
         colors.insert("operator", RGB(153, 0, 0)); // Dark Red
         Self {
             colors,
-            color_support: ColorSupport::detect(),
+            color_choice: Self::detect_color_choice(),
         }
     }
 
     fn get_color(&self, key: &str) -> RGB {
         self.colors.get(key).cloned().unwrap_or(RGB(255, 255, 255))
+    }
+
+    fn get_color_choice(&self) -> ColorChoice {
+        self.color_choice
     }
 }
 
@@ -253,29 +189,23 @@ fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
 
     CURRENT_PALETTE.with(|palette| {
         let palette = palette.borrow();
-        let rgb = palette.get_color(color_key);
-        let RGB(r, g, b) = rgb;
+        let RGB(r, g, b) = palette.get_color(color_key);
 
-        // Always try true color first in Windows Terminal
-        #[cfg(windows)]
-        if std::env::var("WT_SESSION").is_ok() {
-            return text.truecolor(r, g, b).to_string();
-        }
+        // Create a buffer with the appropriate color choice
+        let writer = BufferWriter::stderr(palette.get_color_choice());
+        let mut buffer = writer.buffer();
 
-        match palette.color_support {
-            ColorSupport::NoColor => text.to_string(),
-            ColorSupport::TrueColor => text.truecolor(r, g, b).to_string(),
-            ColorSupport::Color256 => {
-                // For 256 color mode, use the closest ANSI color
-                let color = palette.get_fallback_color(rgb);
-                text.color(color).to_string()
-            }
-            ColorSupport::Basic => {
-                // For basic mode, use the closest ANSI color
-                let color = palette.get_fallback_color(rgb);
-                text.color(color).to_string()
-            }
-        }
+        // Create color specification
+        let mut color_spec = ColorSpec::new();
+        color_spec.set_fg(Some(Color::Rgb(r, g, b)));
+
+        // Write the text with color
+        buffer.set_color(&color_spec).ok();
+        write!(&mut buffer, "{}", text).ok();
+        buffer.reset().ok();
+
+        // Convert buffer to string
+        String::from_utf8_lossy(buffer.as_slice()).into_owned()
     })
 }
 
@@ -559,7 +489,7 @@ impl Function {
     }
 
     pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
-        if !self.has_terminator(self.current_block) {
+        if (!self.has_terminator(self.current_block)) {
             self.make_jump(target, writes);
         }
     }
@@ -794,11 +724,7 @@ impl Function {
             f,
             "{} {}(",
             format_keyword("fn", do_color),
-            if do_color {
-                self.name.white()
-            } else {
-                self.name.as_str().into()
-            }
+            self.name.as_str()
         )?;
         for (i, reg) in self.params.iter().enumerate() {
             if i > 0 {

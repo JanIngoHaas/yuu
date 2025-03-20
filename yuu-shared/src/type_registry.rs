@@ -24,11 +24,11 @@ pub struct StructFieldInfo {
     pub binding_info: BindingInfo,
 }
 
-type UstrMap<V> = IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
+pub type FieldsMap<V> = IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
 
 #[derive(Clone)]
 pub struct StructInfo {
-    pub fields: UstrMap<StructFieldInfo>,
+    pub fields: FieldsMap<StructFieldInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -43,8 +43,8 @@ pub struct FunctionInfo {
 }
 
 pub struct TypeRegistry {
-    structs: UstrMap<StructInfo>,
-    functions: UstrMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
+    structs: FieldsMap<StructInfo>,
+    functions: FieldsMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
     pub type_info_table: TypeInfoTable,
     pub bindings: BindingTable,
 }
@@ -64,8 +64,8 @@ impl Default for TypeRegistry {
 impl TypeRegistry {
     pub fn new() -> Self {
         let mut reg = Self {
-            structs: UstrMap::default(),
-            functions: UstrMap::default(),
+            structs: FieldsMap::default(),
+            functions: FieldsMap::default(),
             type_info_table: TypeInfoTable::new(),
             bindings: BindingTable::default(),
         };
@@ -212,7 +212,7 @@ impl TypeRegistry {
 
     pub fn add_struct(
         &mut self,
-        fields: UstrMap<StructFieldInfo>,
+        fields: FieldsMap<StructFieldInfo>,
         name: Ustr,
         binding_info: BindingInfo,
     ) -> bool {

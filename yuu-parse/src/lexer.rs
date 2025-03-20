@@ -122,6 +122,35 @@ impl Lexer {
         }
     }
 
+    pub fn expect_tag(
+        &mut self,
+        expected: TokenKind,
+        errors: &mut Vec<ParseError>,
+    ) -> ParseResult<Token> {
+        let next = self.next_token();
+        if std::mem::discriminant(&expected) == std::mem::discriminant(&next.kind) {
+            Ok(next)
+        } else {
+            // Error case: Tags don't match
+            let span = next.span.clone();
+            let expected_str = format!("{}", expected);
+            let found_str = format!("{}", next.kind);
+
+            let mut error = YuuError::unexpected_token(
+                span,
+                expected_str,
+                found_str,
+                self.code_info.source.clone(),
+                self.code_info.file_name.clone(),
+            );
+
+            error = error.with_help(format!("Expected token of type: {}", expected));
+
+            errors.push(error);
+            Err(self.synchronize())
+        }
+    }
+
     // Check if the current token matches the expected kind, and consume it if it does
     pub fn expect(
         &mut self,

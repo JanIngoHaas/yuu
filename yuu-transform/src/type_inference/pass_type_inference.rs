@@ -1,11 +1,13 @@
+use indexmap::IndexMap;
 use yuu_shared::{
     ast::{SourceInfo, StructuralNode, AST},
+    binding_info::BindingInfo,
     block::{BindingTable, Block, RootBlock},
     context::Context,
     error::YuuError,
     scheduler::{Pass, ResourceId},
     type_info::TypeInfoTable,
-    type_registry::{StructFieldInfo, TypeRegistry},
+    type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
 };
 
 use super::{declare_function, infer_structural, infer_type};
@@ -76,17 +78,33 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
             data.type_registry.type_info_table.insert(def.body.id, ret);
         }
         StructuralNode::Error(_) => (),
-        StructuralNode::StructDecl(struct_decl) => todo!(),
+        StructuralNode::StructDecl(struct_decl) => {
+            todo!("Currently, struct declarations without definitions are not supported.")
+        }
         StructuralNode::StructDef(struct_def) => {
+            let mut struct_defs = FieldsMap::default();
+
             for field in &struct_def.fields {
                 let ty = infer_type(&field.ty, data);
-                let 
                 let sfi = StructFieldInfo {
                     name: field.name,
                     ty,
-                    binding_info: todo!(),
+                    binding_info: BindingInfo {
+                        id: field.id,
+                        src_location: Some(field.span.clone()),
+                    },
                 };
+                struct_defs.insert(field.name, sfi);
             }
+
+            data.type_registry.add_struct(
+                struct_defs,
+                struct_def.decl.name,
+                BindingInfo {
+                    id: struct_def.id,
+                    src_location: Some(struct_def.span.clone()),
+                },
+            );
         }
     };
 }

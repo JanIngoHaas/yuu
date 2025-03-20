@@ -26,7 +26,13 @@ pub fn declare_function(
         .map(|arg| {
             let semantic_arg_type = infer_type(&arg.ty, data);
 
-            match_binding_node_to_type(block, &arg.binding, semantic_arg_type, data);
+            data.type_registry.add_variable(
+                block,
+                arg.name,
+                arg.id,
+                Some(arg.span.clone()),
+                semantic_arg_type,
+            );
 
             semantic_arg_type
         })
@@ -64,13 +70,7 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
             )));
 
             for arg in &def.decl.args {
-                let BindingNode::Ident(ident) = &arg.binding;
-                func_block.insert_variable(
-                    ident.name.clone(),
-                    ident.id,
-                    Some(ident.span.clone()),
-                    ident.is_mut,
-                );
+                func_block.insert_variable(arg.name, arg.id, Some(arg.span.clone()), arg.is_mut);
             }
 
             // Process function body separately
@@ -85,9 +85,7 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 .type_info_table
                 .insert(*estr, error_type());
         }
-        StructuralNode::StructDecl(struct_decl) => {
-            
-        }
+        StructuralNode::StructDecl(struct_decl) => {}
         StructuralNode::StructDef(struct_def) => todo!(),
     }
 }

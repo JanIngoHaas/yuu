@@ -3,7 +3,7 @@ use crate::{
     lexer::{CatchIn, Lexer, ParseError, ParseResult},
 };
 use logos::Span;
-use ustr::{ustr, Ustr};
+use ustr::{Ustr, ustr};
 use yuu_shared::{
     ast::*,
     block::FUNC_BLOCK_NAME,
@@ -428,15 +428,52 @@ impl Parser {
     }
 
     pub fn parse_func_arg(&mut self) -> ParseResult<Arg> {
-        let name = self.lexer.expect
+        let tkn = self.lexer.next_token();
+        let (name, is_mut, start_span) = match tkn.kind {
+            TokenKind::MutKw => {
+                let ident = self.lexer.next_token();
+                match ident.kind {
+                    TokenKind::Ident(name) => (name, true, tkn.span),
+                    _ => {
+                        let mut error = YuuError::unexpected_token(
+                            ident.span.clone(),
+                            "an identifier".to_string(),
+                            ident.kind,
+                            self.lexer.code_info.source.clone(),
+                            self.lexer.code_info.file_name.clone(),
+                        );
+                        error = error
+                            .with_help("Expected an identifier after 'mut' keyword".to_string());
+                        self.errors.push(error);
+                        return Err(self.lexer.synchronize());
+                    }
+                }
+            }
+            TokenKind::Ident(name) => (name, false, tkn.span),
+            _ => {
+                let mut error = YuuError::unexpected_token(
+                    tkn.span.clone(),
+                    "an identifier or 'mut'".to_string(),
+                    tkn.kind,
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                );
+                error = error
+                    .with_help("Expected 'mut' or an identifier naming the argument".to_string());
+                self.errors.push(error);
+                return Err(self.lexer.synchronize());
+            }
+        };
+
         let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
         let ty = self.parse_type()?;
-        let span = pattern.span().start..ty.span().end;
+        let span = start_span.start..ty.span().end;
         Ok(Arg {
             span: span.clone(),
-            binding: pattern,
+            name,
             ty,
             id: 0,
+            is_mut,
         })
     }
 
@@ -570,6 +607,94 @@ impl Parser {
         }
     }
 
+    pub fn parse_struct_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        let ident = self.lexer.next_token();
+        let mut fields = Vec::new();
+
+        match ident.kind {
+            TokenKind::Ident(name) => {
+                let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+
+                // Parse fields
+                loop {
+                    // Parse ident
+                    let ident = self.lexer.next_token();
+                    match ident.kind {
+                        TokenKind::Ident(name) => {
+                            let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
+                            let (expr_span, expr) = self.parse_expr()?;
+                            let span = ident.span.start..expr_span.end;
+                            let field = Field { name, span };
+                            let field = (field, expr);
+                            fields.push(field);
+                        }
+                        _ => {
+                            self.errors.push(
+                                YuuError::unexpected_token(
+                                    ident.span.clone(),
+                                    "an identifier".to_string(),
+                                    ident.kind,
+                                    self.lexer.code_info.source.clone(),
+                                    self.lexer.code_info.file_name.clone(),
+                                )
+                                .with_help(
+                                    "Expected an identifier denoting a struct field".to_string(),
+                                ),
+                            );
+                            return Err(self.lexer.synchronize());
+                        }
+                    }
+
+                    let la = self.lexer.peek();
+                    match la.kind.clone() {
+                        TokenKind::Comma => {
+                            let _ = self.lexer.next_token();
+                        }
+                        TokenKind::Hash => {
+                            // Done parsing fields
+                            let tkn = self.lexer.next_token();
+                            return Ok((
+                                ident.span.start..tkn.span.end,
+                                ExprNode::StructInstantiation(StructInstantiationExpr {
+                                    struct_name: name,
+                                    fields,
+                                    span: ident.span.start..tkn.span.end,
+                                    id: 0,
+                                }),
+                            ));
+                        }
+                        _ => {
+                            self.errors.push(
+                                YuuError::unexpected_token(
+                                    la.span.clone(),
+                                    "a comma ',' or a colon ':'".to_string(),
+                                    la.kind.clone(),
+                                    self.lexer.code_info.source.clone(),
+                                    self.lexer.code_info.file_name.clone(),
+                                )
+                                .with_help("Struct fields should be separated by commas, with the list ending with a colon".to_string()),
+                            );
+                            return Err(self.lexer.synchronize());
+                        }
+                    }
+                }
+            }
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        ident.span.clone(),
+                        "an identifier".to_string(),
+                        ident.kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected an identifier denoting a struct type".to_string()),
+                );
+                return Err(self.lexer.synchronize());
+            }
+        };
+    }
+
     pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {
         // Handle block label
         let label = if self.lexer.peek().kind == TokenKind::Colon {
@@ -698,36 +823,43 @@ impl Parser {
     }
 
     pub fn parse_struct_def(&mut self) -> ParseResult<(Span, StructDefStructural)> {
-        
         let (span, decl) = self.parse_struct_decl()?;
 
-                let _ = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
-        
-                let fields = self.parse_struct_fields()?;
-        
-                let l = self.lexer.expect(&[TokenKind::RBrace], &mut self.errors)?;
-        
-        let span = span.start..l.span.end;
-        let out = StructDefStructural { id: 0, span: span.clone(), decl, fields };
+        let _ = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
 
-        Ok((span, out ))   
+        let fields = self.parse_struct_fields()?;
+
+        let l = self.lexer.expect(&[TokenKind::RBrace], &mut self.errors)?;
+
+        let span = span.start..l.span.end;
+        let out = StructDefStructural {
+            id: 0,
+            span: span.clone(),
+            decl,
+            fields,
+        };
+
+        Ok((span, out))
     }
 
     pub fn parse_struct_decl(&mut self) -> ParseResult<(Span, StructDeclStructural)> {
-        let struct_tkn = self.lexer.expect(&[TokenKind::StructKw], &mut self.errors)?;
-        let ident = self.lexer.expect(&[TokenKind::Ident("an identifier, naming the struct".intern())], &mut self.errors)?; // TODO: Make this lazy evaluated
+        let struct_tkn = self
+            .lexer
+            .expect(&[TokenKind::StructKw], &mut self.errors)?;
+        let ident = self.lexer.expect(
+            &[TokenKind::Ident(
+                "an identifier, naming the struct".intern(),
+            )],
+            &mut self.errors,
+        )?; // TODO: Make this lazy evaluated
         let name = match ident.kind {
             TokenKind::Ident(ident) => ident,
-            _ => unreachable!("We should have an identifier here")
+            _ => unreachable!("We should have an identifier here"),
         };
 
-        let span = struct_tkn.span.start .. ident.span.end;
+        let span = struct_tkn.span.start..ident.span.end;
 
-        Ok((span.clone(), StructDeclStructural {
-            id: 0,
-            span,
-            name,
-        }))
+        Ok((span.clone(), StructDeclStructural { id: 0, span, name }))
     }
 
     pub fn parse_func_decl(&mut self) -> ParseResult<(Span, FuncDeclStructural)> {
@@ -876,7 +1008,7 @@ impl Parser {
             TokenKind::FnKw => {
                 let (range, res) = self.parse_func_def()?;
                 (range, StructuralNode::FuncDef(res))
-            },
+            }
             TokenKind::StructKw => {
                 let (range, struct_) = self.parse_struct_def()?;
                 (range, StructuralNode::StructDef(struct_))

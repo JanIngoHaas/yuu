@@ -1,6 +1,6 @@
 use miette::{
-    highlighters::SyntectHighlighter, Diagnostic, LabeledSpan, MietteDiagnostic, NamedSource,
-    SourceSpan,
+    Diagnostic, LabeledSpan, MietteDiagnostic, NamedSource, SourceSpan,
+    highlighters::SyntectHighlighter,
 };
 use std::{fmt::Display, str::FromStr, sync::Arc};
 use syntect::highlighting::ThemeItem;
@@ -17,6 +17,8 @@ pub enum ErrorKind {
     InvalidStatement,
     FunctionOverloadError,
     TypeMismatch,
+    ReferencedUndeclaredStruct,
+    ReferencedUndeclaredField,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -30,6 +32,8 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::InvalidStatement => write!(f, "Invalid statement"),
             ErrorKind::FunctionOverloadError => write!(f, "No matching function overload"),
             ErrorKind::TypeMismatch => write!(f, "Types do not match"),
+            ErrorKind::ReferencedUndeclaredStruct => write!(f, "Referenced undeclared struct"),
+            ErrorKind::ReferencedUndeclaredField => write!(f, "Referenced undeclared field"),
         }
     }
 }
@@ -468,11 +472,11 @@ use syntect::highlighting::Color as SyntectColor;
 use syntect::highlighting::{FontStyle, Style, StyleModifier, Theme, ThemeSettings};
 use syntect::highlighting::{ScopeSelector, ScopeSelectors};
 
+use crate::Span;
 use crate::ast::{InternUstr, SourceInfo};
 use crate::binding_info::BindingInfo;
 use crate::type_info::{FunctionType, TypeInfo};
 use crate::type_registry::{FunctionInfo, TypeRegistry};
-use crate::Span;
 
 /// Create a custom theme based on the warm_ember color palette
 pub fn create_autumn_rust_theme() -> Theme {

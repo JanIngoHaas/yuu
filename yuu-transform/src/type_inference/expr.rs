@@ -6,10 +6,10 @@ use yuu_shared::{
     },
     binding_info::BindingInfo,
     block::{Block, IdentResolutionKind},
-    error::{create_no_overload_error, ErrorKind, YuuError},
+    error::{ErrorKind, YuuError, create_no_overload_error},
     type_info::{
-        error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
-        primitive_nil, TypeInfo,
+        TypeInfo, error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64,
+        primitive_i64, primitive_nil,
     },
 };
 
@@ -587,5 +587,97 @@ pub fn infer_expr(
         ExprNode::FuncCall(func_call) => infer_func_call(func_call, block, data),
         ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data),
         ExprNode::Assignment(assignment) => infer_assignment(assignment, block, data),
+        ExprNode::StructInstantiation(struct_instantiation_expr) => {
+            for (_, expr_node) in &struct_instantiation_expr.fields {
+                infer_expr(expr_node, block, data, None);
+            }
+
+            let struct_name = struct_instantiation_expr.struct_name;
+            let struct_opt = data.type_registry.resolve_struct(struct_name);
+
+            if struct_opt.is_none() {
+                let err = YuuError::builder()
+                    .kind(ErrorKind::ReferencedUndeclaredStruct)
+                    .message(format!(
+                        "Cannot instantiate struct '{}' because it has not been declared",
+                        struct_name
+                    ))
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(
+                        struct_instantiation_expr.span.clone(),
+                        "attempted to instantiate undeclared struct",
+                    )
+                    .help("Define this struct before using it")
+                    .build();
+                data.errors.push(err);
+                data.type_registry
+                    .type_info_table
+                    .insert(struct_instantiation_expr.id, error_type());
+                return error_type();
+            }
+
+            let sinfo = struct_opt.unwrap();
+            let struct_type = sinfo.ty;
+
+            for (field, expr_node) in &struct_instantiation_expr.fields {
+                // Get the already inferred expression type from the registry
+                let expr_type = data
+                    .type_registry
+                    .type_info_table
+                    .get(expr_node.node_id())
+                    .expect("Compiler bug: expression type should be in registry");
+
+                if let Some(field_info) = sinfo.fields.get(&field.name) {
+                    match expr_type.unify(field_info.ty) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            let err_msg = YuuError::builder()
+                                .kind(ErrorKind::TypeMismatch)
+                                .message(format!(
+                                    "Cannot assign {} to field '{}' of type {}",
+                                    err.left, field.name, err.right
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(expr_node.span().clone(), format!("has type {}", err.left))
+                                .label(field.span.clone(), format!("expected type {}", err.right))
+                                .help("The types must be compatible for assignment")
+                                .build();
+                            data.errors.push(err_msg);
+                        }
+                    }
+                } else {
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndeclaredField)
+                        .message(format!(
+                            "Cannot assign to undeclared field '{}' of struct '{}'",
+                            field.name, struct_name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(
+                            field.span.clone(),
+                            "attempted to assign to undeclared field",
+                        )
+                        .help("Define this field in the struct before using it")
+                        .build();
+                    data.errors.push(err);
+                }
+            }
+
+            // Register the type for the struct instantiation expression
+            data.type_registry
+                .type_info_table
+                .insert(struct_instantiation_expr.id, struct_type);
+
+            struct_type
+        }
     }
 }
