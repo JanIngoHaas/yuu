@@ -85,7 +85,8 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 .type_info_table
                 .insert(*estr, error_type());
         }
-        StructuralNode::StructDecl(struct_decl) => {}
-        StructuralNode::StructDef(struct_def) => todo!(),
+        // Already did that in collect_structural
+        StructuralNode::StructDecl(_struct_decl) => {}
+        StructuralNode::StructDef(_struct_def) => {},
     }
 }

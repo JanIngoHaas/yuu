@@ -173,7 +173,7 @@ impl TypeInterner {
         let out = self
             .combination_to_type
             .entry(key)
-            .or_insert_with(|| Box::new(TypeInfo::Struct(struct_)));
+            .or_insert_with(|| Box::new(TypeInfo::Struct(StructType { name: struct_ })));
 
         // SAFETY: The Box lives as long as TypeInterner and we never remove from the map
         unsafe { &*(out.as_ref() as *const TypeInfo) }
@@ -198,7 +198,7 @@ impl TypeInterner {
             TypeInfo::Inactive => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Struct(struct_type) => {
-                panic!("Cannot dereference non-pointer type: {}", struct_type)
+                panic!("Cannot dereference non-pointer type: {}", struct_type.name)
             }
         }
     }
@@ -340,6 +340,11 @@ impl From<FunctionType> for &'static TypeInfo {
 }
 
 #[derive(Clone, Debug)]
+pub struct StructType {
+    pub name: Ustr,
+}
+
+#[derive(Clone, Debug)]
 pub enum TypeInfo {
     BuiltInPrimitive(PrimitiveType),
     Function(FunctionType),
@@ -348,10 +353,18 @@ pub enum TypeInfo {
     // This happens for example when you 'unwind' in a block - the block does not have a value.
     // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
     Error,
-    Struct(Ustr),
+    Struct(StructType),
 }
 
 impl TypeInfo {
+
+    pub fn is_ptr(&self) -> bool {
+        match self {
+            TypeInfo::Pointer(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn is_primitive(&self) -> bool {
         match self {
             TypeInfo::BuiltInPrimitive(_) => true,
@@ -407,7 +420,7 @@ impl Display for TypeInfo {
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
             TypeInfo::Inactive => write!(f, "<no value>"),
             TypeInfo::Error => write!(f, "<error>"),
-            TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type),
+            TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
         }
     }
 }

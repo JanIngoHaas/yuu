@@ -1,8 +1,9 @@
 use crate::ast::InternUstr;
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
-    primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
+    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
+use crate::type_registry::StructInfo;
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -209,7 +210,7 @@ fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
     })
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct Register {
     name: Ustr,
     id: i64,
@@ -284,7 +285,7 @@ pub enum Operand {
     F32Const(f32),
     F64Const(f64),
     BoolConst(bool),
-    Register(Register),
+    Register(Register),  
     NoOp,
 }
 
@@ -317,6 +318,19 @@ pub enum UnaryOp {
 
 #[derive(Clone)]
 pub enum Instruction {
+    SizeOf {
+        target: Register,
+        ty: &'static TypeInfo,
+    },
+    AlignOf {
+        target: Register,
+        ty: &'static TypeInfo,
+    },
+    GetFieldPtr {
+        target: Register,
+        base: Operand,
+        field: Ustr,
+    },
     Assign {
         target: Register,
         value: Operand,
@@ -339,6 +353,7 @@ pub enum Instruction {
     Store {
         address: Operand,
         value: Operand,
+        indirect_store: bool
     },
     Alloca {
         target: Register,
@@ -425,8 +440,10 @@ impl Function {
         self.blocks.get_mut(&id)
     }
 
-    pub fn get_current_block_mut(&mut self) -> Option<&mut BasicBlock> {
-        self.blocks.get_mut(&self.current_block)
+    pub fn get_current_block_mut(&mut self) -> &mut BasicBlock {
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
     }
 
     pub fn get_current_block(&self) -> Option<&BasicBlock> {
@@ -551,6 +568,16 @@ impl Function {
         }
     }
 
+    pub fn make_get_field_ptr(&mut self, target: Register, base: Operand, field: Ustr) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::GetFieldPtr {
+                target,
+                base,
+                field,
+            });
+        }
+    }
+
     pub fn make_binary(
         &mut self,
         name: Ustr,
@@ -573,9 +600,12 @@ impl Function {
 
     pub fn make_store(&mut self, address: Operand, value: Operand) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block
-                .instructions
-                .push(Instruction::Store { address, value });
+            // We talk about an indirect store, IF
+            // 1) type of "value": is a pointer and deref'd type of "value" == type of "address"
+            let vtype = value.ty();
+            let atype = address.ty();
+            let indirect_store = vtype.is_ptr() && vtype.deref_ptr().is_exact_same_type(atype);
+            block.instructions.push(Instruction::Store { address, value, indirect_store });
         }
     }
 
@@ -604,6 +634,16 @@ impl Function {
             });
         }
         target
+    }
+
+    pub fn make_sizeof(&mut self, target: Register, ty: &'static TypeInfo) {
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::SizeOf { target, ty });
+    }
+
+    pub fn make_alignof(&mut self, target: Register, ty: &'static TypeInfo) {
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::AlignOf { target, ty });
     }
 
     pub fn make_call(
@@ -746,98 +786,115 @@ impl Function {
                 write!(f, "    ")?;
                 match inst {
                     Instruction::Assign { target, value } => {
-                        writeln!(
-                            f,
-                            "{} := {}",
-                            format_register(target, do_color),
-                            format_operand(value, do_color)
-                        )?;
-                    }
+                                        writeln!(
+                                            f,
+                                            "{} := {}",
+                                            format_register(target, do_color),
+                                            format_operand(value, do_color)
+                                        )?;
+                                    }
                     Instruction::Binary {
-                        target,
-                        op,
-                        lhs,
-                        rhs,
-                    } => {
-                        writeln!(
-                            f,
-                            "{} := {} {} {}",
-                            format_register(target, do_color),
-                            format_operand(lhs, do_color),
-                            format_binop(op, do_color),
-                            format_operand(rhs, do_color)
-                        )?;
-                    }
+                                        target,
+                                        op,
+                                        lhs,
+                                        rhs,
+                                    } => {
+                                        writeln!(
+                                            f,
+                                            "{} := {} {} {}",
+                                            format_register(target, do_color),
+                                            format_operand(lhs, do_color),
+                                            format_binop(op, do_color),
+                                            format_operand(rhs, do_color)
+                                        )?;
+                                    }
                     Instruction::Unary {
-                        target,
-                        op,
-                        operand,
-                    } => {
-                        writeln!(
-                            f,
-                            "{} := {}{}",
-                            format_register(target, do_color),
-                            format_unop(op, do_color),
-                            format_operand(operand, do_color)
-                        )?;
-                    }
+                                        target,
+                                        op,
+                                        operand,
+                                    } => {
+                                        writeln!(
+                                            f,
+                                            "{} := {}{}",
+                                            format_register(target, do_color),
+                                            format_unop(op, do_color),
+                                            format_operand(operand, do_color)
+                                        )?;
+                                    }
                     Instruction::Load { target, address } => {
-                        writeln!(
-                            f,
-                            "{} := {} {}",
-                            format_register(target, do_color),
-                            format_keyword("load", do_color),
-                            format_operand(address, do_color)
-                        )?;
-                    }
-                    Instruction::Store { address, value } => {
-                        writeln!(
-                            f,
-                            "{} {} <- {}",
-                            format_keyword("store", do_color),
-                            format_operand(address, do_color),
-                            format_operand(value, do_color)
-                        )?;
-                    }
+                                        writeln!(
+                                            f,
+                                            "{} := {} {}",
+                                            format_register(target, do_color),
+                                            format_keyword("load", do_color),
+                                            format_operand(address, do_color)
+                                        )?;
+                                    }
+                    Instruction::Store { address, value, indirect_store } => {
+                                        writeln!(
+                                            f,
+                                            "{} {} <- {}{}",
+                                            format_keyword("store", do_color),
+                                            format_operand(address, do_color),
+                                            if *indirect_store { format_keyword("bitwise_copy ", do_color) } else { String::from("")},
+                                            format_operand(value, do_color)
+                                        )?;
+                                    }
                     Instruction::Alloca { target } => {
-                        writeln!(
-                            f,
-                            "{} := {}",
-                            format_register(target, do_color),
-                            format_keyword("alloca", do_color)
-                        )?;
-                    }
+                                        writeln!(
+                                            f,
+                                            "{} := {}",
+                                            format_register(target, do_color),
+                                            format_keyword("alloca", do_color)
+                                        )?;
+                                    }
                     Instruction::Call { target, name, args } => {
-                        if let Some(target) = target {
-                            write!(f, "{} := ", format_register(target, do_color))?;
-                        }
-                        write!(f, "{} {}(", format_keyword("call", do_color), name)?;
-                        for (i, arg) in args.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", format_operand(arg, do_color))?;
-                        }
-                        writeln!(f, ")")?;
-                    }
+                                        if let Some(target) = target {
+                                            write!(f, "{} := ", format_register(target, do_color))?;
+                                        }
+                                        write!(f, "{} {}(", format_keyword("call", do_color), name)?;
+                                        for (i, arg) in args.iter().enumerate() {
+                                            if i > 0 {
+                                                write!(f, ", ")?;
+                                            }
+                                            write!(f, "{}", format_operand(arg, do_color))?;
+                                        }
+                                        writeln!(f, ")")?;
+                                    }
                     Instruction::Omega {
-                        target,
-                        writable_blocks,
-                    } => {
-                        write!(
-                            f,
-                            "{} := {} [",
-                            format_register(target, do_color),
-                            format_keyword("Ω", do_color)
-                        )?;
-                        for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", format_label(block.name(), do_color))?;
-                        }
-                        writeln!(f, "]")?;
-                    }
+                                        target,
+                                        writable_blocks,
+                                    } => {
+                                        write!(
+                                            f,
+                                            "{} := {} [",
+                                            format_register(target, do_color),
+                                            format_keyword("Ω", do_color)
+                                        )?;
+                                        for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
+                                            if i > 0 {
+                                                write!(f, ", ")?;
+                                            }
+                                            write!(f, "{}", format_label(block.name(), do_color))?;
+                                        }
+                                        writeln!(f, "]")?;
+                                    }
+                    Instruction::GetFieldPtr {
+                                        target,
+                                        base,
+                                        field,
+                                    } => {
+                                        writeln!(
+                                            f,
+                                            "{} := {} {} {}",
+                                            format_register(target, do_color),
+                                            format_keyword("field_ptr", do_color),
+                                            format_operand(base, do_color),
+                                            colorize(&format!(".{}", field), "operator", do_color)
+                                        )?;
+                                    }
+Instruction::SizeOf { target, ty } => todo!(),
+                    Instruction::AlignOf { target, ty } => todo!(),
                 }
             }
 
@@ -894,6 +951,7 @@ impl Function {
 
 pub struct Module {
     pub functions: UstrMap<FunctionDeclarationState>,
+    pub structs: Vec<Ustr>, // Just the names... NOthing else is really needed for
 }
 
 impl ResourceId for Module {
@@ -912,7 +970,12 @@ impl Module {
     pub fn new() -> Self {
         Self {
             functions: UstrMap::default(),
+            structs: Vec::new(),
         }
+    }
+
+    pub fn define_struct(&mut self, name: Ustr) {
+        self.structs.push(name);
     }
 
     pub fn declare_function(&mut self, func: Function) {

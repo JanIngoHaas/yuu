@@ -210,6 +210,7 @@ impl TypeRegistry {
         self.type_info_table.types.insert(id, ty);
     }
 
+
     pub fn add_struct(
         &mut self,
         fields: FieldsMap<StructFieldInfo>,
@@ -287,6 +288,14 @@ impl TypeRegistry {
             .filter(|x| levenshtein_distance(name.as_str(), x.as_str()) <= max_dst)
             .cloned()
             .collect()
+    }
+
+    pub fn get_similar_names_struct(&self, name: Ustr, max_dst: usize) -> Vec<Ustr> {
+        self.structs
+           .keys()
+           .filter(|x| levenshtein_distance(name.as_str(), x.as_str()) <= max_dst)
+           .cloned()
+           .collect()
     }
 
     pub fn resolve_function(

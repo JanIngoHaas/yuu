@@ -17,7 +17,7 @@ pub enum ErrorKind {
     InvalidStatement,
     FunctionOverloadError,
     TypeMismatch,
-    ReferencedUndeclaredStruct,
+    ReferencedUndefinedStruct,
     ReferencedUndeclaredField,
 }
 
@@ -32,7 +32,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::InvalidStatement => write!(f, "Invalid statement"),
             ErrorKind::FunctionOverloadError => write!(f, "No matching function overload"),
             ErrorKind::TypeMismatch => write!(f, "Types do not match"),
-            ErrorKind::ReferencedUndeclaredStruct => write!(f, "Referenced undeclared struct"),
+            ErrorKind::ReferencedUndefinedStruct => write!(f, "Referenced undeclared struct"),
             ErrorKind::ReferencedUndeclaredField => write!(f, "Referenced undeclared field"),
         }
     }
