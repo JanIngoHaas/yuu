@@ -1,10 +1,12 @@
+use ustr::Ustr;
 use yuu_shared::{
     context::Context,
     scheduler::{Pass, ResourceId},
-    type_info::{PrimitiveType, TypeInfo},
+    type_info::{PrimitiveType, StructType, TypeInfo, struct_type},
+    type_registry::TypeRegistry,
     yir::{
         BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module, Operand,
-        Register,
+        Variable,
     },
 };
 
@@ -17,19 +19,20 @@ const PREFIX_FUNCTION: &str = "fn_";
 
 struct TransientData<'a> {
     module: &'a Module,
+    tr: &'a TypeRegistry,
     output: String,
 }
 
 impl PassYirToC {
     fn write_register_name(
-        reg: &Register,
+        reg: &Variable,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}_{}", PREFIX_REGISTER, reg.name(), reg.id())
     }
 
     fn write_memory_name(
-        reg: &Register,
+        reg: &Variable,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}_{}", PREFIX_MEMORY, reg.name(), reg.id())
@@ -44,6 +47,34 @@ impl PassYirToC {
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}", PREFIX_FUNCTION, name)
+    }
+
+    fn def_struct(
+        &self,
+        data: &mut TransientData,
+        struct_name: Ustr,
+    ) -> Result<(), std::fmt::Error> {
+        let sinfo = data
+            .tr
+            .resolve_struct(struct_name)
+            .expect("Compiler Bug: Struct not found when lowering to C");
+        /*
+        typedef struct struct_name {
+            type1 field1;
+            type2 field2;
+            ...
+        } struct_name;
+        */
+
+        write!(data.output, "struct {}{{", sinfo.name.as_str())?;
+
+        for (fname, finfo) in sinfo.fields.iter() {
+            self.gen_type(data, finfo.ty)?;
+            write!(data.output, " {};", fname.as_str())?;
+        }
+
+        write!(data.output, "}} {};", sinfo.name.as_str())?;
+        Ok(())
     }
 
     fn gen_type(
@@ -72,7 +103,9 @@ impl PassYirToC {
             TypeInfo::Error => panic!(
                 "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
             ),
-            TypeInfo::Struct(struct_type) => todo!(),
+            TypeInfo::Struct(struct_type) => {
+                write!(data.output, "{}", struct_type.name)
+            }
         }
     }
 
@@ -86,7 +119,7 @@ impl PassYirToC {
             Operand::F32Const(c) => write!(data.output, "({}f)", c),
             Operand::F64Const(c) => write!(data.output, "({}d)", c),
             Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
-            Operand::Register(register) => Self::write_register_name(register, &mut data.output),
+            Operand::Variable(register) => Self::write_register_name(register, &mut data.output),
             Operand::NoOp => Ok(()),
         }
     }
@@ -94,7 +127,7 @@ impl PassYirToC {
     fn gen_register(
         &self,
         data: &mut TransientData,
-        reg: &Register,
+        reg: &Variable,
     ) -> Result<(), std::fmt::Error> {
         self.gen_type(data, reg.ty())?;
         write!(data.output, " ")?;
@@ -107,7 +140,7 @@ impl PassYirToC {
         data: &mut TransientData,
     ) -> anyhow::Result<()> {
         match instruction {
-            Instruction::Assign { target, value } => {
+            Instruction::BitwiseCopy { target, value } => {
                 self.gen_register(data, target)?;
                 write!(data.output, "=")?;
                 self.gen_operand(data, value)?;
@@ -147,11 +180,14 @@ impl PassYirToC {
                 write!(data.output, "=*")?;
                 self.gen_operand(data, address)?;
             }
-            Instruction::Store { address, value } => {
+            Instruction::Store {
+                address,
+                value,
+            } => {
                 write!(data.output, "*")?;
                 self.gen_operand(data, address)?;
                 write!(data.output, "=")?;
-                self.gen_operand(data, value)?;
+                self.gen_operand(data, value)?;                
             }
             Instruction::Alloca { target } => {
                 self.gen_type(data, target.ty().deref_ptr())?;
@@ -181,6 +217,31 @@ impl PassYirToC {
             }
             Instruction::Omega { target, .. } => {
                 self.gen_register(data, target)?;
+            }
+            Instruction::GetField {
+                target,
+                base,
+                field,
+            } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "&(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, ".{})", field.as_str())?;
+            }
+            Instruction::SizeOf { target, ty } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "sizeof(")?;
+                self.gen_type(data, ty)?;
+                write!(data.output, ")")?;
+            }
+            Instruction::AlignOf { target, ty } => {
+                self.gen_register(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "__alignof(")?;
+                self.gen_type(data, ty)?;
+                write!(data.output, ")")?;
             }
         }
         write!(data.output, ";")?;
@@ -303,6 +364,12 @@ impl PassYirToC {
         writeln!(data.output, "#include <stdint.h>\n")?;
         writeln!(data.output, "#include <stdbool.h>\n")?;
 
+        // Generate struct defs
+        // TODO: this needs to properly sorted first according to dependency analysis, but for now it's okay
+        for sname in data.module.structs.iter() {
+            self.def_struct(data, *sname)?;
+        }
+
         // Generate function declarations
         for function_state in data.module.functions.values() {
             match function_state {
@@ -343,9 +410,14 @@ impl Pass for PassYirToC {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
         let module = context.get_resource::<Module>(self);
         let module = module.lock().unwrap();
+
+        let tr = context.get_resource::<TypeRegistry>(self);
+        let tr = tr.lock().unwrap();
+
         let mut data = TransientData {
             module: &module,
             output: String::new(),
+            tr: &tr,
         };
 
         // Generate code for each function
@@ -361,6 +433,7 @@ impl Pass for PassYirToC {
         Self: Sized,
     {
         schedule.requires_resource_read::<Module>(&self);
+        schedule.requires_resource_read::<TypeRegistry>(&self);
         schedule.produces_resource::<CSourceCode>(&self);
         schedule.add_pass(self);
     }

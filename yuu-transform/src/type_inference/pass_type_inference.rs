@@ -78,8 +78,8 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
             data.type_registry.type_info_table.insert(def.body.id, ret);
         }
         StructuralNode::Error(_) => (),
-        StructuralNode::StructDecl(struct_decl) => {
-            todo!("Currently, struct declarations without definitions are not supported.")
+        StructuralNode::StructDecl(_struct_decl) => {
+            unimplemented!("StructDecls are not supported");
         }
         StructuralNode::StructDef(struct_def) => {
             let mut struct_defs = FieldsMap::default();

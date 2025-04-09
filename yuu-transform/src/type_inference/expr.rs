@@ -316,7 +316,19 @@ fn infer_func_call(
             // This is a compiler bug, so keep the panic
             panic!("Compiler bug: Inactive type as return type of function")
         }
-        TypeInfo::Struct(struct_type) => todo!(),
+        TypeInfo::Struct(_struct_type) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message("Cannot call a struct type identifier as a function")
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), "struct type")
+                .build();
+            data.errors.push(err);
+            error_type()
+        },
         TypeInfo::Error => error_type(),
     };
 
@@ -597,9 +609,9 @@ pub fn infer_expr(
 
             if struct_opt.is_none() {
                 let err = YuuError::builder()
-                    .kind(ErrorKind::ReferencedUndeclaredStruct)
+                    .kind(ErrorKind::ReferencedUndefinedStruct)
                     .message(format!(
-                        "Cannot instantiate struct '{}' because it has not been declared",
+                        "Cannot instantiate struct '{}' because it has not been defined",
                         struct_name
                     ))
                     .source(
@@ -608,7 +620,7 @@ pub fn infer_expr(
                     )
                     .span(
                         struct_instantiation_expr.span.clone(),
-                        "attempted to instantiate undeclared struct",
+                        "attempted to instantiate undefined struct",
                     )
                     .help("Define this struct before using it")
                     .build();

@@ -3,6 +3,7 @@ use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
+use crate::type_registry::StructInfo;
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -209,26 +210,26 @@ fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
     })
 }
 
-#[derive(Clone)]
-pub struct Register {
+#[derive(Copy, Clone)]
+pub struct Variable {
     name: Ustr,
     id: i64,
     ty: &'static TypeInfo,
 }
 
-impl Hash for Register {
+impl Hash for Variable {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl PartialEq for Register {
+impl PartialEq for Variable {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl Eq for Register {}
+impl Eq for Variable {}
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct Label {
@@ -242,7 +243,7 @@ impl fmt::Display for Label {
     }
 }
 
-impl Register {
+impl Variable {
     pub fn new(name: Ustr, id: i64, ty: &'static TypeInfo) -> Self {
         Self { name, id, ty }
     }
@@ -284,7 +285,7 @@ pub enum Operand {
     F32Const(f32),
     F64Const(f64),
     BoolConst(bool),
-    Register(Register),
+    Variable(Variable),
     NoOp,
 }
 
@@ -295,7 +296,7 @@ impl Operand {
             Operand::F32Const(_) => primitive_f32(),
             Operand::F64Const(_) => primitive_f64(),
             Operand::BoolConst(_) => primitive_bool(),
-            Operand::Register(reg) => reg.ty(),
+            Operand::Variable(reg) => reg.ty(),
             Operand::NoOp => primitive_nil(),
         }
     }
@@ -317,39 +318,49 @@ pub enum UnaryOp {
 
 #[derive(Clone)]
 pub enum Instruction {
-    Assign {
-        target: Register,
+    SizeOf {
+        target: Variable,
+        ty: &'static TypeInfo,
+    },
+    AlignOf {
+        target: Variable,
+        ty: &'static TypeInfo,
+    },
+    GetField {
+        target: Variable,
+        base: Operand,
+        field: Ustr,
+    },
+    BitwiseCopy {
+        target: Variable,
         value: Operand,
     },
     Binary {
-        target: Register,
+        target: Variable,
         op: BinOp,
         lhs: Operand,
         rhs: Operand,
     },
     Unary {
-        target: Register,
+        target: Variable,
         op: UnaryOp,
         operand: Operand,
     },
-    Load {
-        target: Register,
+    Ref {
+        target: Variable,
         address: Operand,
     },
-    Store {
-        address: Operand,
+    Deref {
+        target: Variable,
         value: Operand,
     },
-    Alloca {
-        target: Register,
-    },
     Call {
-        target: Option<Register>,
+        target: Option<Variable>,
         name: Ustr,
         args: Vec<Operand>,
     },
     Omega {
-        target: Register,
+        target: Variable,
         writable_blocks: Arc<Mutex<Vec<Label>>>, // Share the same Arc<Mutex> as in omega_blocks
     },
 }
@@ -358,15 +369,15 @@ pub enum Instruction {
 pub enum ControlFlow {
     Jump {
         target: Label,
-        writes: Vec<(Register, Operand)>, // Omikron writes at jump
+        writes: Vec<(Variable, Operand)>, // Omikron writes at jump
     },
     Branch {
         condition: Operand,
-        if_true: (Label, Vec<(Register, Operand)>), // Writes for true branch
-        if_false: (Label, Vec<(Register, Operand)>), // Writes for false branch
+        if_true: (Label, Vec<(Variable, Operand)>), // Writes for true branch
+        if_false: (Label, Vec<(Variable, Operand)>), // Writes for false branch
     },
     Return(Option<Operand>),
-    Fallthrough(Vec<(Register, Operand)>), // Writes for fallthrough
+    Fallthrough(Vec<(Variable, Operand)>), // Writes for fallthrough
 }
 
 #[derive(Clone)]
@@ -388,14 +399,14 @@ impl BasicBlock {
 #[derive(Clone)]
 pub struct Function {
     pub name: Ustr,
-    pub params: Vec<Register>,
+    pub params: Vec<Variable>,
     pub return_type: &'static TypeInfo,
     pub blocks: IndexMap<i64, BasicBlock>,
     pub entry_block: i64,
     current_block: i64,
     next_reg_id: i64,
     next_label_id: i64,
-    omega_blocks: IndexMap<Register, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
+    omega_blocks: IndexMap<Variable, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
 }
 
 impl Function {
@@ -415,18 +426,20 @@ impl Function {
         f
     }
 
-    pub fn fresh_register(&mut self, name: Ustr, ty: &'static TypeInfo) -> Register {
+    pub fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
         let id = self.next_reg_id;
         self.next_reg_id += 1;
-        Register::new(name, id, ty)
+        Variable::new(name, id, ty)
     }
 
     pub fn get_block_mut(&mut self, id: i64) -> Option<&mut BasicBlock> {
         self.blocks.get_mut(&id)
     }
 
-    pub fn get_current_block_mut(&mut self) -> Option<&mut BasicBlock> {
-        self.blocks.get_mut(&self.current_block)
+    pub fn get_current_block_mut(&mut self) -> &mut BasicBlock {
+        self.blocks
+            .get_mut(&self.current_block)
+            .expect("Compiler Error: No current block")
     }
 
     pub fn get_current_block(&self) -> Option<&BasicBlock> {
@@ -460,7 +473,7 @@ impl Function {
         label
     }
 
-    fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Register, Operand)>) {
+    fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Variable, Operand)>) {
         let current_label = self.blocks.get(&self.current_block).unwrap().label.clone();
 
         for (reg, _) in writes {
@@ -473,8 +486,8 @@ impl Function {
 
     fn gen_writes_if_not_nop(
         &mut self,
-        writes: Vec<(Register, Operand)>,
-    ) -> Vec<(Register, Operand)> {
+        writes: Vec<(Variable, Operand)>,
+    ) -> Vec<(Variable, Operand)> {
         writes
             .into_iter()
             .filter(|(_, op)| !matches!(op, Operand::NoOp))
@@ -494,7 +507,7 @@ impl Function {
         }
     }
 
-    pub fn make_jump(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
+    pub fn make_jump(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
         let writes = self.gen_writes_if_not_nop(writes);
         self.update_omega_writes(writes.iter());
         self.blocks
@@ -509,7 +522,7 @@ impl Function {
         }
     }
 
-    pub fn make_fallthrough(&mut self, writes: Vec<(Register, Operand)>) {
+    pub fn make_fallthrough(&mut self, writes: Vec<(Variable, Operand)>) {
         let writes = self.gen_writes_if_not_nop(writes);
         self.update_omega_writes(writes.iter());
         self.blocks
@@ -521,8 +534,8 @@ impl Function {
     pub fn set_branch_writes(
         &mut self,
         condition: Operand,
-        if_true: (Label, Vec<(Register, Operand)>),
-        if_false: (Label, Vec<(Register, Operand)>),
+        if_true: (Label, Vec<(Variable, Operand)>),
+        if_false: (Label, Vec<(Variable, Operand)>),
     ) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.terminator = ControlFlow::Branch {
@@ -533,20 +546,30 @@ impl Function {
         }
     }
 
-    pub fn make_assign(&mut self, target: Register, value: Operand) {
+    pub fn make_bitwise_copy(&mut self, target: Variable, value: Operand) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block
                 .instructions
-                .push(Instruction::Assign { target, value });
+                .push(Instruction::BitwiseCopy { target, value });
         }
     }
 
-    pub fn make_unary(&mut self, target: Register, op: UnaryOp, operand: Operand) {
+    pub fn make_unary(&mut self, target: Variable, op: UnaryOp, operand: Operand) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Unary {
                 target,
                 op,
                 operand,
+            });
+        }
+    }
+
+    pub fn make_get_field(&mut self, target: Variable, base: Operand, field: Ustr) {
+        if let Some(block) = self.blocks.get_mut(&self.current_block) {
+            block.instructions.push(Instruction::GetField {
+                target,
+                base,
+                field,
             });
         }
     }
@@ -558,8 +581,8 @@ impl Function {
         lhs: Operand,
         rhs: Operand,
         ty: &'static TypeInfo,
-    ) -> Register {
-        let target = self.fresh_register(name, ty);
+    ) -> Variable {
+        let target = self.fresh_variable(name, ty);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Binary {
                 target: target.clone(),
@@ -571,23 +594,23 @@ impl Function {
         target
     }
 
-    pub fn make_store(&mut self, address: Operand, value: Operand) {
+    pub fn make_deref(&mut self, target: Variable, value: Operand) {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block
                 .instructions
-                .push(Instruction::Store { address, value });
+                .push(Instruction::Deref { address, value });
         }
     }
 
-    pub fn make_load(
+    pub fn make_ref(
         &mut self,
         name: Ustr,
         address: Operand,
         value_type: &'static TypeInfo,
-    ) -> Register {
-        let target = self.fresh_register(name, value_type);
+    ) -> Variable {
+        let target = self.fresh_variable(name, value_type);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Load {
+            block.instructions.push(Instruction::Ref {
                 target: target.clone(),
                 address,
             });
@@ -595,15 +618,25 @@ impl Function {
         target
     }
 
-    pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> Register {
-        let ptr_type = value_type.ptr_to();
-        let target = self.fresh_register(name, ptr_type);
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Alloca {
-                target: target.clone(),
-            });
-        }
-        target
+    // pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> Register {
+    //     let ptr_type = value_type.ptr_to();
+    //     let target = self.fresh_register(name, ptr_type);
+    //     if let Some(block) = self.blocks.get_mut(&self.current_block) {
+    //         block.instructions.push(Instruction::Alloca {
+    //             target: target.clone(),
+    //         });
+    //     }
+    //     target
+    // }
+
+    pub fn make_sizeof(&mut self, target: Variable, ty: &'static TypeInfo) {
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::SizeOf { target, ty });
+    }
+
+    pub fn make_alignof(&mut self, target: Variable, ty: &'static TypeInfo) {
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::AlignOf { target, ty });
     }
 
     pub fn make_call(
@@ -612,11 +645,11 @@ impl Function {
         func_name: Ustr,
         args: Vec<Operand>,
         return_type: &'static TypeInfo,
-    ) -> Option<Register> {
+    ) -> Option<Variable> {
         if return_type.is_nil() {
             return None;
         }
-        let target = self.fresh_register(name, return_type);
+        let target = self.fresh_variable(name, return_type);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Call {
                 target: Some(target.clone()),
@@ -632,8 +665,8 @@ impl Function {
         condition: Operand,
         then: Label,
         else_: Label,
-        then_writes: Vec<(Register, Operand)>,
-        else_writes: Vec<(Register, Operand)>,
+        then_writes: Vec<(Variable, Operand)>,
+        else_writes: Vec<(Variable, Operand)>,
     ) {
         let then_writes = self.gen_writes_if_not_nop(then_writes);
         let else_writes = self.gen_writes_if_not_nop(else_writes);
@@ -653,8 +686,8 @@ impl Function {
     pub fn make_branch(
         &mut self,
         condition: Operand,
-        then_writes: Vec<(Register, Operand)>,
-        else_writes: Vec<(Register, Operand)>,
+        then_writes: Vec<(Variable, Operand)>,
+        else_writes: Vec<(Variable, Operand)>,
     ) -> (Label, Label) {
         let true_label = self.fresh_label("then".intern());
         let false_label = self.fresh_label("else".intern());
@@ -705,7 +738,7 @@ impl Function {
     //     }
     // }
 
-    pub fn make_omega(&mut self, target: Register) {
+    pub fn make_omega(&mut self, target: Variable) {
         let blocks = Arc::new(Mutex::new(Vec::new()));
 
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
@@ -730,7 +763,7 @@ impl Function {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            write!(f, "{}", format_register(reg, do_color))?;
+            write!(f, "{}", format_variable(reg, do_color))?;
         }
         writeln!(f, ") -> {} {{", format_type(self.return_type, do_color))?;
 
@@ -745,11 +778,11 @@ impl Function {
             for inst in &block.instructions {
                 write!(f, "    ")?;
                 match inst {
-                    Instruction::Assign { target, value } => {
+                    Instruction::BitwiseCopy { target, value } => {
                         writeln!(
                             f,
                             "{} := {}",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_operand(value, do_color)
                         )?;
                     }
@@ -762,7 +795,7 @@ impl Function {
                         writeln!(
                             f,
                             "{} := {} {} {}",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_operand(lhs, do_color),
                             format_binop(op, do_color),
                             format_operand(rhs, do_color)
@@ -776,7 +809,7 @@ impl Function {
                         writeln!(
                             f,
                             "{} := {}{}",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_unop(op, do_color),
                             format_operand(operand, do_color)
                         )?;
@@ -785,7 +818,7 @@ impl Function {
                         writeln!(
                             f,
                             "{} := {} {}",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_keyword("load", do_color),
                             format_operand(address, do_color)
                         )?;
@@ -803,13 +836,13 @@ impl Function {
                         writeln!(
                             f,
                             "{} := {}",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_keyword("alloca", do_color)
                         )?;
                     }
                     Instruction::Call { target, name, args } => {
                         if let Some(target) = target {
-                            write!(f, "{} := ", format_register(target, do_color))?;
+                            write!(f, "{} := ", format_variable(target, do_color))?;
                         }
                         write!(f, "{} {}(", format_keyword("call", do_color), name)?;
                         for (i, arg) in args.iter().enumerate() {
@@ -827,7 +860,7 @@ impl Function {
                         write!(
                             f,
                             "{} := {} [",
-                            format_register(target, do_color),
+                            format_variable(target, do_color),
                             format_keyword("Ω", do_color)
                         )?;
                         for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
@@ -838,6 +871,22 @@ impl Function {
                         }
                         writeln!(f, "]")?;
                     }
+                    Instruction::GetField {
+                        target,
+                        base,
+                        field,
+                    } => {
+                        writeln!(
+                            f,
+                            "{} := {} {} {}",
+                            format_variable(target, do_color),
+                            format_keyword("field_ptr", do_color),
+                            format_operand(base, do_color),
+                            colorize(&format!(".{}", field), "operator", do_color)
+                        )?;
+                    }
+                    Instruction::SizeOf { target, ty } => todo!(),
+                    Instruction::AlignOf { target, ty } => todo!(),
                 }
             }
 
@@ -894,6 +943,7 @@ impl Function {
 
 pub struct Module {
     pub functions: UstrMap<FunctionDeclarationState>,
+    pub structs: Vec<Ustr>, // Just the names... NOthing else is really needed for
 }
 
 impl ResourceId for Module {
@@ -912,7 +962,12 @@ impl Module {
     pub fn new() -> Self {
         Self {
             functions: UstrMap::default(),
+            structs: Vec::new(),
         }
+    }
+
+    pub fn define_struct(&mut self, name: Ustr) {
+        self.structs.push(name);
     }
 
     pub fn declare_function(&mut self, func: Function) {
@@ -974,7 +1029,7 @@ fn format_type(ty: &TypeInfo, do_color: bool) -> String {
     colorize(&s, "type", do_color)
 }
 
-fn format_register(reg: &Register, do_color: bool) -> String {
+fn format_variable(reg: &Variable, do_color: bool) -> String {
     let base_name = reg.name();
     let name = if reg.id() == 0 {
         base_name.to_string()
@@ -1018,7 +1073,7 @@ fn format_operand(op: &Operand, do_color: bool) -> String {
                 colorize("@bool", "type", do_color)
             )
         }
-        Operand::Register(reg) => {
+        Operand::Variable(reg) => {
             let name = if reg.id() == 0 {
                 reg.name().to_string()
             } else {
@@ -1065,7 +1120,7 @@ fn format_unop(op: &UnaryOp, do_color: bool) -> String {
 }
 
 // Add helper function for formatting Omikron writes
-fn format_omikron_writes(writes: &[(Register, Operand)], do_color: bool) -> String {
+fn format_omikron_writes(writes: &[(Variable, Operand)], do_color: bool) -> String {
     if writes.is_empty() {
         "ο{}".to_string()
     } else {
@@ -1074,7 +1129,7 @@ fn format_omikron_writes(writes: &[(Register, Operand)], do_color: bool) -> Stri
             .map(|(reg, val)| {
                 format!(
                     "{} = {}",
-                    format_register(reg, do_color),
+                    format_variable(reg, do_color),
                     format_operand(val, do_color)
                 )
             })
