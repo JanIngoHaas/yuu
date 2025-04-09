@@ -83,12 +83,56 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{pass_ast_to_yir::PassAstToYir, pass_check_errors::PassPrintErrors, type_inference::PassTypeInference};
+    use crate::{
+        pass_ast_to_yir::PassAstToYir, pass_check_errors::PassPrintErrors,
+        type_inference::PassTypeInference,
+    };
     use yuu_parse::pass_parse::PassParse;
     use yuu_shared::{
         ast::SourceInfo,
         scheduler::{Schedule, Scheduler},
     };
+
+    #[test]
+    fn test_struct_yir() {
+        // Define a struct (three members, f32, i64, f32). Define function which takes a such a struct and returns a struct. We create a struct in the function and return it.
+        let code_info = SourceInfo {
+            source: Arc::from(
+                r#"struct Point {
+                    x: f32,
+                    y: i64,
+                    z: f32,
+                }
+                
+                fn create_point(x: f32, y: i64, z: f32) -> Point {
+                    Point { x:x, y:y, z:z }!
+                }"#,
+            ),
+            file_name: Arc::from("test.yuu"),
+        };
+
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+        let mut schedule = Schedule::new();
+
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
+        PassPrintErrors.install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR:\n{}", yir_output.0);
+    }
 
     #[test]
     fn test_fac_yir() {

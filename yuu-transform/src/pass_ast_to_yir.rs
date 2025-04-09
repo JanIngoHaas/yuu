@@ -4,37 +4,36 @@ use indexmap::IndexMap;
 use ustr::Ustr;
 use yuu_shared::{
     ast::{
-        BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp, AST
+        AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
+        StructuralNode, UnaryOp,
     },
     block::BindingTable,
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
     type_registry::{self, TypeRegistry},
-    yir::{self, BinOp as YirBinOp, Function, Module, Operand, Variable, UnaryOp as YirUnaryOp},
+    yir::{self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable},
 };
 
 pub struct TransientData<'a> {
     pub function: Function,
     tr: &'a TypeRegistry,
-    register_bindings: IndexMap<NodeId, Variable>,
-    block_labels: IndexMap<NodeId, (yir::Label, Variable)>, // Maps block ID to its label and omega register
+    variable_bindings: IndexMap<NodeId, Variable>,
+    block_labels: IndexMap<NodeId, (yir::Label, Variable)>, // Maps block ID to its label and omega variable
 }
 
 impl<'a> TransientData<'a> {
-    fn new(
-        function: Function,
-        tr: &'a TypeRegistry,
-    ) -> Self {
+    fn new(function: Function, tr: &'a TypeRegistry) -> Self {
         Self {
             function,
             tr,
-            register_bindings: IndexMap::new(),
+            variable_bindings: IndexMap::new(),
             block_labels: IndexMap::new(),
         }
     }
 
     fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
-        self.tr.type_info_table
+        self.tr
+            .type_info_table
             .types
             .get(&node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
@@ -44,8 +43,8 @@ impl<'a> TransientData<'a> {
         let ty = self.get_type(id);
         let target = self.function.fresh_variable(ident, ty);
         // bitwise-copy of value into target
-        self.function.make_bitwise_copy(target.clone(), value);
-        self.register_bindings.insert(id, target);
+        self.function.make_store(target, value);
+        self.variable_bindings.insert(id, target);
     }
 
     fn allocate_and_initialize_binding(&mut self, binding: &BindingNode, value: Operand) {
@@ -105,9 +104,12 @@ impl<'a> TransientData<'a> {
 
                 match un_expr.op {
                     UnaryOp::Negate => {
-                        let target = self.function.fresh_variable("neg_result".intern(), ty);
-                        self.function
-                            .make_unary(target.clone(), YirUnaryOp::Neg, operand);
+                        let target = self.function.make_unary(
+                            "neg_result".intern(),
+                            ty,
+                            YirUnaryOp::Neg,
+                            operand,
+                        );
                         Operand::Variable(target)
                     }
                     UnaryOp::Pos => operand,
@@ -117,13 +119,14 @@ impl<'a> TransientData<'a> {
             ExprNode::Ident(ident_expr) => {
                 debug_assert!(self.tr.bindings.contains_key(&ident_expr.id));
                 debug_assert!(
-                    self.register_bindings
+                    self.variable_bindings
                         .contains_key(&self.tr.bindings[&ident_expr.id])
                 );
                 if let Some(reg) = self
-                    .tr.bindings
+                    .tr
+                    .bindings
                     .get(&ident_expr.id)
-                    .and_then(|x| self.register_bindings.get(x))
+                    .and_then(|x| self.variable_bindings.get(x))
                 {
                     Operand::Variable(*reg)
                 } else {
@@ -157,36 +160,39 @@ impl<'a> TransientData<'a> {
 
                 match binding.as_ref() {
                     BindingNode::Ident(ident_binding) => {
-                        let target = self.register_bindings.get(&ident_binding.id).unwrap();
-                        self.function
-                            .make_store(Operand::Variable(target.clone()), value);
-                        Operand::Variable(target.clone())
+                        let target = *self.variable_bindings.get(&ident_binding.id).unwrap();
+                        self.function.make_store(target, value);
+                        Operand::Variable(target)
                     }
                 }
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
-                let sinfo = self.tr.resolve_struct(struct_instantiation_expr.struct_name).expect("Compiler bug: struct not found in lowering to YIR");
+                let sinfo = self
+                    .tr
+                    .resolve_struct(struct_instantiation_expr.struct_name)
+                    .expect("Compiler bug: struct not found in lowering to YIR");
                 // Alloc
-                let struct_reg = self.function.fresh_variable(
-                    struct_instantiation_expr.struct_name.clone(),
-                    &sinfo.ty, 
-                );
+                let struct_reg = self
+                    .function
+                    .fresh_variable(struct_instantiation_expr.struct_name.clone(), &sinfo.ty);
 
                 // Generate code for the struct's fields expressions:
                 for (field, field_expr) in &struct_instantiation_expr.fields {
                     let field_name = field.name;
                     let field_op = self.lower_expr(field_expr);
-                    let field = sinfo.fields.get(&field_name).expect("Compiler bug: field not found in lowering to YIR");
-                    let field_reg = self.function.fresh_variable(field_name, field.ty);
+                    let field = sinfo
+                        .fields
+                        .get(&field_name)
+                        .expect("Compiler bug: field not found in lowering to YIR");
                     // Use the GetFieldPtr instruction to get the pointer to the field
-                    self.function.make_get_field(
-                        field_reg,
+                    let field_reg = self.function.make_get_field_ptr(
+                        field_name,
                         Operand::Variable(struct_reg),
-                        field_name
+                        field,
                     );
 
                     // Store the value into the field
-                    self.function.make_store(Operand::Variable(field_reg), field_op);
+                    self.function.make_store(field_reg, field_op);
                 }
 
                 // Return the pointer to the struct
@@ -196,19 +202,17 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
-        // For labeled blocks, create omega register
+        // For labeled blocks, create omega variable
         let omega_with_label = if let Some(label_name) = block_expr.label.as_ref() {
             let omega = self
                 .function
-                .fresh_variable("block_return".intern(), self.get_type(block_expr.id));
-            self.function.make_omega(omega.clone());
+                .make_omega("block_return".intern(), self.get_type(block_expr.id));
 
             // Make a labeld_block_merge bb that we jump to...
             let block = self.function.add_block(
                 /*format!("{}_merge", label.as_str()).intern()*/ *label_name,
             );
-            self.block_labels
-                .insert(block_expr.id, (block.clone(), omega.clone())); // That's where we jump to from deep within the callstack
+            self.block_labels.insert(block_expr.id, (block, omega)); // That's where we jump to from deep within the callstack
 
             Some((omega, block))
         } else {
@@ -262,11 +266,12 @@ impl<'a> TransientData<'a> {
                 //     .block_labels
                 //     .contains_key(&self.binding_table[&exit_stmt.id]));
                 if let Some((target_label, omega_reg)) = self
-                    .tr.bindings
+                    .tr
+                    .bindings
                     .get(&exit_stmt.id)
                     .and_then(|x| self.block_labels.get(x))
                 {
-                    // Write the break value to the block's omega register
+                    // Write the break value to the block's omega variable
                     self.function
                         .make_jump(target_label.clone(), vec![(omega_reg.clone(), value)]);
                 }
@@ -285,11 +290,10 @@ impl<'a> TransientData<'a> {
         let (then_label, else_label) = self.function.make_branch(cond, vec![], vec![]);
         let merge_label = self.function.add_block("merge".intern());
 
-        // Create omega register and declare it in current block
+        // Create omega variable and declare it in current block
         let omega = self
             .function
-            .fresh_variable("if_result".intern(), self.get_type(if_expr.id));
-        self.function.make_omega(omega.clone());
+            .make_omega("if_result".intern(), self.get_type(if_expr.id));
 
         // Lower the then block, setting merge as its next block
         self.function.set_current_block(&then_label);
@@ -339,18 +343,16 @@ impl PassAstToYir {
                         _ => panic!("Expected function type"),
                     };
 
-                    let mut data = TransientData::new(
-                        Function::new(func.decl.name.clone(), return_type),
-                        tr,
-                    );
+                    let mut data =
+                        TransientData::new(Function::new(func.decl.name.clone(), return_type), tr);
 
                     // Add parameters
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name.clone());
                         let param = data.function.fresh_variable(name, ty);
                         data.function.params.push(param);
-                        // Register the parameter
-                        data.register_bindings.insert(arg.id, param);
+                        // variable the parameter
+                        data.variable_bindings.insert(arg.id, param);
                     }
 
                     // Process the function body block
@@ -362,7 +364,7 @@ impl PassAstToYir {
                 // Define structs
                 StructuralNode::StructDef(sdefs) => {
                     module.define_struct(sdefs.decl.name);
-                },
+                }
                 _ => (),
             }
         }

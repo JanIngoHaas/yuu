@@ -12,7 +12,7 @@ use yuu_shared::{
 
 use std::fmt::Write;
 
-const PREFIX_REGISTER: &str = "reg_";
+const PREFIX_VAR: &str = "reg_";
 const PREFIX_MEMORY: &str = "mem_";
 const PREFIX_LABEL: &str = "lbl_";
 const PREFIX_FUNCTION: &str = "fn_";
@@ -24,11 +24,8 @@ struct TransientData<'a> {
 }
 
 impl PassYirToC {
-    fn write_register_name(
-        reg: &Variable,
-        f: &mut impl std::fmt::Write,
-    ) -> Result<(), std::fmt::Error> {
-        write!(f, "{}{}_{}", PREFIX_REGISTER, reg.name(), reg.id())
+    fn write_var_name(reg: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}_{}", PREFIX_VAR, reg.name(), reg.id())
     }
 
     fn write_memory_name(
@@ -119,19 +116,19 @@ impl PassYirToC {
             Operand::F32Const(c) => write!(data.output, "({}f)", c),
             Operand::F64Const(c) => write!(data.output, "({}d)", c),
             Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
-            Operand::Variable(register) => Self::write_register_name(register, &mut data.output),
+            Operand::Variable(variable) => Self::write_var_name(variable, &mut data.output),
             Operand::NoOp => Ok(()),
         }
     }
 
-    fn gen_register(
+    fn gen_variable(
         &self,
         data: &mut TransientData,
         reg: &Variable,
     ) -> Result<(), std::fmt::Error> {
         self.gen_type(data, reg.ty())?;
         write!(data.output, " ")?;
-        Self::write_register_name(reg, &mut data.output)
+        Self::write_var_name(reg, &mut data.output)
     }
 
     fn gen_instruction(
@@ -141,7 +138,7 @@ impl PassYirToC {
     ) -> anyhow::Result<()> {
         match instruction {
             Instruction::BitwiseCopy { target, value } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 self.gen_operand(data, value)?;
             }
@@ -151,7 +148,7 @@ impl PassYirToC {
                 lhs,
                 rhs,
             } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 self.gen_operand(data, lhs)?;
                 match op {
@@ -168,41 +165,18 @@ impl PassYirToC {
                 op,
                 operand,
             } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 match op {
                     yuu_shared::yir::UnaryOp::Neg => write!(data.output, "-"),
                 }?;
                 self.gen_operand(data, operand)?;
             }
-            Instruction::Load { target, address } => {
-                self.gen_register(data, target)?;
-                write!(data.output, "=*")?;
-                self.gen_operand(data, address)?;
-            }
-            Instruction::Store {
-                address,
-                value,
-            } => {
-                write!(data.output, "*")?;
-                self.gen_operand(data, address)?;
-                write!(data.output, "=")?;
-                self.gen_operand(data, value)?;                
-            }
-            Instruction::Alloca { target } => {
-                self.gen_type(data, target.ty().deref_ptr())?;
-                write!(data.output, " ")?;
-                Self::write_memory_name(target, &mut data.output)?;
-                write!(data.output, ";")?;
-                self.gen_register(data, target)?;
-                write!(data.output, "=&")?;
-                Self::write_memory_name(target, &mut data.output)?;
-            }
             Instruction::Call { target, name, args } => {
                 if let Some(target) = target {
                     self.gen_type(data, target.ty())?;
                     write!(data.output, " ")?;
-                    Self::write_register_name(target, &mut data.output)?;
+                    Self::write_var_name(target, &mut data.output)?;
                     write!(data.output, "=")?;
                 }
                 Self::write_function_name(name, &mut data.output)?;
@@ -216,32 +190,44 @@ impl PassYirToC {
                 write!(data.output, ")")?;
             }
             Instruction::Omega { target, .. } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
             }
-            Instruction::GetField {
+            Instruction::GetFieldPtr {
                 target,
                 base,
                 field,
             } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 write!(data.output, "&(")?;
                 self.gen_operand(data, base)?;
                 write!(data.output, ".{})", field.as_str())?;
             }
             Instruction::SizeOf { target, ty } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 write!(data.output, "sizeof(")?;
                 self.gen_type(data, ty)?;
                 write!(data.output, ")")?;
             }
             Instruction::AlignOf { target, ty } => {
-                self.gen_register(data, target)?;
+                self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
                 write!(data.output, "__alignof(")?;
                 self.gen_type(data, ty)?;
                 write!(data.output, ")")?;
+            }
+            Instruction::TakeAddress { target, value } => {
+                self.gen_variable(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "&")?;
+                self.gen_operand(data, value)?;
+            }
+            Instruction::Store { target, value } => {
+                self.gen_variable(data, target)?;
+                write!(data.output, "=")?;
+                write!(data.output, "*")?;
+                self.gen_operand(data, value)?;
             }
         }
         write!(data.output, ";")?;
@@ -264,7 +250,7 @@ impl PassYirToC {
                 // Generate Omikron writes
                 for (reg, value) in writes {
                     write!(data.output, "    ")?;
-                    Self::write_register_name(reg, &mut data.output)?;
+                    Self::write_var_name(reg, &mut data.output)?;
                     write!(data.output, "=")?;
                     self.gen_operand(data, value)?;
                     writeln!(data.output, ";")?;
@@ -285,7 +271,7 @@ impl PassYirToC {
                 // Generate true branch writes
                 for (reg, value) in true_writes {
                     write!(data.output, "    ")?;
-                    Self::write_register_name(reg, &mut data.output)?;
+                    Self::write_var_name(reg, &mut data.output)?;
                     write!(data.output, "=")?;
                     self.gen_operand(data, value)?;
                     writeln!(data.output, ";")?;
@@ -298,7 +284,7 @@ impl PassYirToC {
                 // Generate false branch writes
                 for (reg, value) in false_writes {
                     write!(data.output, "    ")?;
-                    Self::write_register_name(reg, &mut data.output)?;
+                    Self::write_var_name(reg, &mut data.output)?;
                     write!(data.output, "=")?;
                     self.gen_operand(data, value)?;
                     writeln!(data.output, ";")?;
@@ -318,7 +304,7 @@ impl PassYirToC {
                 // Generate Omikron writes
                 for (reg, value) in writes {
                     write!(data.output, "    ")?;
-                    Self::write_register_name(reg, &mut data.output)?;
+                    Self::write_var_name(reg, &mut data.output)?;
                     write!(data.output, "=")?;
                     self.gen_operand(data, value)?;
                     writeln!(data.output, ";")?;
@@ -353,7 +339,7 @@ impl PassYirToC {
             if i > 0 {
                 write!(data.output, ", ")?;
             }
-            self.gen_register(data, reg)?;
+            self.gen_variable(data, reg)?;
         }
         write!(data.output, ")")?;
         Ok(())

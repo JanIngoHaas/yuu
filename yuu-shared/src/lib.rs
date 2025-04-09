@@ -11,6 +11,7 @@ pub mod context;
 pub mod error;
 pub mod scheduler;
 pub mod type_registry;
+pub mod yir_printer;
 
 #[cfg(test)]
 mod tests {

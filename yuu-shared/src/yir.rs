@@ -3,212 +3,17 @@ use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
-use crate::type_registry::StructInfo;
+use crate::type_registry::{StructFieldInfo, StructInfo};
+use crate::yir_printer;
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::sync::{Arc, Mutex};
-use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 use ustr::{Ustr, UstrMap};
 
 /*
 Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5 /
 */
-
-// Color palette system
-#[derive(Clone)]
-#[allow(clippy::upper_case_acronyms)]
-struct RGB(u8, u8, u8);
-
-struct ColorPalette {
-    colors: IndexMap<&'static str, RGB>,
-    color_choice: ColorChoice,
-}
-
-impl ColorPalette {
-    fn detect_color_choice() -> ColorChoice {
-        // Check NO_COLOR first - respect user preferences
-        if std::env::var("NO_COLOR").is_ok() {
-            return ColorChoice::Never;
-        }
-
-        // Use termcolor's auto detection
-        ColorChoice::Auto
-    }
-
-    // No need for fallback color method, as termcolor handles this automatically
-
-    #[allow(dead_code)]
-    fn deep_ocean() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(255, 255, 255)); // White
-        colors.insert("keyword", RGB(255, 215, 0)); // Deep Gold
-        colors.insert("type", RGB(64, 224, 208)); // Turquoise
-        colors.insert("register", RGB(230, 230, 250)); // Lavender
-        colors.insert("constant", RGB(46, 139, 87)); // Sea Green
-        colors.insert("label", RGB(125, 249, 255)); // Electric Blue
-        colors.insert("operator", RGB(250, 128, 114)); // Salmon
-
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    fn warm_ember() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(255, 255, 255)); // White
-        colors.insert("keyword", RGB(255, 140, 85)); // Warm Orange
-        colors.insert("type", RGB(255, 183, 138)); // Peach
-        colors.insert("register", RGB(255, 121, 121)); // Soft Red
-        colors.insert("constant", RGB(255, 218, 121)); // Warm Yellow
-        colors.insert("label", RGB(255, 166, 158)); // Coral Pink
-        colors.insert("operator", RGB(255, 110, 74)); // Burnt Orange
-
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn mystic_forest() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(255, 255, 255)); // White
-        colors.insert("keyword", RGB(144, 238, 144)); // Light Green
-        colors.insert("type", RGB(152, 251, 152)); // Pale Green
-        colors.insert("register", RGB(143, 188, 143)); // Dark Sea Green
-        colors.insert("constant", RGB(50, 205, 50)); // Lime Green
-        colors.insert("label", RGB(127, 255, 170)); // Aquamarine
-        colors.insert("operator", RGB(34, 139, 34)); // Forest Green
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn cosmic_night() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(255, 255, 255)); // White
-        colors.insert("keyword", RGB(147, 112, 219)); // Medium Purple
-        colors.insert("type", RGB(138, 43, 226)); // Blue Violet
-        colors.insert("register", RGB(216, 191, 216)); // Thistle
-        colors.insert("constant", RGB(221, 160, 221)); // Plum
-        colors.insert("label", RGB(218, 112, 214)); // Orchid
-        colors.insert("operator", RGB(186, 85, 211)); // Medium Orchid
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn neon_dreams() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(255, 255, 255)); // White
-        colors.insert("keyword", RGB(255, 110, 199)); // Hot Pink
-        colors.insert("type", RGB(0, 255, 255)); // Cyan
-        colors.insert("register", RGB(191, 255, 0)); // Neon Green
-        colors.insert("constant", RGB(255, 0, 255)); // Magenta
-        colors.insert("label", RGB(255, 255, 0)); // Yellow
-        colors.insert("operator", RGB(255, 69, 0)); // Red-Orange
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    // === Light Background Palettes ===
-
-    #[allow(dead_code)]
-    fn summer_breeze() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(0, 0, 0)); // Black
-        colors.insert("keyword", RGB(255, 110, 74)); // Burnt Orange
-        colors.insert("type", RGB(0, 119, 182)); // Ocean Blue
-        colors.insert("register", RGB(86, 130, 3)); // Olive Green
-        colors.insert("constant", RGB(255, 49, 49)); // Bright Red
-        colors.insert("label", RGB(106, 76, 147)); // Royal Purple
-        colors.insert("operator", RGB(220, 47, 2)); // Deep Red
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn cherry_blossom() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(0, 0, 0)); // Black
-        colors.insert("keyword", RGB(219, 68, 88)); // Deep Pink
-        colors.insert("type", RGB(15, 76, 129)); // Navy Blue
-        colors.insert("register", RGB(255, 87, 127)); // Bright Pink
-        colors.insert("constant", RGB(53, 80, 112)); // Steel Blue
-        colors.insert("label", RGB(234, 72, 72)); // Coral Red
-        colors.insert("operator", RGB(140, 20, 84)); // Dark Magenta
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn forest_morning() -> Self {
-        let mut colors = IndexMap::new();
-        colors.insert("function", RGB(0, 0, 0)); // Black
-        colors.insert("keyword", RGB(0, 102, 0)); // Dark Green
-        colors.insert("type", RGB(0, 77, 122)); // Deep Blue
-        colors.insert("register", RGB(153, 51, 0)); // Brown
-        colors.insert("constant", RGB(204, 51, 0)); // Dark Orange
-        colors.insert("label", RGB(0, 153, 76)); // Emerald
-        colors.insert("operator", RGB(153, 0, 0)); // Dark Red
-        Self {
-            colors,
-            color_choice: Self::detect_color_choice(),
-        }
-    }
-
-    fn get_color(&self, key: &str) -> RGB {
-        self.colors.get(key).cloned().unwrap_or(RGB(255, 255, 255))
-    }
-
-    fn get_color_choice(&self) -> ColorChoice {
-        self.color_choice
-    }
-}
-
-thread_local! {
-    static CURRENT_PALETTE: std::cell::RefCell<ColorPalette> = std::cell::RefCell::new(ColorPalette::warm_ember());
-}
-
-fn colorize(text: &str, color_key: &str, do_color: bool) -> String {
-    if !do_color {
-        return text.to_string();
-    }
-
-    CURRENT_PALETTE.with(|palette| {
-        let palette = palette.borrow();
-        let RGB(r, g, b) = palette.get_color(color_key);
-
-        // Create a buffer with the appropriate color choice
-        let writer = BufferWriter::stderr(palette.get_color_choice());
-        let mut buffer = writer.buffer();
-
-        // Create color specification
-        let mut color_spec = ColorSpec::new();
-        color_spec.set_fg(Some(Color::Rgb(r, g, b)));
-
-        // Write the text with color
-        buffer.set_color(&color_spec).ok();
-        write!(&mut buffer, "{}", text).ok();
-        buffer.reset().ok();
-
-        // Convert buffer to string
-        String::from_utf8_lossy(buffer.as_slice()).into_owned()
-    })
-}
 
 #[derive(Copy, Clone)]
 pub struct Variable {
@@ -231,7 +36,7 @@ impl PartialEq for Variable {
 
 impl Eq for Variable {}
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Label {
     name: Ustr,
     id: i64,
@@ -318,15 +123,15 @@ pub enum UnaryOp {
 
 #[derive(Clone)]
 pub enum Instruction {
-    SizeOf {
-        target: Variable,
-        ty: &'static TypeInfo,
-    },
-    AlignOf {
-        target: Variable,
-        ty: &'static TypeInfo,
-    },
-    GetField {
+    // SizeOf {
+    //     target: Variable,
+    //     ty: &'static TypeInfo,
+    // },
+    // AlignOf {
+    //     target: Variable,
+    //     ty: &'static TypeInfo,
+    // },
+    GetFieldPtr {
         target: Variable,
         base: Operand,
         field: Ustr,
@@ -346,13 +151,13 @@ pub enum Instruction {
         op: UnaryOp,
         operand: Operand,
     },
-    Ref {
-        target: Variable,
-        address: Operand,
-    },
-    Deref {
+    TakeAddress {
         target: Variable,
         value: Operand,
+    },
+    Store {
+        dest: Variable,
+        src: Operand,
     },
     Call {
         target: Option<Variable>,
@@ -501,7 +306,7 @@ impl Function {
             .unwrap_or(false)
     }
 
-    pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
+    pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
         if !self.has_terminator(self.current_block) {
             self.make_jump(target, writes);
         }
@@ -510,10 +315,7 @@ impl Function {
     pub fn make_jump(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
         let writes = self.gen_writes_if_not_nop(writes);
         self.update_omega_writes(writes.iter());
-        self.blocks
-            .get_mut(&self.current_block)
-            .expect("Compiler Error: No current block")
-            .terminator = ControlFlow::Jump { target, writes };
+        self.get_current_block_mut().terminator = ControlFlow::Jump { target, writes };
     }
 
     pub fn make_return(&mut self, value: Option<Operand>) {
@@ -546,15 +348,14 @@ impl Function {
         }
     }
 
-    pub fn make_bitwise_copy(&mut self, target: Variable, value: Operand) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block
-                .instructions
-                .push(Instruction::BitwiseCopy { target, value });
-        }
-    }
-
-    pub fn make_unary(&mut self, target: Variable, op: UnaryOp, operand: Operand) {
+    pub fn make_unary(
+        &mut self,
+        target_name: Ustr,
+        ty: &'static TypeInfo,
+        op: UnaryOp,
+        operand: Operand,
+    ) -> Variable {
+        let target = self.fresh_variable(target_name, ty);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Unary {
                 target,
@@ -562,65 +363,67 @@ impl Function {
                 operand,
             });
         }
+        target
     }
 
-    pub fn make_get_field(&mut self, target: Variable, base: Operand, field: Ustr) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::GetField {
-                target,
-                base,
-                field,
-            });
-        }
+    pub fn make_get_field_ptr(
+        &mut self,
+        target_name: Ustr,
+        base: Operand,
+        field_info: &StructFieldInfo,
+    ) -> Variable {
+        let ty = field_info.ty.ptr_to();
+        let target = self.fresh_variable(target_name, ty);
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::GetFieldPtr {
+            target,
+            base,
+            field: field_info.name,
+        });
+        target
     }
 
     pub fn make_binary(
         &mut self,
-        name: Ustr,
+        target_name: Ustr,
         op: BinOp,
         lhs: Operand,
         rhs: Operand,
         ty: &'static TypeInfo,
     ) -> Variable {
-        let target = self.fresh_variable(name, ty);
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Binary {
-                target: target.clone(),
-                op,
-                lhs,
-                rhs,
-            });
-        }
+        let target = self.fresh_variable(target_name, ty);
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::Binary {
+            target: target.clone(),
+            op,
+            lhs,
+            rhs,
+        });
         target
     }
 
-    pub fn make_deref(&mut self, target: Variable, value: Operand) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block
-                .instructions
-                .push(Instruction::Deref { address, value });
-        }
+    pub fn make_store(&mut self, dest: Variable, src: Operand) {
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::Store { dest, src });
     }
 
-    pub fn make_ref(
+    pub fn make_take_address(
         &mut self,
         name: Ustr,
-        address: Operand,
+        value: Operand,
         value_type: &'static TypeInfo,
     ) -> Variable {
-        let target = self.fresh_variable(name, value_type);
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Ref {
-                target: target.clone(),
-                address,
-            });
-        }
+        let target = self.fresh_variable(name, value_type.ptr_to());
+        let block = self.get_current_block_mut();
+        block
+            .instructions
+            .push(Instruction::TakeAddress { target, value });
         target
     }
 
-    // pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> Register {
+    // pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> variable {
     //     let ptr_type = value_type.ptr_to();
-    //     let target = self.fresh_register(name, ptr_type);
+    //     let target = self.fresh_variable(name, ptr_type);
     //     if let Some(block) = self.blocks.get_mut(&self.current_block) {
     //         block.instructions.push(Instruction::Alloca {
     //             target: target.clone(),
@@ -629,15 +432,16 @@ impl Function {
     //     target
     // }
 
-    pub fn make_sizeof(&mut self, target: Variable, ty: &'static TypeInfo) {
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::SizeOf { target, ty });
-    }
+    // pub fn make_sizeof(&mut self, target_name: Ustr, ty: &'static TypeInfo) {
+    //     let target = self.fresh_variable(target_name, primitive_i64());
+    //     let block = self.get_current_block_mut();
+    //     block.instructions.push(Instruction::SizeOf { target, ty });
+    // }
 
-    pub fn make_alignof(&mut self, target: Variable, ty: &'static TypeInfo) {
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::AlignOf { target, ty });
-    }
+    // pub fn make_alignof(&mut self, target: Variable, ty: &'static TypeInfo) {
+    //     let block = self.get_current_block_mut();
+    //     block.instructions.push(Instruction::AlignOf { target, ty });
+    // }
 
     pub fn make_call(
         &mut self,
@@ -738,7 +542,8 @@ impl Function {
     //     }
     // }
 
-    pub fn make_omega(&mut self, target: Variable) {
+    pub fn make_omega(&mut self, target_name: Ustr, ty: &'static TypeInfo) -> Variable {
+        let target = self.fresh_variable(target_name, ty);
         let blocks = Arc::new(Mutex::new(Vec::new()));
 
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
@@ -749,195 +554,11 @@ impl Function {
             });
             self.omega_blocks.insert(target, blocks);
         }
+        target
     }
 
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
-        // Print function signature
-        write!(
-            f,
-            "{} {}(",
-            format_keyword("fn", do_color),
-            self.name.as_str()
-        )?;
-        for (i, reg) in self.params.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{}", format_variable(reg, do_color))?;
-        }
-        writeln!(f, ") -> {} {{", format_type(self.return_type, do_color))?;
-
-        // Removed queue logic: instead, collect and sort blocks by label id
-        let mut blocks: Vec<&BasicBlock> = self.blocks.values().collect();
-        blocks.sort_by_key(|block| block.label.id());
-        for block in blocks {
-            // Print block label
-            writeln!(f, "{}:", format_label(block.label.name(), do_color))?;
-
-            // Print instructions
-            for inst in &block.instructions {
-                write!(f, "    ")?;
-                match inst {
-                    Instruction::BitwiseCopy { target, value } => {
-                        writeln!(
-                            f,
-                            "{} := {}",
-                            format_variable(target, do_color),
-                            format_operand(value, do_color)
-                        )?;
-                    }
-                    Instruction::Binary {
-                        target,
-                        op,
-                        lhs,
-                        rhs,
-                    } => {
-                        writeln!(
-                            f,
-                            "{} := {} {} {}",
-                            format_variable(target, do_color),
-                            format_operand(lhs, do_color),
-                            format_binop(op, do_color),
-                            format_operand(rhs, do_color)
-                        )?;
-                    }
-                    Instruction::Unary {
-                        target,
-                        op,
-                        operand,
-                    } => {
-                        writeln!(
-                            f,
-                            "{} := {}{}",
-                            format_variable(target, do_color),
-                            format_unop(op, do_color),
-                            format_operand(operand, do_color)
-                        )?;
-                    }
-                    Instruction::Load { target, address } => {
-                        writeln!(
-                            f,
-                            "{} := {} {}",
-                            format_variable(target, do_color),
-                            format_keyword("load", do_color),
-                            format_operand(address, do_color)
-                        )?;
-                    }
-                    Instruction::Store { address, value } => {
-                        writeln!(
-                            f,
-                            "{} {} <- {}",
-                            format_keyword("store", do_color),
-                            format_operand(address, do_color),
-                            format_operand(value, do_color)
-                        )?;
-                    }
-                    Instruction::Alloca { target } => {
-                        writeln!(
-                            f,
-                            "{} := {}",
-                            format_variable(target, do_color),
-                            format_keyword("alloca", do_color)
-                        )?;
-                    }
-                    Instruction::Call { target, name, args } => {
-                        if let Some(target) = target {
-                            write!(f, "{} := ", format_variable(target, do_color))?;
-                        }
-                        write!(f, "{} {}(", format_keyword("call", do_color), name)?;
-                        for (i, arg) in args.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", format_operand(arg, do_color))?;
-                        }
-                        writeln!(f, ")")?;
-                    }
-                    Instruction::Omega {
-                        target,
-                        writable_blocks,
-                    } => {
-                        write!(
-                            f,
-                            "{} := {} [",
-                            format_variable(target, do_color),
-                            format_keyword("Ω", do_color)
-                        )?;
-                        for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", format_label(block.name(), do_color))?;
-                        }
-                        writeln!(f, "]")?;
-                    }
-                    Instruction::GetField {
-                        target,
-                        base,
-                        field,
-                    } => {
-                        writeln!(
-                            f,
-                            "{} := {} {} {}",
-                            format_variable(target, do_color),
-                            format_keyword("field_ptr", do_color),
-                            format_operand(base, do_color),
-                            colorize(&format!(".{}", field), "operator", do_color)
-                        )?;
-                    }
-                    Instruction::SizeOf { target, ty } => todo!(),
-                    Instruction::AlignOf { target, ty } => todo!(),
-                }
-            }
-
-            // Print terminator
-            write!(f, "    ")?;
-            match &block.terminator {
-                ControlFlow::Jump { target, writes } => {
-                    writeln!(
-                        f,
-                        "{} {} {}",
-                        format_keyword("jump", do_color),
-                        format_label(target.name(), do_color),
-                        format_omikron_writes(writes, do_color)
-                    )?;
-                }
-                ControlFlow::Branch {
-                    condition,
-                    if_true: (true_label, true_writes),
-                    if_false: (false_label, false_writes),
-                } => {
-                    writeln!(
-                        f,
-                        "{} {} ? {} {}, {} {}",
-                        format_keyword("branch", do_color),
-                        format_operand(condition, do_color),
-                        format_label(true_label.name(), do_color),
-                        format_omikron_writes(true_writes, do_color),
-                        format_label(false_label.name(), do_color),
-                        format_omikron_writes(false_writes, do_color)
-                    )?;
-                }
-                ControlFlow::Return(value) => {
-                    write!(f, "{}", format_keyword("return", do_color))?;
-                    if let Some(val) = value {
-                        write!(f, " {}", format_operand(val, do_color))?;
-                    }
-                    writeln!(f)?;
-                }
-                ControlFlow::Fallthrough(writes) => {
-                    writeln!(
-                        f,
-                        "{} {}",
-                        format_keyword("fallthrough", do_color),
-                        format_omikron_writes(writes, do_color)
-                    )?;
-                }
-            }
-            writeln!(f)?;
-        }
-
-        writeln!(f, "}}")
+        yir_printer::format_yir(self, do_color, f)
     }
 }
 
@@ -991,9 +612,9 @@ impl Module {
                     writeln!(
                         f,
                         "{} {} : {}",
-                        format_keyword("declare", do_color),
+                        yir_printer::format_keyword("declare", do_color),
                         name,
-                        format_type(func.return_type, do_color)
+                        yir_printer::format_type(func.return_type, do_color)
                     )?;
                 }
                 FunctionDeclarationState::Defined(func) => {
@@ -1020,121 +641,5 @@ impl fmt::Display for Module {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.format_yir(false, f)
-    }
-}
-
-// Helper functions for formatting
-fn format_type(ty: &TypeInfo, do_color: bool) -> String {
-    let s = format!("@{}", ty);
-    colorize(&s, "type", do_color)
-}
-
-fn format_variable(reg: &Variable, do_color: bool) -> String {
-    let base_name = reg.name();
-    let name = if reg.id() == 0 {
-        base_name.to_string()
-    } else {
-        format!("{}.{}", base_name, reg.id())
-    };
-    format!(
-        "{}{}",
-        colorize(&name, "register", do_color),
-        format_type(reg.ty(), do_color)
-    )
-}
-
-fn format_operand(op: &Operand, do_color: bool) -> String {
-    match op {
-        Operand::I64Const(n) => {
-            format!(
-                "{}{}",
-                colorize(&n.to_string(), "constant", do_color),
-                colorize("@i64", "type", do_color)
-            )
-        }
-        Operand::F32Const(f) => {
-            format!(
-                "{}{}",
-                colorize(&f.to_string(), "constant", do_color),
-                colorize("@f32", "type", do_color)
-            )
-        }
-        Operand::F64Const(f) => {
-            format!(
-                "{}{}",
-                colorize(&f.to_string(), "constant", do_color),
-                colorize("@f64", "type", do_color)
-            )
-        }
-        Operand::BoolConst(b) => {
-            format!(
-                "{}{}",
-                colorize(&b.to_string(), "constant", do_color),
-                colorize("@bool", "type", do_color)
-            )
-        }
-        Operand::Variable(reg) => {
-            let name = if reg.id() == 0 {
-                reg.name().to_string()
-            } else {
-                format!("{}.{}", reg.name(), reg.id())
-            };
-            format!(
-                "{}{}",
-                colorize(&name, "register", do_color),
-                format_type(reg.ty(), do_color)
-            )
-        }
-        Operand::NoOp => colorize("nop", "operator", do_color),
-    }
-}
-
-fn format_keyword(keyword: &str, do_color: bool) -> String {
-    colorize(keyword, "keyword", do_color)
-}
-
-fn format_label(label: &str, do_color: bool) -> String {
-    format!(":{}", colorize(label, "label", do_color))
-}
-
-fn format_operator(op: &str, do_color: bool) -> String {
-    colorize(op, "operator", do_color)
-}
-
-fn format_binop(op: &BinOp, do_color: bool) -> String {
-    let op_str = match op {
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Eq => "==",
-    };
-    format_operator(op_str, do_color)
-}
-
-fn format_unop(op: &UnaryOp, do_color: bool) -> String {
-    let op_str = match op {
-        UnaryOp::Neg => "-",
-    };
-    format_operator(op_str, do_color)
-}
-
-// Add helper function for formatting Omikron writes
-fn format_omikron_writes(writes: &[(Variable, Operand)], do_color: bool) -> String {
-    if writes.is_empty() {
-        "ο{}".to_string()
-    } else {
-        let writes_str = writes
-            .iter()
-            .map(|(reg, val)| {
-                format!(
-                    "{} = {}",
-                    format_variable(reg, do_color),
-                    format_operand(val, do_color)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("ο{{ {} }}", writes_str)
     }
 }

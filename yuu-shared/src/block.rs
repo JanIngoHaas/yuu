@@ -1,10 +1,10 @@
 use std::ops::{Deref, DerefMut};
 
+use crate::Span;
 use crate::ast::{InternUstr, SourceInfo};
 use crate::binding_info::VariableBinding;
-use crate::error::{levenshtein_distance, ErrorKind, YuuError};
+use crate::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::scheduler::{ResourceId, ResourceName};
-use crate::Span;
 use crate::{
     ast::NodeId,
     binding_info::BindingInfo,

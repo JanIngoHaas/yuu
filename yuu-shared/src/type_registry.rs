@@ -1,6 +1,7 @@
 use std::hash::BuildHasherDefault;
 
 use indexmap::IndexMap;
+use logos::Span;
 use serde_json::value::Index;
 use ustr::{IdentityHasher, Ustr};
 
@@ -8,13 +9,12 @@ use crate::{
     ast::{InternUstr, NodeId},
     binding_info::BindingInfo,
     block::{BindingTable, Block, RootBlock},
-    error::{levenshtein_distance, YuuError},
+    error::{YuuError, levenshtein_distance},
     scheduler::ResourceId,
     type_info::{
-        function_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, struct_type,
-        FunctionType, GiveMePtrHashes, PrimitiveType, TypeInfo, TypeInfoTable,
+        FunctionType, GiveMePtrHashes, PrimitiveType, TypeInfo, TypeInfoTable, function_type,
+        primitive_bool, primitive_f32, primitive_f64, primitive_i64, struct_type,
     },
-    Span,
 };
 
 #[derive(Clone)]
@@ -210,7 +210,6 @@ impl TypeRegistry {
         self.type_info_table.types.insert(id, ty);
     }
 
-
     pub fn add_struct(
         &mut self,
         fields: FieldsMap<StructFieldInfo>,
@@ -292,10 +291,10 @@ impl TypeRegistry {
 
     pub fn get_similar_names_struct(&self, name: Ustr, max_dst: usize) -> Vec<Ustr> {
         self.structs
-           .keys()
-           .filter(|x| levenshtein_distance(name.as_str(), x.as_str()) <= max_dst)
-           .cloned()
-           .collect()
+            .keys()
+            .filter(|x| levenshtein_distance(name.as_str(), x.as_str()) <= max_dst)
+            .cloned()
+            .collect()
     }
 
     pub fn resolve_function(

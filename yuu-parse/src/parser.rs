@@ -91,16 +91,34 @@ impl Parser {
         (span_clone, ExprNode::Ident(ident_expr))
     }
 
+    // Inspired by: https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
     fn parse_primary_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
-        let t = self.lexer.next_token();
-        match &t.kind {
+        let peek = self.lexer.peek();
+
+        match &peek.kind {
             TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) => {
+                let t = self.lexer.next_token(); // Consume the token
                 Ok(self.make_literal_expr(t))
             }
 
-            TokenKind::Ident(ident) => Ok(self.make_ident_expr(ident.clone(), t.span)),
+            TokenKind::Ident(_) => {
+                // Check if this identifier is followed by a left brace (struct instantiation)
+                let peek_next = self.lexer.peek_at(1);
+                if peek_next.kind == TokenKind::LBrace {
+                    // This is a struct instantiation expression
+                    return self.parse_struct_instantiation_expr();
+                }
+
+                // Regular identifier
+                let t = self.lexer.next_token();
+                match t.kind {
+                    TokenKind::Ident(ident) => Ok(self.make_ident_expr(ident, t.span)),
+                    _ => unreachable!("Token kind should match the peeked token"),
+                }
+            }
 
             TokenKind::Plus | TokenKind::Minus => {
+                let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
                 let span = t.span.start..span.end;
@@ -108,6 +126,7 @@ impl Parser {
                 Ok(unary)
             }
             TokenKind::LParen => {
+                let t = self.lexer.next_token();
                 let (span, lhs) = self.parse_expr_chain(0)?;
 
                 let token_lparen_span = t.span.clone();
@@ -142,8 +161,12 @@ impl Parser {
                     }
                 }
             }
-            TokenKind::IfKw => self.parse_if_expr(),
+            TokenKind::IfKw => {
+                self.lexer.next_token();
+                self.parse_if_expr()
+            }
             _ => {
+                let t = self.lexer.next_token();
                 let x = YuuError::unexpected_token(
                     t.span.clone(),
                     "a primary expression".to_string(),
@@ -608,71 +631,93 @@ impl Parser {
     }
 
     pub fn parse_struct_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        // Parse the struct name identifier
         let ident = self.lexer.next_token();
-        let mut fields = Vec::new();
-
         match ident.kind {
             TokenKind::Ident(name) => {
-                let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+                // Expect the opening brace '{'
+                let _l_brace = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
+                let mut fields = Vec::new();
 
-                // Parse fields
+                // Parse fields until we hit a closing brace
                 loop {
-                    // Parse ident
-                    let ident = self.lexer.next_token();
-                    match ident.kind {
-                        TokenKind::Ident(name) => {
-                            let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
-                            let (expr_span, expr) = self.parse_expr()?;
-                            let span = ident.span.start..expr_span.end;
-                            let field = Field { name, span };
-                            let field = (field, expr);
-                            fields.push(field);
-                        }
-                        _ => {
-                            self.errors.push(
-                                YuuError::unexpected_token(
-                                    ident.span.clone(),
-                                    "an identifier".to_string(),
-                                    ident.kind,
-                                    self.lexer.code_info.source.clone(),
-                                    self.lexer.code_info.file_name.clone(),
-                                )
-                                .with_help(
-                                    "Expected an identifier denoting a struct field".to_string(),
-                                ),
-                            );
-                            return Err(self.lexer.synchronize());
-                        }
+                    // Check if we're at the closing brace
+                    let next = self.lexer.peek();
+                    if next.kind == TokenKind::RBrace {
+                        // Consume the closing brace and return struct instantiation
+                        let r_brace = self.lexer.next_token();
+                        let span = ident.span.start..r_brace.span.end;
+                        return Ok((
+                            span.clone(),
+                            ExprNode::StructInstantiation(StructInstantiationExpr {
+                                struct_name: name,
+                                fields,
+                                span,
+                                id: 0,
+                            }),
+                        ));
                     }
 
-                    let la = self.lexer.peek();
-                    match la.kind.clone() {
-                        TokenKind::Comma => {
-                            let _ = self.lexer.next_token();
-                        }
-                        TokenKind::Hash => {
-                            // Done parsing fields
-                            let tkn = self.lexer.next_token();
-                            return Ok((
-                                ident.span.start..tkn.span.end,
-                                ExprNode::StructInstantiation(StructInstantiationExpr {
-                                    struct_name: name,
-                                    fields,
-                                    span: ident.span.start..tkn.span.end,
-                                    id: 0,
-                                }),
-                            ));
+                    // Parse field name
+                    let field_ident = self.lexer.next_token();
+                    match field_ident.kind {
+                        TokenKind::Ident(field_name) => {
+                            // Expect colon between field name and value
+                            let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+
+                            // Parse the field value expression
+                            let (expr_span, expr) = self.parse_expr()?;
+                            let field_span = field_ident.span.start..expr_span.end;
+                            let field = Field {
+                                name: field_name,
+                                span: field_span.clone(),
+                            };
+
+                            // Add the field to our collection
+                            fields.push((field, expr));
+
+                            // Check what follows: comma or closing brace
+                            let la = self.lexer.peek();
+                            match la.kind {
+                                TokenKind::Comma => {
+                                    // Consume the comma and continue parsing fields
+                                    let _ = self.lexer.next_token();
+
+                                    // Allow trailing comma - peek ahead to see if next token is RBrace
+                                    let peek_after_comma = self.lexer.peek();
+                                    if peek_after_comma.kind == TokenKind::RBrace {
+                                        // We have a trailing comma followed by a closing brace, so break out
+                                        continue;
+                                    }
+                                }
+                                TokenKind::RBrace => {
+                                    // We'll handle this in the next loop iteration
+                                }
+                                _ => {
+                                    self.errors.push(
+                                        YuuError::unexpected_token(
+                                            la.span.clone(),
+                                            "a comma ',' or a closing brace '}'".to_string(),
+                                            la.kind.clone(),
+                                            self.lexer.code_info.source.clone(),
+                                            self.lexer.code_info.file_name.clone(),
+                                        )
+                                        .with_help("Struct fields should be separated by commas and the list must end with a closing brace '}'".to_string()),
+                                    );
+                                    return Err(self.lexer.synchronize());
+                                }
+                            }
                         }
                         _ => {
                             self.errors.push(
                                 YuuError::unexpected_token(
-                                    la.span.clone(),
-                                    "a comma ',' or a colon ':'".to_string(),
-                                    la.kind.clone(),
+                                    field_ident.span.clone(),
+                                    "a field identifier".to_string(),
+                                    field_ident.kind,
                                     self.lexer.code_info.source.clone(),
                                     self.lexer.code_info.file_name.clone(),
                                 )
-                                .with_help("Struct fields should be separated by commas, with the list ending with a colon".to_string()),
+                                .with_help("Expected a field name identifier".to_string()),
                             );
                             return Err(self.lexer.synchronize());
                         }
@@ -683,12 +728,12 @@ impl Parser {
                 self.errors.push(
                     YuuError::unexpected_token(
                         ident.span.clone(),
-                        "an identifier".to_string(),
+                        "a struct name identifier".to_string(),
                         ident.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
-                    .with_help("Expected an identifier denoting a struct type".to_string()),
+                    .with_help("Expected a struct name identifier".to_string()),
                 );
                 return Err(self.lexer.synchronize());
             }
@@ -846,10 +891,8 @@ impl Parser {
         let struct_tkn = self
             .lexer
             .expect(&[TokenKind::StructKw], &mut self.errors)?;
-        let ident = self.lexer.expect(
-            &[TokenKind::Ident(
-                "an identifier, naming the struct".intern(),
-            )],
+        let ident = self.lexer.expect_tag(
+            TokenKind::Ident("an identifier naming the struct".intern()),
             &mut self.errors,
         )?; // TODO: Make this lazy evaluated
         let name = match ident.kind {
