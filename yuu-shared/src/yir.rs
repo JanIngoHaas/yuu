@@ -1,7 +1,7 @@
 use crate::ast::InternUstr;
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
-    primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, TypeInfo,
+    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
 use indexmap::IndexMap;
 use std::fmt;
@@ -489,7 +489,7 @@ impl Function {
     }
 
     pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Register, Operand)>) {
-        if (!self.has_terminator(self.current_block)) {
+        if !self.has_terminator(self.current_block) {
             self.make_jump(target, writes);
         }
     }
