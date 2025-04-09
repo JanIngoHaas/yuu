@@ -6,7 +6,7 @@ use yuu_shared::{
     type_registry::TypeRegistry,
     yir::{
         BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module, Operand,
-        Register,
+        Variable,
     },
 };
 
@@ -25,14 +25,14 @@ struct TransientData<'a> {
 
 impl PassYirToC {
     fn write_register_name(
-        reg: &Register,
+        reg: &Variable,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}_{}", PREFIX_REGISTER, reg.name(), reg.id())
     }
 
     fn write_memory_name(
-        reg: &Register,
+        reg: &Variable,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}_{}", PREFIX_MEMORY, reg.name(), reg.id())
@@ -119,7 +119,7 @@ impl PassYirToC {
             Operand::F32Const(c) => write!(data.output, "({}f)", c),
             Operand::F64Const(c) => write!(data.output, "({}d)", c),
             Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
-            Operand::Register(register) => Self::write_register_name(register, &mut data.output),
+            Operand::Variable(register) => Self::write_register_name(register, &mut data.output),
             Operand::NoOp => Ok(()),
         }
     }
@@ -127,7 +127,7 @@ impl PassYirToC {
     fn gen_register(
         &self,
         data: &mut TransientData,
-        reg: &Register,
+        reg: &Variable,
     ) -> Result<(), std::fmt::Error> {
         self.gen_type(data, reg.ty())?;
         write!(data.output, " ")?;
@@ -140,7 +140,7 @@ impl PassYirToC {
         data: &mut TransientData,
     ) -> anyhow::Result<()> {
         match instruction {
-            Instruction::Assign { target, value } => {
+            Instruction::BitwiseCopy { target, value } => {
                 self.gen_register(data, target)?;
                 write!(data.output, "=")?;
                 self.gen_operand(data, value)?;
@@ -183,18 +183,11 @@ impl PassYirToC {
             Instruction::Store {
                 address,
                 value,
-                indirect_store,
             } => {
                 write!(data.output, "*")?;
                 self.gen_operand(data, address)?;
                 write!(data.output, "=")?;
-                if *indirect_store {
-                    write!(data.output, "*(")?;
-                    self.gen_operand(data, value)?;
-                    write!(data.output, ")")?;
-                } else {
-                    self.gen_operand(data, value)?;
-                }
+                self.gen_operand(data, value)?;                
             }
             Instruction::Alloca { target } => {
                 self.gen_type(data, target.ty().deref_ptr())?;
@@ -225,7 +218,7 @@ impl PassYirToC {
             Instruction::Omega { target, .. } => {
                 self.gen_register(data, target)?;
             }
-            Instruction::GetFieldPtr {
+            Instruction::GetField {
                 target,
                 base,
                 field,

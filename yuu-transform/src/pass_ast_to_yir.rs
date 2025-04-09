@@ -10,14 +10,14 @@ use yuu_shared::{
     scheduler::Pass,
     type_info::{TypeInfo, TypeInfoTable},
     type_registry::{self, TypeRegistry},
-    yir::{self, BinOp as YirBinOp, Function, Module, Operand, Register, UnaryOp as YirUnaryOp},
+    yir::{self, BinOp as YirBinOp, Function, Module, Operand, Variable, UnaryOp as YirUnaryOp},
 };
 
 pub struct TransientData<'a> {
     pub function: Function,
     tr: &'a TypeRegistry,
-    register_bindings: IndexMap<NodeId, Register>,
-    block_labels: IndexMap<NodeId, (yir::Label, Register)>, // Maps block ID to its label and omega register
+    register_bindings: IndexMap<NodeId, Variable>,
+    block_labels: IndexMap<NodeId, (yir::Label, Variable)>, // Maps block ID to its label and omega register
 }
 
 impl<'a> TransientData<'a> {
@@ -42,9 +42,9 @@ impl<'a> TransientData<'a> {
 
     fn allocate_and_initialize_ident_binding(&mut self, ident: Ustr, id: NodeId, value: Operand) {
         let ty = self.get_type(id);
-        let target = self.function.make_alloca(ident, ty);
-        self.function
-            .make_store(Operand::Register(target.clone()), value);
+        let target = self.function.fresh_variable(ident, ty);
+        // bitwise-copy of value into target
+        self.function.make_bitwise_copy(target.clone(), value);
         self.register_bindings.insert(id, target);
     }
 
@@ -97,7 +97,7 @@ impl<'a> TransientData<'a> {
                 let result = self
                     .function
                     .make_binary("bin_result".intern(), op, lhs, rhs, ty);
-                Operand::Register(result)
+                Operand::Variable(result)
             }
             ExprNode::Unary(un_expr) => {
                 let operand = self.lower_expr(&un_expr.operand);
@@ -105,10 +105,10 @@ impl<'a> TransientData<'a> {
 
                 match un_expr.op {
                     UnaryOp::Negate => {
-                        let target = self.function.fresh_register("neg_result".intern(), ty);
+                        let target = self.function.fresh_variable("neg_result".intern(), ty);
                         self.function
                             .make_unary(target.clone(), YirUnaryOp::Neg, operand);
-                        Operand::Register(target)
+                        Operand::Variable(target)
                     }
                     UnaryOp::Pos => operand,
                 }
@@ -125,13 +125,7 @@ impl<'a> TransientData<'a> {
                     .get(&ident_expr.id)
                     .and_then(|x| self.register_bindings.get(x))
                 {
-                    let ty = self.get_type(ident_expr.id);
-                    let result = self.function.make_load(
-                        "load_result".intern(),
-                        Operand::Register(reg.clone()),
-                        ty,
-                    );
-                    Operand::Register(result)
+                    Operand::Variable(*reg)
                 } else {
                     Operand::NoOp
                 }
@@ -155,7 +149,7 @@ impl<'a> TransientData<'a> {
                     self.function
                         .make_call("call_result".intern(), func_name, args, return_type);
 
-                result.map(Operand::Register).unwrap_or(Operand::NoOp)
+                result.map(Operand::Variable).unwrap_or(Operand::NoOp)
             }
             ExprNode::Assignment(assignment_expr) => {
                 let binding = &assignment_expr.binding;
@@ -165,15 +159,15 @@ impl<'a> TransientData<'a> {
                     BindingNode::Ident(ident_binding) => {
                         let target = self.register_bindings.get(&ident_binding.id).unwrap();
                         self.function
-                            .make_store(Operand::Register(target.clone()), value);
-                        Operand::Register(target.clone())
+                            .make_store(Operand::Variable(target.clone()), value);
+                        Operand::Variable(target.clone())
                     }
                 }
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 let sinfo = self.tr.resolve_struct(struct_instantiation_expr.struct_name).expect("Compiler bug: struct not found in lowering to YIR");
                 // Alloc
-                let struct_reg = self.function.make_alloca(
+                let struct_reg = self.function.fresh_variable(
                     struct_instantiation_expr.struct_name.clone(),
                     &sinfo.ty, 
                 );
@@ -183,20 +177,20 @@ impl<'a> TransientData<'a> {
                     let field_name = field.name;
                     let field_op = self.lower_expr(field_expr);
                     let field = sinfo.fields.get(&field_name).expect("Compiler bug: field not found in lowering to YIR");
-                    let field_reg = self.function.fresh_register(field_name, field.ty);
+                    let field_reg = self.function.fresh_variable(field_name, field.ty);
                     // Use the GetFieldPtr instruction to get the pointer to the field
-                    self.function.make_get_field_ptr(
+                    self.function.make_get_field(
                         field_reg,
-                        Operand::Register(struct_reg),
+                        Operand::Variable(struct_reg),
                         field_name
                     );
 
                     // Store the value into the field
-                    self.function.make_store(Operand::Register(field_reg), field_op);
+                    self.function.make_store(Operand::Variable(field_reg), field_op);
                 }
 
                 // Return the pointer to the struct
-                Operand::Register(struct_reg)
+                Operand::Variable(struct_reg)
             }
         }
     }
@@ -206,7 +200,7 @@ impl<'a> TransientData<'a> {
         let omega_with_label = if let Some(label_name) = block_expr.label.as_ref() {
             let omega = self
                 .function
-                .fresh_register("block_return".intern(), self.get_type(block_expr.id));
+                .fresh_variable("block_return".intern(), self.get_type(block_expr.id));
             self.function.make_omega(omega.clone());
 
             // Make a labeld_block_merge bb that we jump to...
@@ -236,7 +230,7 @@ impl<'a> TransientData<'a> {
                     self.function
                         .make_jump_if_no_terminator(label.clone(), vec![(omega.clone(), value)]);
                     self.function.set_current_block(&label);
-                    Operand::Register(omega)
+                    Operand::Variable(omega)
                 }
                 // Unlabeled block: Just return the value, no jumping around needed
                 _ => value,
@@ -246,7 +240,7 @@ impl<'a> TransientData<'a> {
             self.function
                 .make_jump_if_no_terminator(label.clone(), vec![]);
             self.function.set_current_block(&label);
-            Operand::Register(omega)
+            Operand::Variable(omega)
         } else {
             Operand::NoOp
         }
@@ -294,7 +288,7 @@ impl<'a> TransientData<'a> {
         // Create omega register and declare it in current block
         let omega = self
             .function
-            .fresh_register("if_result".intern(), self.get_type(if_expr.id));
+            .fresh_variable("if_result".intern(), self.get_type(if_expr.id));
         self.function.make_omega(omega.clone());
 
         // Lower the then block, setting merge as its next block
@@ -316,7 +310,7 @@ impl<'a> TransientData<'a> {
 
         // Set merge block as current (no next block needed since it's the end)
         self.function.set_current_block(&merge_label);
-        Operand::Register(omega)
+        Operand::Variable(omega)
     }
 }
 
@@ -353,14 +347,10 @@ impl PassAstToYir {
                     // Add parameters
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name.clone());
-                        let param = data.function.fresh_register(name.clone(), ty);
-                        data.function.params.push(param.clone());
-                        // Use allocate_and_initialize_ident_binding to handle parameter storage consistently
-                        data.allocate_and_initialize_ident_binding(
-                            arg.name,
-                            arg.id,
-                            Operand::Register(param),
-                        );
+                        let param = data.function.fresh_variable(name, ty);
+                        data.function.params.push(param);
+                        // Register the parameter
+                        data.register_bindings.insert(arg.id, param);
                     }
 
                     // Process the function body block
