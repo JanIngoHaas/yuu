@@ -77,7 +77,7 @@ impl AddId for ExprNode {
             }
             ExprNode::Assignment(assignment_expr) => {
                 assignment_expr.id = generator.next();
-                assignment_expr.binding.add_id(generator);
+                assignment_expr.lhs.add_id(generator);
                 assignment_expr.rhs.add_id(generator);
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
@@ -85,6 +85,11 @@ impl AddId for ExprNode {
                 for (_name, field) in &mut struct_instantiation_expr.fields {
                     field.add_id(generator);
                 }
+            }
+            ExprNode::While(while_expr) => {
+                while_expr.id = generator.next();
+                while_expr.condition_block.body.add_id(generator);
+                while_expr.condition_block.condition.add_id(generator);
             }
         }
     }
@@ -191,9 +196,6 @@ impl AddId for BlockExpr {
         for stmt in &mut self.body {
             stmt.add_id(generator);
         }
-        if let Some(last_expr) = &mut self.last_expr {
-            last_expr.add_id(generator);
-        }
     }
 }
 
@@ -235,6 +237,7 @@ impl GetId for ExprNode {
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.id
             }
+            ExprNode::While(while_expr) => while_expr.id,
         }
     }
 }

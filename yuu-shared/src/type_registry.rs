@@ -2,18 +2,17 @@ use std::hash::BuildHasherDefault;
 
 use indexmap::IndexMap;
 use logos::Span;
-use serde_json::value::Index;
 use ustr::{IdentityHasher, Ustr};
 
 use crate::{
     ast::{InternUstr, NodeId},
     binding_info::BindingInfo,
-    block::{BindingTable, Block, RootBlock},
-    error::{YuuError, levenshtein_distance},
+    block::{BindingTable, Block},
+    error::levenshtein_distance,
     scheduler::ResourceId,
     type_info::{
-        FunctionType, GiveMePtrHashes, PrimitiveType, TypeInfo, TypeInfoTable, function_type,
-        primitive_bool, primitive_f32, primitive_f64, primitive_i64, struct_type,
+        FunctionType, GiveMePtrHashes, TypeInfo, TypeInfoTable, function_type, primitive_bool,
+        primitive_f32, primitive_f64, primitive_i64, struct_type,
     },
 };
 
@@ -107,6 +106,36 @@ impl TypeRegistry {
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
+        reg.register_binary_op(
+            "lt".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "gt".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "le".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ge".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ne".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_bool(),
+        );
 
         // I64 operations
         reg.register_binary_op(
@@ -139,6 +168,36 @@ impl TypeRegistry {
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
+        reg.register_binary_op(
+            "lt".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "gt".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "le".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ge".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ne".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_bool(),
+        );
 
         // F64 operations
         reg.register_binary_op(
@@ -167,6 +226,36 @@ impl TypeRegistry {
         );
         reg.register_binary_op(
             "eq".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "lt".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "gt".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "le".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ge".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ne".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
@@ -258,7 +347,7 @@ impl TypeRegistry {
         let funcs = self
             .functions
             .entry(info.name)
-            .or_insert_with(|| IndexMap::new());
+            .or_insert_with(IndexMap::new);
 
         let succ = self
             .type_info_table
@@ -267,10 +356,7 @@ impl TypeRegistry {
             .is_none();
 
         let out = funcs
-            .insert(
-                arg_type.into_iter().map(|x| GiveMePtrHashes(*x)).collect(),
-                info,
-            )
+            .insert(arg_type.iter().map(|x| GiveMePtrHashes(*x)).collect(), info)
             .is_none()
             && succ;
         debug_assert!(out);
@@ -304,20 +390,17 @@ impl TypeRegistry {
     ) -> Result<FunctionInfo, Vec<FunctionInfo>> {
         let funcs = self.functions.get(&name);
         if let Some(funcs) = funcs {
-            let key = args
-                .into_iter()
-                .map(|x| GiveMePtrHashes(*x))
-                .collect::<Vec<_>>();
+            let key = args.iter().map(|x| GiveMePtrHashes(*x)).collect::<Vec<_>>();
             let finfo = funcs.get(&key);
             match finfo {
-                Some(finfo) => return Ok(finfo.clone()),
+                Some(finfo) => Ok(finfo.clone()),
                 None => {
                     let candidates = funcs.values().cloned().collect();
-                    return Err(candidates);
+                    Err(candidates)
                 }
             }
         } else {
-            return Err(Vec::default());
+            Err(Vec::default())
         }
     }
 }

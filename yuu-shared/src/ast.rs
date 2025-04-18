@@ -29,6 +29,11 @@ pub enum BinOp {
     Multiply,
     Divide,
     Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
 }
 
 impl Display for BinOp {
@@ -39,6 +44,11 @@ impl Display for BinOp {
             BinOp::Multiply => write!(f, "*"),
             BinOp::Divide => write!(f, "/"),
             BinOp::Eq => write!(f, "=="),
+            BinOp::NotEq => write!(f, "!="),
+            BinOp::Lt => write!(f, "<"),
+            BinOp::LtEq => write!(f, "<="),
+            BinOp::Gt => write!(f, ">"),
+            BinOp::GtEq => write!(f, ">="),
         }
     }
 }
@@ -51,6 +61,11 @@ impl BinOp {
             BinOp::Multiply => "mul",
             BinOp::Divide => "div",
             BinOp::Eq => "eq",
+            BinOp::NotEq => "ne",
+            BinOp::Lt => "lt",
+            BinOp::LtEq => "le",
+            BinOp::Gt => "gt",
+            BinOp::GtEq => "ge",
         }
         .intern()
     }
@@ -106,6 +121,13 @@ pub struct IfExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct WhileExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub condition_block: ConditionWithBody,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Field {
     pub name: Ustr,
     pub span: Span,
@@ -148,7 +170,7 @@ pub struct IdentExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AssignmentExpr {
-    pub binding: Box<BindingNode>,
+    pub lhs: Box<ExprNode>, // Changed from Box<BindingNode>
     pub rhs: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
@@ -164,6 +186,7 @@ pub enum ExprNode {
     Block(BlockExpr),
     FuncCall(FuncCallExpr),
     If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
+    While(WhileExpr),
     Assignment(AssignmentExpr),
     StructInstantiation(StructInstantiationExpr),
     //Error,
@@ -277,7 +300,6 @@ pub struct BlockExpr {
     pub span: Span,
     pub body: Vec<StmtNode>,
     pub label: Option<Ustr>,
-    pub last_expr: Option<Box<ExprNode>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -323,8 +345,8 @@ pub enum StructuralNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BreakStmt {
     pub span: Span,
-    pub expr: Box<ExprNode>, // Optional for => ; case
-    pub target: Ustr,        // None for => ; case, Some("blk1") for => blk1 case
+    pub expr: Box<ExprNode>,  // Optional for => ; case
+    pub target: Option<Ustr>, // None for break expr, Some(label) for break label expr
     pub id: NodeId,
 }
 
@@ -395,6 +417,7 @@ impl Spanned for ExprNode {
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.span.clone()
             }
+            ExprNode::While(while_expr) => while_expr.span.clone(),
         }
     }
 }
@@ -459,6 +482,7 @@ impl ExprNode {
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.id
             }
+            ExprNode::While(while_expr) => while_expr.id,
         }
     }
 }

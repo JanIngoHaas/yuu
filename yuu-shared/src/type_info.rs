@@ -1,4 +1,3 @@
-use std::hint::unreachable_unchecked;
 use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use std::hash::Hash;
@@ -357,7 +356,6 @@ pub enum TypeInfo {
 }
 
 impl TypeInfo {
-
     pub fn is_ptr(&self) -> bool {
         match self {
             TypeInfo::Pointer(_) => true,
@@ -407,7 +405,7 @@ impl TypeInfo {
         }
     }
 
-    pub fn does_coerce_to_same_type(&'static self, other: &'static TypeInfo) -> bool {
+    pub fn can_unify(&'static self, other: &'static TypeInfo) -> bool {
         self.unify(other).is_ok()
     }
 }

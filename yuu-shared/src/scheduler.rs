@@ -3,9 +3,9 @@ use std::any::Any;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use petgraph::{
+    Directed,
     dot::{Config, Dot},
     prelude::GraphMap,
-    Directed,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 

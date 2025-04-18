@@ -157,6 +157,11 @@ impl PassYirToC {
                     yuu_shared::yir::BinOp::Mul => write!(data.output, "*"),
                     yuu_shared::yir::BinOp::Div => write!(data.output, "/"),
                     yuu_shared::yir::BinOp::Eq => write!(data.output, "=="),
+                    yuu_shared::yir::BinOp::NotEq => write!(data.output, "!="),
+                    yuu_shared::yir::BinOp::LessThan => write!(data.output, "<"),
+                    yuu_shared::yir::BinOp::LessThanEq => write!(data.output, "<="),
+                    yuu_shared::yir::BinOp::GreaterThan => write!(data.output, ">"),
+                    yuu_shared::yir::BinOp::GreaterThanEq => write!(data.output, ">="),
                 }?;
                 self.gen_operand(data, rhs)?;
             }
@@ -189,7 +194,15 @@ impl PassYirToC {
                 }
                 write!(data.output, ")")?;
             }
-            Instruction::Omega { target, .. } => {
+            Instruction::Omega {
+                target,
+                writable_blocks,
+            } => {
+                // If no one writes to this block, we skip emitting it
+                // TODO: Separate pass?
+                if writable_blocks.lock().unwrap().is_empty() {
+                    return Ok(());
+                }
                 self.gen_variable(data, target)?;
             }
             Instruction::GetFieldPtr {
@@ -198,36 +211,27 @@ impl PassYirToC {
                 field,
             } => {
                 self.gen_variable(data, target)?;
-                write!(data.output, "=")?;
-                write!(data.output, "&(")?;
+                write!(data.output, "=&(")?;
                 self.gen_operand(data, base)?;
                 write!(data.output, ".{})", field.as_str())?;
             }
-            Instruction::SizeOf { target, ty } => {
-                self.gen_variable(data, target)?;
-                write!(data.output, "=")?;
-                write!(data.output, "sizeof(")?;
-                self.gen_type(data, ty)?;
-                write!(data.output, ")")?;
-            }
-            Instruction::AlignOf { target, ty } => {
-                self.gen_variable(data, target)?;
-                write!(data.output, "=")?;
-                write!(data.output, "__alignof(")?;
-                self.gen_type(data, ty)?;
-                write!(data.output, ")")?;
-            }
             Instruction::TakeAddress { target, value } => {
                 self.gen_variable(data, target)?;
-                write!(data.output, "=")?;
-                write!(data.output, "&")?;
+                write!(data.output, "=&")?;
                 self.gen_operand(data, value)?;
             }
-            Instruction::Store { target, value } => {
+            Instruction::Store { dest, src } => {
+                write!(data.output, "*{}=", dest.name())?;
+                self.gen_operand(data, src)?;
+            }
+            Instruction::Assign { target, value } => {
                 self.gen_variable(data, target)?;
                 write!(data.output, "=")?;
-                write!(data.output, "*")?;
                 self.gen_operand(data, value)?;
+            }
+            Instruction::Alloca { target } => {
+                // Just declare the variable, no need to do anything else
+                self.gen_variable(data, target)?;
             }
         }
         write!(data.output, ";")?;
@@ -356,19 +360,32 @@ impl PassYirToC {
             self.def_struct(data, *sname)?;
         }
 
-        // Generate function declarations
         for function_state in data.module.functions.values() {
             match function_state {
                 // Predeclare all functions
                 FunctionDeclarationState::Declared(func) => {
                     self.gen_func_decl(func, data)?;
-                    write!(data.output, ";")?;
+                    writeln!(data.output, ";")?;
                 }
+                FunctionDeclarationState::Defined(func) => {
+                    self.gen_func_decl(func, data)?;
+                    writeln!(data.output, ";")?;
+                }
+            }
+        }
+
+        // Generate function definitions
+        for function_state in data.module.functions.values() {
+            match function_state {
+                // Define all functions
                 FunctionDeclarationState::Defined(func) => {
                     self.gen_func_decl(func, data)?;
                     write!(data.output, "{{")?;
                     self.gen_function(func, data)?;
                     write!(data.output, "}}")?;
+                }
+                FunctionDeclarationState::Declared(_) => {
+                    // Do nothing, we already declared it above
                 }
             }
         }
@@ -446,13 +463,13 @@ mod tests {
         let code_info = SourceInfo {
             source: Arc::from(
                 r#"fn fac(n: i64) -> i64 {
-                if n == 0 {
-                    1!
+                break if n == 0 {
+                    break 1;
                 }
                 else {
                     let n_out = n * fac(n - 1);
                     return n_out;
-                }!
+                };
             }"#,
             ),
             file_name: Arc::from("test.yuu"),
@@ -467,7 +484,7 @@ mod tests {
 
         // Add passes in the correct order
         PassParse.install(&mut schedule);
-        PassTypeInference::new().install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToC.install(&mut schedule);
 

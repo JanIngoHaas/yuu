@@ -4,7 +4,7 @@ use yuu_parse::pass_parse::SyntaxErrors;
 
 use yuu_shared::{
     context::Context,
-    error::{setup_error_formatter, YuuError},
+    error::{YuuError, setup_error_formatter},
     scheduler::Pass,
 };
 

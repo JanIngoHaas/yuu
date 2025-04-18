@@ -1,14 +1,14 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::Span;
-use crate::ast::{InternUstr, SourceInfo};
+use crate::ast::SourceInfo;
 use crate::binding_info::VariableBinding;
 use crate::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::scheduler::{ResourceId, ResourceName};
 use crate::{
     ast::NodeId,
     binding_info::BindingInfo,
-    type_info::{FunctionType, PrimitiveType, TypeInfo, TypeInfoTable},
+    type_info::{FunctionType, TypeInfo},
 };
 use indexmap::IndexMap;
 use ustr::{Ustr, UstrMap};
@@ -21,7 +21,7 @@ pub struct Block {
     pub parent: Option<usize>,
     pub root_block: *mut RootBlock,
     pub id: usize,
-    pub named_block_binding: Option<(Ustr, BindingInfo)>,
+    pub named_block_binding: (Option<Ustr>, BindingInfo),
 }
 
 unsafe impl Send for RootBlock {}
@@ -76,7 +76,13 @@ impl RootBlock {
             parent: None,
             root_block: std::ptr::null_mut(),
             id: 0,
-            named_block_binding: None,
+            named_block_binding: (
+                None,
+                BindingInfo {
+                    id: std::i64::MIN,
+                    src_location: None,
+                },
+            ),
         };
 
         arena.push(top_level_block);
@@ -126,7 +132,7 @@ impl Block {
     }
 
     pub fn get_block_binding(&self, searched_name: &str) -> Option<BindingInfo> {
-        if let Some((name, binding)) = self.named_block_binding.as_ref() {
+        if let (Some(name), binding) = &self.named_block_binding {
             if name == searched_name {
                 return Some(binding.clone());
             }
@@ -140,7 +146,7 @@ impl Block {
         self.get_block_binding(FUNC_BLOCK_NAME).expect("Compiler bug: Every function has to have a root block and this is automatically assigned by the compiler. This one apparently doesn't have one.")
     }
 
-    pub fn make_child(&mut self, name: Option<(Ustr, BindingInfo)>) -> &mut Block {
+    pub fn make_child(&mut self, name: (Option<Ustr>, BindingInfo)) -> &mut Block {
         let id = self.id;
         let len = self.get_root_block().arena.len();
         let root_block = self.get_root_block_mut();
@@ -226,7 +232,7 @@ impl Block {
         sp: Span,
     ) -> Result<VariableBinding, Box<YuuError>> {
         self.get_binding(name).ok_or_else(|| {
-            Box::new(self.create_binding_not_found_error(&name.to_string(), src, sp.clone()))
+            Box::new(self.create_binding_not_found_error(name.as_ref(), src, sp.clone()))
         })
 
         // match binding {

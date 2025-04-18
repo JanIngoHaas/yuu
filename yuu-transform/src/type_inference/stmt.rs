@@ -1,5 +1,6 @@
 use yuu_shared::{
     ast::{Spanned, StmtNode},
+    binding_info::BindingInfo,
     block::Block,
     error::{ErrorKind, YuuError},
     type_info::error_type,
@@ -26,38 +27,49 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
         StmtNode::Break(exit) => {
             let ty = infer_expr(&exit.expr, block, data, None);
 
-            let target_block = match block.get_block_binding(&exit.target) {
-                Some(target) => target,
-                None => {
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::InvalidStatement)
-                        .message(format!(
-                            "Break statement references nonexistent label '{}'",
-                            exit.target
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            exit.span.clone(),
-                            format!("break to undefined label '{}'", exit.target),
-                        )
-                        .help("Make sure the label is defined in an enclosing block or loop")
-                        .build();
+            let bi = if let Some(target_label) = exit.target {
+                match block.get_block_binding(&target_label) {
+                    Some(target) => target,
+                    None => {
+                        let err = YuuError::builder()
+                            .kind(ErrorKind::InvalidStatement)
+                            .message(format!(
+                                "Break statement references nonexistent label '{}'",
+                                target_label
+                            ))
+                            .source(
+                                data.src_code.source.clone(),
+                                data.src_code.file_name.clone(),
+                            )
+                            .span(
+                                exit.span.clone(),
+                                format!("break to undefined label '{}'", target_label),
+                            )
+                            .help("Make sure the label is defined in an enclosing block or loop")
+                            .build();
 
-                    data.errors.push(err);
+                        data.errors.push(err);
 
-                    // Set error type for this node
-                    data.type_registry.type_info_table.insert(exit.id, error_type());
+                        // Set error type for this node
+                        data.type_registry
+                            .type_info_table
+                            .insert(exit.id, error_type());
 
-                    return ExitKind::Proceed; // Continue analysis instead of breaking
+                        return ExitKind::Proceed; // Continue analysis instead of breaking
+                    }
                 }
+            } else {
+                // We break to the parent block
+                block.named_block_binding.1.clone()
             };
 
-            data.type_registry.bindings.insert(exit.id, target_block.id);
+            data.type_registry.bindings.insert(exit.id, bi.id);
 
-            if let Err(unify_err) = data.type_registry.type_info_table.unify_and_insert(target_block.id, ty) {
+            if let Err(unify_err) = data
+                .type_registry
+                .type_info_table
+                .unify_and_insert(bi.id, ty)
+            {
                 let err = YuuError::builder()
                     .kind(ErrorKind::TypeMismatch)
                     .message(format!(
@@ -65,8 +77,8 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
                         ty, unify_err.right
                     ))
                     .source(
-                        data.src_code.source.clone(), 
-                        data.src_code.file_name.clone()
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
                     )
                     .span(
                         exit.expr.span(),
@@ -76,9 +88,11 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
                         "Break values must be compatible with the block's return type, which may be determined by other break statements or the block's last expression"
                     )
                     .build();
-                
+
                 data.errors.push(err);
-                data.type_registry.type_info_table.insert(exit.id, error_type());
+                data.type_registry
+                    .type_info_table
+                    .insert(exit.id, error_type());
                 // We still want to return Break to maintain control flow analysis
             }
             ExitKind::Break

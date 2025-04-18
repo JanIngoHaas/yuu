@@ -3,7 +3,7 @@ use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
-use crate::type_registry::{StructFieldInfo, StructInfo};
+use crate::type_registry::StructFieldInfo;
 use crate::yir_printer;
 use indexmap::IndexMap;
 use std::fmt;
@@ -114,6 +114,11 @@ pub enum BinOp {
     Mul,
     Div,
     Eq,
+    NotEq,
+    LessThan,
+    LessThanEq,
+    GreaterThan,
+    GreaterThanEq,
 }
 
 #[derive(Clone)]
@@ -131,6 +136,13 @@ pub enum Instruction {
     //     target: Variable,
     //     ty: &'static TypeInfo,
     // },
+    Alloca {
+        target: Variable,
+    },
+    Assign {
+        target: Variable,
+        value: Operand,
+    },
     GetFieldPtr {
         target: Variable,
         base: Operand,
@@ -156,7 +168,7 @@ pub enum Instruction {
         value: Operand,
     },
     Store {
-        dest: Variable,
+        dest: Operand,
         src: Operand,
     },
     Call {
@@ -231,7 +243,13 @@ impl Function {
         f
     }
 
-    pub fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
+    pub fn add_param(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
+        let param = self.fresh_variable(name, ty);
+        self.params.push(param);
+        param
+    }
+
+    fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
         let id = self.next_reg_id;
         self.next_reg_id += 1;
         Variable::new(name, id, ty)
@@ -270,7 +288,7 @@ impl Function {
         self.blocks.insert(
             label.id(),
             BasicBlock {
-                label: label.clone(),
+                label: label,
                 instructions: Vec::new(),
                 terminator: ControlFlow::Fallthrough(Vec::new()),
             },
@@ -279,12 +297,12 @@ impl Function {
     }
 
     fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Variable, Operand)>) {
-        let current_label = self.blocks.get(&self.current_block).unwrap().label.clone();
+        let current_label = self.blocks.get(&self.current_block).unwrap().label;
 
         for (reg, _) in writes {
             if let Some(blocks) = self.omega_blocks.get(reg) {
                 let mut blocks = blocks.lock().unwrap();
-                blocks.push(current_label.clone());
+                blocks.push(current_label);
             }
         }
     }
@@ -310,6 +328,15 @@ impl Function {
         if !self.has_terminator(self.current_block) {
             self.make_jump(target, writes);
         }
+    }
+
+    pub fn make_assign(&mut self, target_name: Ustr, value: Operand) -> Variable {
+        let target = self.fresh_variable(target_name, value.ty());
+        let block = self.get_current_block_mut();
+        block
+            .instructions
+            .push(Instruction::Assign { target, value });
+        target
     }
 
     pub fn make_jump(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
@@ -394,7 +421,7 @@ impl Function {
         let target = self.fresh_variable(target_name, ty);
         let block = self.get_current_block_mut();
         block.instructions.push(Instruction::Binary {
-            target: target.clone(),
+            target: target,
             op,
             lhs,
             rhs,
@@ -402,7 +429,7 @@ impl Function {
         target
     }
 
-    pub fn make_store(&mut self, dest: Variable, src: Operand) {
+    pub fn make_store(&mut self, dest: Operand, src: Operand) {
         let block = self.get_current_block_mut();
         block.instructions.push(Instruction::Store { dest, src });
     }
@@ -421,16 +448,12 @@ impl Function {
         target
     }
 
-    // pub fn make_alloca(&mut self, name: Ustr, value_type: &'static TypeInfo) -> variable {
-    //     let ptr_type = value_type.ptr_to();
-    //     let target = self.fresh_variable(name, ptr_type);
-    //     if let Some(block) = self.blocks.get_mut(&self.current_block) {
-    //         block.instructions.push(Instruction::Alloca {
-    //             target: target.clone(),
-    //         });
-    //     }
-    //     target
-    // }
+    pub fn make_alloca(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
+        let target = self.fresh_variable(name, ty);
+        let block = self.get_current_block_mut();
+        block.instructions.push(Instruction::Alloca { target });
+        target
+    }
 
     // pub fn make_sizeof(&mut self, target_name: Ustr, ty: &'static TypeInfo) {
     //     let target = self.fresh_variable(target_name, primitive_i64());
@@ -456,7 +479,7 @@ impl Function {
         let target = self.fresh_variable(name, return_type);
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             block.instructions.push(Instruction::Call {
-                target: Some(target.clone()),
+                target: Some(target),
                 name: func_name,
                 args,
             });
@@ -507,14 +530,14 @@ impl Function {
             .expect("Compiler Error: No current block")
             .terminator = ControlFlow::Branch {
             condition,
-            if_true: (true_label.clone(), then_writes),
-            if_false: (false_label.clone(), else_writes),
+            if_true: (true_label, then_writes),
+            if_false: (false_label, else_writes),
         };
 
         self.blocks.insert(
             true_label.id(),
             BasicBlock {
-                label: true_label.clone(),
+                label: true_label,
                 instructions: Vec::new(),
                 terminator: ControlFlow::Fallthrough(Vec::new()),
             },
@@ -523,7 +546,7 @@ impl Function {
         self.blocks.insert(
             false_label.id(),
             BasicBlock {
-                label: false_label.clone(),
+                label: false_label,
                 instructions: Vec::new(),
                 terminator: ControlFlow::Fallthrough(Vec::new()),
             },
@@ -549,7 +572,7 @@ impl Function {
         if let Some(block) = self.blocks.get_mut(&self.current_block) {
             // Use the same Arc<Mutex> for both the instruction and the tracking map
             block.instructions.push(Instruction::Omega {
-                target: target.clone(),
+                target: target,
                 writable_blocks: Arc::clone(&blocks), // Share the same Arc
             });
             self.omega_blocks.insert(target, blocks);
@@ -593,16 +616,14 @@ impl Module {
 
     pub fn declare_function(&mut self, func: Function) {
         self.functions.insert(
-            func.name.clone(),
+            func.name,
             FunctionDeclarationState::Declared(Arc::new(func)),
         );
     }
 
     pub fn define_function(&mut self, func: Function) {
-        self.functions.insert(
-            func.name.clone(),
-            FunctionDeclarationState::Defined(Arc::new(func)),
-        );
+        self.functions
+            .insert(func.name, FunctionDeclarationState::Defined(Arc::new(func)));
     }
 
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {

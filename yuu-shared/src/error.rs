@@ -474,8 +474,7 @@ use syntect::highlighting::{ScopeSelector, ScopeSelectors};
 
 use crate::Span;
 use crate::ast::{InternUstr, SourceInfo};
-use crate::binding_info::BindingInfo;
-use crate::type_info::{FunctionType, TypeInfo};
+use crate::type_info::TypeInfo;
 use crate::type_registry::{FunctionInfo, TypeRegistry};
 
 /// Create a custom theme based on the warm_ember color palette
@@ -1053,7 +1052,7 @@ pub fn create_no_overload_error(
             help.push_str("\n\nDid you mean:");
             for (i, suggestion) in suggestions.iter().enumerate() {
                 if i > 0 {
-                    help.push_str(",");
+                    help.push(',');
                 }
                 help.push_str(&format!(" '{}'", suggestion));
             }

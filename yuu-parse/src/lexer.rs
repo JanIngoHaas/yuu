@@ -5,21 +5,6 @@ use yuu_shared::{
     token::{Token, TokenKind},
 };
 
-// #[derive(Debug, Clone)]
-// pub struct Note {
-//     pub message: String,
-//     pub span: Option<Span>,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct GenericError {
-//     pub expected: String,
-//     pub found: String,
-//     pub note: Vec<Note>,
-//     pub span: Span,
-// }
-
-// Use our new YuuError type for parsing errors
 pub type ParseError = YuuError;
 
 // Enum for different synchronization points
@@ -49,6 +34,7 @@ impl Lexer {
             match token_result {
                 Ok(kind) => tokens.push(Token { kind, span }),
                 Err(_) => {
+                    // TODO: Improve error handling
                     panic!("Unknown Token lexed");
                 }
             }

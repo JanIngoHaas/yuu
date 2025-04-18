@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use yuu_shared::{
-    ast::{SourceInfo, StructuralNode, AST},
+    ast::{AST, SourceInfo, StructuralNode},
     binding_info::BindingInfo,
     block::{BindingTable, Block, RootBlock},
     context::Context,

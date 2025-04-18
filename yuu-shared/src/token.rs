@@ -37,9 +37,11 @@ pub enum Integer {
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
 pub enum TokenKind {
-    // Bang
-    #[token("!")]
-    Bang,
+    #[token("break")]
+    Break,
+
+    #[token("while")]
+    WhileKw,
 
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
@@ -107,6 +109,21 @@ pub enum TokenKind {
     #[token("==")]
     EqEq,
 
+    #[token("<")]
+    Lt,
+
+    #[token(">")]
+    Gt,
+
+    #[token("<=")]
+    LtEq,
+
+    #[token(">=")]
+    GtEq,
+
+    #[token("!=")]
+    NotEq,
+
     #[token(",")]
     Comma,
 
@@ -162,7 +179,7 @@ impl TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenKind::Bang => "'!'".fmt(f),
+            TokenKind::Break => "'break'".fmt(f),
             TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
             TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
@@ -182,6 +199,10 @@ impl Display for TokenKind {
             TokenKind::DoubleColon => "'::'".fmt(f),
             TokenKind::Equal => "'='".fmt(f),
             TokenKind::EqEq => "'=='".fmt(f),
+            TokenKind::Lt => "'<'".fmt(f),
+            TokenKind::Gt => "'>'".fmt(f),
+            TokenKind::LtEq => "'<='".fmt(f),
+            TokenKind::GtEq => "'>='".fmt(f),
             TokenKind::Comma => "','".fmt(f),
             TokenKind::Semicolon => "';'".fmt(f),
             TokenKind::TrueKw => "'true'".fmt(f),
@@ -198,6 +219,8 @@ impl Display for TokenKind {
             TokenKind::EOF => "'EOF'".fmt(f),
             TokenKind::StructKw => "'struct'".fmt(f),
             TokenKind::Hash => "'#'".fmt(f),
+            TokenKind::NotEq => "'!='".fmt(f),
+            TokenKind::WhileKw => "'while'".fmt(f),
         }
     }
 }

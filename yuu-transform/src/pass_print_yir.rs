@@ -94,6 +94,51 @@ mod tests {
     };
 
     #[test]
+    fn test_while_loop() {
+        // Test a while loop with a labeled break
+        let code_info = SourceInfo {
+            source: Arc::from(
+                r#"fn test_while() -> i64 {
+                    let mut i = 0;
+                    let result = :outer_block {
+                        while i < 10 {
+                            if i == 5 {
+                                break :outer_block 100;
+                            }
+                            i = i + 1;
+                        }
+                        break 999;
+                    }
+                    return result;
+                }"#,
+            ),
+            file_name: Arc::from("test_while.yuu"),
+        };
+
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+        let mut schedule = Schedule::new();
+
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
+        PassPrintErrors.install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR for while loop:\n{}", yir_output.0);
+    }
+
+    #[test]
     fn test_struct_yir() {
         // Define a struct (three members, f32, i64, f32). Define function which takes a such a struct and returns a struct. We create a struct in the function and return it.
         let code_info = SourceInfo {
@@ -103,10 +148,15 @@ mod tests {
                     y: i64,
                     z: f32,
                 }
-                
+                fn test() -> Point
+                {
+                    let p = create_point(1.0, 2, 3.0);
+                    return p;
+                }                
                 fn create_point(x: f32, y: i64, z: f32) -> Point {
-                    Point { x:x, y:y, z:z }!
-                }"#,
+                    break Point { x:x, y:y, z:z };
+                }
+                "#,
             ),
             file_name: Arc::from("test.yuu"),
         };
@@ -140,13 +190,13 @@ mod tests {
         let code_info = SourceInfo {
             source: Arc::from(
                 r#"fn fac(n: i64) -> i64 {
-                if n == 0 {
-                    1!
+                break if n == 0 {
+                    break 1;
                 }
                 else {
                     let n_out = n * fac(n - 1);
                     return n_out;
-                }!
+                };
             }"#,
             ),
             file_name: Arc::from("test.yuu"),

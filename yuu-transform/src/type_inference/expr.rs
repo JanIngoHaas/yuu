@@ -167,30 +167,20 @@ pub fn infer_block_no_child_creation(
     root_func_block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let mut break_ty = None;
+    let mut span_break_ty = None;
 
     for stmt in &block_expr.body {
         let out = super::infer_stmt(stmt, root_func_block, data);
+        // This is for when we break OUT of the current block!
         if let super::ExitKind::Break = out {
-            // Store break type but keep processing - we'll unify with last expr
-            break_ty = Some(inactive_type());
+            // Store break type but keep processing
+            span_break_ty = Some((stmt.span(), inactive_type()));
         }
     }
 
-    // Get last expression type if it exists
-    let last_expr_ty = if let Some(last_expr) = &block_expr.last_expr {
-        let expr = infer_expr(last_expr, root_func_block, data, None);
-        Some((last_expr.span(), expr))
-    } else {
-        None
-    };
-
-    // Determine type from breaks and last expression
-    let (span, block_ty) = match (break_ty, last_expr_ty) {
-        (Some(brk), Some((span, last))) => (Some(span), brk.unify(last).unwrap_or(inactive_type())),
-        (Some(brk), None) => (None, brk),
-        (None, Some((span, last))) => (Some(span), last),
-        (None, None) => (None, primitive_nil()),
+    let (span, block_ty) = match span_break_ty {
+        Some((span, ty)) => (Some(span), ty),
+        None => (None, primitive_nil()),
     };
 
     // Unify with any existing type from breaks TO this block
@@ -258,9 +248,15 @@ pub fn infer_block(
             id: block_expr.id,
             src_location: Some(block_expr.span.clone()),
         };
-        parent_block.make_child(Some((label.clone(), binding)))
+        parent_block.make_child((Some(*label), binding))
     } else {
-        parent_block.make_child(None)
+        parent_block.make_child((
+            None,
+            BindingInfo {
+                id: block_expr.id,
+                src_location: Some(block_expr.span.clone()),
+            },
+        ))
     };
 
     infer_block_no_child_creation(block_expr, child_block, data)
@@ -328,7 +324,7 @@ fn infer_func_call(
                 .build();
             data.errors.push(err);
             error_type()
-        },
+        }
         TypeInfo::Error => error_type(),
     };
 
@@ -339,44 +335,41 @@ fn infer_func_call(
     resolved_ret_type
 }
 
-// This is WRONG: lhs needs to be an expression, not a binding!
-// TODO: Fix this
 fn infer_assignment(
     assignment_expr: &AssignmentExpr,
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let binding = &assignment_expr.binding;
-    // match_binding_node_to_type(binding, block, ty, data) -> we probably need to call this somehow
-    let binding_ty = data
-        .type_registry
-        .type_info_table
-        .get(binding.node_id())
-        .expect("Compiler bug: binding not found in type table");
+    // let binding = &assignment_expr.lhs;
+    // // match_binding_node_to_type(binding, block, ty, data) -> we probably need to call this somehow
+    // let binding_ty = data
+    //     .type_registry
+    //     .type_info_table
+    //     .get(binding.node_id())
+    //     .expect("Compiler bug: binding not found in type table");
 
-    // Check mutability
-    if !binding.is_mut() {
-        let err = YuuError::builder()
-            .kind(ErrorKind::InvalidExpression)
-            .message("Cannot assign to immutable binding")
-            .source(
-                data.src_code.source.clone(),
-                data.src_code.file_name.clone(),
-            )
-            .span(
-                assignment_expr.span.clone(),
-                "assignment to immutable binding",
-            )
-            .help("Consider adding 'mut' when declaring this binding")
-            .build();
-        data.errors.push(err);
-        return error_type();
-    }
+    // TODO: Check mutability - We need to do this in another pass!
+    //     let err = YuuError::builder()
+    //         .kind(ErrorKind::InvalidExpression)
+    //         .message("Cannot assign to immutable binding")
+    //         .source(
+    //             data.src_code.source.clone(),
+    //             data.src_code.file_name.clone(),
+    //         )
+    //         .span(
+    //             assignment_expr.span.clone(),
+    //             "assignment to immutable binding",
+    //         )
+    //         .help("Consider adding 'mut' when declaring this binding")
+    //         .build();
+    //     data.errors.push(err);
+    //     return error_type();
 
-    let value = infer_expr(&assignment_expr.rhs, block, data, None);
+    let ty_lhs = infer_expr(&assignment_expr.lhs, block, data, None);
+    let ty_rhs = infer_expr(&assignment_expr.rhs, block, data, None);
 
     // Prevent binding inactive types
-    if matches!(value, TypeInfo::Inactive) {
+    if matches!(ty_rhs, TypeInfo::Inactive) {
         let err = YuuError::builder()
             .kind(ErrorKind::InvalidExpression)
             .message("Cannot bind a value-less expression to a variable")
@@ -395,13 +388,13 @@ fn infer_assignment(
     }
 
     // First unify to check compatibility
-    let unified = match value.unify(binding_ty) {
+    let unified = match ty_lhs.unify(ty_rhs) {
         Ok(unified) => unified,
         Err(err) => {
             let err_msg = YuuError::builder()
                 .kind(ErrorKind::TypeMismatch)
                 .message(format!(
-                    "Cannot assign {} to binding of type {}",
+                    "Cannot unify type '{}' and type '{}' in assignment expression",
                     err.left, err.right
                 ))
                 .source(
@@ -413,8 +406,8 @@ fn infer_assignment(
                     format!("has type {}", err.left),
                 )
                 .label(
-                    binding.span().clone(),
-                    format!("expected type {}", err.right),
+                    assignment_expr.lhs.span().clone(),
+                    format!("has type {}", err.right),
                 )
                 .help("The types must be compatible for assignment")
                 .build();
@@ -433,17 +426,7 @@ fn infer_assignment(
         Ok(ty) => ty,
         Err(_err) => {
             // This should never happen if the previous unify worked, but just in case
-            let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
-                .message("Type inconsistency in assignment")
-                .source(
-                    data.src_code.source.clone(),
-                    data.src_code.file_name.clone(),
-                )
-                .span(assignment_expr.span.clone(), "inconsistent types")
-                .build();
-            data.errors.push(err_msg);
-            error_type()
+            unreachable!("Compiler bug: We should never have inconsistent types here");
         }
     }) as _
 }
@@ -690,6 +673,66 @@ pub fn infer_expr(
                 .insert(struct_instantiation_expr.id, struct_type);
 
             struct_type
+        }
+        ExprNode::While(while_expr) => {
+            let cond_ty = infer_expr(&while_expr.condition_block.condition, block, data, None);
+            let while_expr_ty = infer_block(&while_expr.condition_block.body, block, data);
+
+            if let Err(err) = cond_ty.unify(primitive_bool()) {
+                let err_msg = YuuError::builder()
+                    .kind(ErrorKind::TypeMismatch)
+                    .message(format!(
+                        "While condition must be of type 'bool', got '{}'",
+                        err.left
+                    ))
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(
+                        while_expr.condition_block.condition.span().clone(),
+                        format!("has type '{}'", err.left),
+                    )
+                    .help("Conditions must evaluate to a boolean type")
+                    .build();
+                data.errors.push(err_msg);
+                // Continue execution but mark as error
+                data.type_registry
+                    .type_info_table
+                    .insert(while_expr.id, error_type());
+                return error_type();
+            }
+
+            let unify_res = data
+                .type_registry
+                .type_info_table
+                .unify_and_insert(while_expr.id, while_expr_ty);
+
+            match unify_res {
+                Ok(ty) => ty,
+                Err(err) => {
+                    let err_msg = YuuError::builder()
+                        .kind(ErrorKind::TypeMismatch)
+                        .message("While loop has inconsistent break types")
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(
+                            while_expr.condition_block.body.span.clone(),
+                            // TODO: I should collect "breaks" in a separate datastructure so we can pinpoint the breaks which are incompatible and have a better error message
+                            format!("Cannot unify type '{}' and type '{}'", err.left, err.right),
+                        )
+                        .help("All break statements within a while loop must have compatible types")
+                        .build();
+                    data.errors.push(err_msg);
+
+                    data.type_registry
+                        .type_info_table
+                        .insert(while_expr.id, error_type());
+                    error_type()
+                }
+            }
         }
     }
 }

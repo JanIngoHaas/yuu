@@ -1,13 +1,9 @@
 use crate::type_info::TypeInfo;
-use crate::yir::{
-    BinOp, ControlFlow, Function, Instruction, Label, Module, Operand, UnaryOp, Variable,
-};
+use crate::yir::{BinOp, ControlFlow, Instruction, Operand, UnaryOp, Variable};
 use indexmap::IndexMap;
 use std::fmt;
 use std::io::Write;
-use std::sync::Mutex;
 use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
-use ustr::Ustr;
 
 // Color palette system
 #[derive(Clone)]
@@ -288,6 +284,11 @@ pub fn format_binop(op: &BinOp, do_color: bool) -> String {
         BinOp::Mul => "*",
         BinOp::Div => "/",
         BinOp::Eq => "==",
+        BinOp::NotEq => "!=",
+        BinOp::LessThan => "<",
+        BinOp::LessThanEq => "<=",
+        BinOp::GreaterThan => ">",
+        BinOp::GreaterThanEq => ">=",
     };
     format_operator(op_str, do_color)
 }
@@ -426,6 +427,22 @@ pub fn format_instruction(
                 format_keyword("store", do_color),
                 format_variable(dest, do_color),
                 format_operand(src, do_color)
+            )
+        }
+        Instruction::Assign { target, value } => {
+            writeln!(
+                f,
+                "{} := {}",
+                format_variable(target, do_color),
+                format_operand(value, do_color)
+            )
+        }
+        Instruction::Alloca { target } => {
+            writeln!(
+                f,
+                "{} := {}",
+                format_variable(target, do_color),
+                format_keyword("alloca", do_color)
             )
         }
     }

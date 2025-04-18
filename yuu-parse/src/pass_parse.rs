@@ -1,5 +1,5 @@
 use yuu_shared::{
-    ast::{SourceInfo, AST},
+    ast::{AST, SourceInfo},
     context::Context,
     error::YuuError,
     scheduler::{Pass, ResourceId},

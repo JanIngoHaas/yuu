@@ -1,16 +1,13 @@
 use ustr::Ustr;
 use yuu_shared::{
+    Span,
     ast::{Arg, BindingNode, InternUstr, NodeId, StructuralNode, TypeNode},
     binding_info::BindingInfo,
     block::{Block, FUNC_BLOCK_NAME},
-    type_info::{error_type, primitive_nil, FunctionType, TypeInfo},
-    Span,
+    type_info::{FunctionType, TypeInfo, error_type, primitive_nil},
 };
 
-use super::{
-    infer_block_no_child_creation, infer_type, match_binding_node_to_type,
-    pass_type_inference::TransientData,
-};
+use super::{infer_block_no_child_creation, infer_type, pass_type_inference::TransientData};
 
 pub fn declare_function(
     name: Ustr,
@@ -61,13 +58,13 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
     match structural {
         StructuralNode::FuncDecl(_decl) => {}
         StructuralNode::FuncDef(def) => {
-            let func_block = block.make_child(Some((
-                FUNC_BLOCK_NAME.intern(),
+            let func_block = block.make_child((
+                Some(FUNC_BLOCK_NAME.intern()),
                 BindingInfo {
                     id: def.body.id,
                     src_location: Some(def.span.clone()),
                 },
-            )));
+            ));
 
             for arg in &def.decl.args {
                 func_block.insert_variable(arg.name, arg.id, Some(arg.span.clone()), arg.is_mut);
@@ -87,6 +84,6 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
         }
         // Already did that in collect_structural
         StructuralNode::StructDecl(_struct_decl) => {}
-        StructuralNode::StructDef(_struct_def) => {},
+        StructuralNode::StructDef(_struct_def) => {}
     }
 }
