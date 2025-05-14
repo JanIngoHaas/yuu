@@ -320,7 +320,7 @@ impl Display for FunctionType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionType {
     pub args: Vec<&'static TypeInfo>,
     pub ret: &'static TypeInfo,
@@ -338,12 +338,12 @@ impl From<FunctionType> for &'static TypeInfo {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructType {
     pub name: Ustr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeInfo {
     BuiltInPrimitive(PrimitiveType),
     Function(FunctionType),

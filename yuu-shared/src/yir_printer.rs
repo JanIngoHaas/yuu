@@ -327,11 +327,68 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::BitwiseCopy { target, value } => {
+        Instruction::DeclareVar { target, init_value } => {
+            if let Some(val) = init_value {
+                writeln!(
+                    f,
+                    "{} := {}",
+                    format_variable(target, do_color),
+                    format_operand(val, do_color)
+                )
+            } else {
+                writeln!(
+                    f,
+                    "{} := {}",
+                    format_variable(target, do_color),
+                    colorize("nop", "operator", do_color)
+                )
+            }
+        }
+        Instruction::Assign { target, value } => {
             writeln!(
                 f,
                 "{} := {}",
                 format_variable(target, do_color),
+                format_operand(value, do_color)
+            )
+        }
+        Instruction::TakeAddress { target, source } => {
+            writeln!(
+                f,
+                "{} := {} {}",
+                format_variable(target, do_color),
+                format_keyword("&", do_color),
+                format_variable(source, do_color)
+            )
+        }
+        Instruction::GetFieldPtr {
+            target,
+            base,
+            field,
+        } => {
+            writeln!(
+                f,
+                "{} := {} {} {}",
+                format_variable(target, do_color),
+                format_keyword("field_ptr", do_color),
+                format_operand(base, do_color),
+                colorize(&format!(".{}", field), "operator", do_color)
+            )
+        }
+        Instruction::Load { target, source } => {
+            writeln!(
+                f,
+                "{} := *{}",
+                format_variable(target, do_color),
+                format_operand(source, do_color)
+            )
+        }
+        Instruction::Store { dest, value } => {
+            writeln!(
+                f,
+                "{} {} <- {}",
+                format_keyword("store", do_color),
+                format_operand(dest, do_color),
                 format_operand(value, do_color)
             )
         }
@@ -376,74 +433,24 @@ pub fn format_instruction(
             }
             writeln!(f, ")")
         }
-        Instruction::Omega {
+        Instruction::MakeStruct {
             target,
-            writable_blocks,
+            type_ident,
+            fields,
         } => {
             write!(
                 f,
-                "{} := {} [",
+                "{} := {} {{ ",
                 format_variable(target, do_color),
-                format_keyword("Ω", do_color)
+                format_keyword("make_struct", do_color)
             )?;
-            for (i, block) in writable_blocks.lock().unwrap().iter().enumerate() {
+            for (i, (field, val)) in fields.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", format_label(block.name(), do_color))?;
+                write!(f, "{}: {}", field, format_operand(val, do_color))?;
             }
-            writeln!(f, "]")
-        }
-        Instruction::GetFieldPtr {
-            target,
-            base,
-            field,
-        } => {
-            writeln!(
-                f,
-                "{} := {} {} {}",
-                format_variable(target, do_color),
-                format_keyword("field_ptr", do_color),
-                format_operand(base, do_color),
-                colorize(&format!(".{}", field), "operator", do_color)
-            )
-        }
-        Instruction::TakeAddress {
-            target,
-            value: address,
-        } => {
-            writeln!(
-                f,
-                "{} := {} {}",
-                format_variable(target, do_color),
-                format_keyword("&", do_color),
-                format_operand(address, do_color)
-            )
-        }
-        Instruction::Store { dest, src } => {
-            writeln!(
-                f,
-                "{} {} <- {}",
-                format_keyword("store", do_color),
-                format_variable(dest, do_color),
-                format_operand(src, do_color)
-            )
-        }
-        Instruction::Assign { target, value } => {
-            writeln!(
-                f,
-                "{} := {}",
-                format_variable(target, do_color),
-                format_operand(value, do_color)
-            )
-        }
-        Instruction::Alloca { target } => {
-            writeln!(
-                f,
-                "{} := {}",
-                format_variable(target, do_color),
-                format_keyword("alloca", do_color)
-            )
+            writeln!(f, " }}")
         }
     }
 }
@@ -454,29 +461,26 @@ pub fn format_control_flow(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match terminator {
-        ControlFlow::Jump { target, writes } => {
+        ControlFlow::Jump { target } => {
             writeln!(
                 f,
-                "{} {} {}",
+                "{} {}",
                 format_keyword("jump", do_color),
-                format_label(target.name(), do_color),
-                format_omikron_writes(writes, do_color)
+                format_label(target.name(), do_color)
             )
         }
         ControlFlow::Branch {
             condition,
-            if_true: (true_label, true_writes),
-            if_false: (false_label, false_writes),
+            if_true,
+            if_false,
         } => {
             writeln!(
                 f,
-                "{} {} ? {} {}, {} {}",
+                "{} {} ? {}, {}",
                 format_keyword("branch", do_color),
                 format_operand(condition, do_color),
-                format_label(true_label.name(), do_color),
-                format_omikron_writes(true_writes, do_color),
-                format_label(false_label.name(), do_color),
-                format_omikron_writes(false_writes, do_color)
+                format_label(if_true.name(), do_color),
+                format_label(if_false.name(), do_color)
             )
         }
         ControlFlow::Return(value) => {
@@ -486,14 +490,7 @@ pub fn format_control_flow(
             }
             writeln!(f)
         }
-        ControlFlow::Fallthrough(writes) => {
-            writeln!(
-                f,
-                "{} {}",
-                format_keyword("fallthrough", do_color),
-                format_omikron_writes(writes, do_color)
-            )
-        }
+        ControlFlow::Unterminated => writeln!(f, "<unreachable>"),
     }
 }
 

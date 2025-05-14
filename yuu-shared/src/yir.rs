@@ -3,12 +3,13 @@ use crate::scheduler::{ResourceId, ResourceName};
 use crate::type_info::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
-use crate::type_registry::StructFieldInfo;
+use crate::type_registry::{StructFieldInfo, StructInfo};
 use crate::yir_printer;
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
+use std::thread::current;
 use ustr::{Ustr, UstrMap};
 
 /*
@@ -84,7 +85,7 @@ impl Label {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Operand {
     I64Const(i64),
     F32Const(f32),
@@ -128,73 +129,90 @@ pub enum UnaryOp {
 
 #[derive(Clone)]
 pub enum Instruction {
-    // SizeOf {
-    //     target: Variable,
-    //     ty: &'static TypeInfo,
-    // },
-    // AlignOf {
-    //     target: Variable,
-    //     ty: &'static TypeInfo,
-    // },
-    Alloca {
-        target: Variable,
+    // Declares a variable on the stack with optional initial value
+    DeclareVar {
+        target: Variable,            // The variable being declared
+        init_value: Option<Operand>, // Optional initial value
     },
+
+    // Simple assignment between variables or from constant to variable
     Assign {
-        target: Variable,
-        value: Operand,
+        target: Variable, // Target variable to assign to
+        value: Operand,   // Source value
     },
-    GetFieldPtr {
-        target: Variable,
-        base: Operand,
-        field: Ustr,
-    },
-    BitwiseCopy {
-        target: Variable,
-        value: Operand,
-    },
-    Binary {
-        target: Variable,
-        op: BinOp,
-        lhs: Operand,
-        rhs: Operand,
-    },
-    Unary {
-        target: Variable,
-        op: UnaryOp,
-        operand: Operand,
-    },
+
+    // Get pointer to a variable (for taking address of a variable)
     TakeAddress {
-        target: Variable,
-        value: Operand,
+        target: Variable, // Pointer variable to store the address
+        source: Variable, // Variable whose address we're taking
     },
+
+    // Get pointer to a field within a struct
+    GetFieldPtr {
+        target: Variable, // Result pointer variable
+        base: Operand,    // Base struct operand (either variable or pointer)
+        field: Ustr,      // Field name
+    },
+
+    // Load value through a pointer
+    Load {
+        target: Variable, // Target variable to store loaded value
+        source: Operand,  // Source pointer operand (must be a pointer type)
+    },
+
+    // Store value through a pointer
     Store {
-        dest: Operand,
-        src: Operand,
+        dest: Operand,  // Destination pointer operand (must be a pointer type)
+        value: Operand, // Value to store
     },
+
+    // Binary operation
+    Binary {
+        target: Variable, // Result variable
+        op: BinOp,        // Operation
+        lhs: Operand,     // Left operand
+        rhs: Operand,     // Right operand
+    },
+
+    // Unary operation
+    Unary {
+        target: Variable, // Result variable
+        op: UnaryOp,      // Operation
+        operand: Operand, // Operand
+    },
+
+    // Function call
     Call {
-        target: Option<Variable>,
-        name: Ustr,
-        args: Vec<Operand>,
+        target: Option<Variable>, // Optional target for return value
+        name: Ustr,               // Function name
+        args: Vec<Operand>,       // Arguments
     },
-    Omega {
-        target: Variable,
-        writable_blocks: Arc<Mutex<Vec<Label>>>, // Share the same Arc<Mutex> as in omega_blocks
+
+    // Create a struct directly with values (not pointers)
+    MakeStruct {
+        target: Variable,             // Variable to hold the struct
+        type_ident: Ustr,             // Name of struct type
+        fields: Vec<(Ustr, Operand)>, // Field name and value pairs
     },
 }
 
 #[derive(Clone)]
 pub enum ControlFlow {
+    // Simple unconditional jump
     Jump {
         target: Label,
-        writes: Vec<(Variable, Operand)>, // Omikron writes at jump
     },
+    // Conditional branch
     Branch {
         condition: Operand,
-        if_true: (Label, Vec<(Variable, Operand)>), // Writes for true branch
-        if_false: (Label, Vec<(Variable, Operand)>), // Writes for false branch
+        if_true: Label,
+        if_false: Label,
     },
+    // Return from function
     Return(Option<Operand>),
-    Fallthrough(Vec<(Variable, Operand)>), // Writes for fallthrough
+    // Represents a block that hasn't had its terminator set yet.
+    // Should be replaced by a real terminator before final IR generation.
+    Unterminated,
 }
 
 #[derive(Clone)]
@@ -202,15 +220,6 @@ pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<Instruction>,
     pub terminator: ControlFlow,
-}
-
-impl BasicBlock {
-    pub fn fallthrough_to(&self) -> Option<i64> {
-        match &self.terminator {
-            ControlFlow::Fallthrough(_) => Some(self.label.id() + 1),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -223,7 +232,6 @@ pub struct Function {
     current_block: i64,
     next_reg_id: i64,
     next_label_id: i64,
-    omega_blocks: IndexMap<Variable, Arc<Mutex<Vec<Label>>>>, // Track blocks separately
 }
 
 impl Function {
@@ -237,7 +245,6 @@ impl Function {
             current_block: 0,
             next_reg_id: 0,
             next_label_id: 0,
-            omega_blocks: IndexMap::new(),
         };
         f.add_block("entry".intern());
         f
@@ -290,294 +297,274 @@ impl Function {
             BasicBlock {
                 label: label,
                 instructions: Vec::new(),
-                terminator: ControlFlow::Fallthrough(Vec::new()),
+                // Initialize blocks as Unterminated
+                terminator: ControlFlow::Unterminated,
             },
         );
         label
     }
 
-    fn update_omega_writes<'a>(&mut self, writes: impl Iterator<Item = &'a (Variable, Operand)>) {
-        let current_label = self.blocks.get(&self.current_block).unwrap().label;
-
-        for (reg, _) in writes {
-            if let Some(blocks) = self.omega_blocks.get(reg) {
-                let mut blocks = blocks.lock().unwrap();
-                blocks.push(current_label);
-            }
-        }
-    }
-
-    fn gen_writes_if_not_nop(
-        &mut self,
-        writes: Vec<(Variable, Operand)>,
-    ) -> Vec<(Variable, Operand)> {
-        writes
-            .into_iter()
-            .filter(|(_, op)| !matches!(op, Operand::NoOp))
-            .collect()
-    }
-
     pub fn has_terminator(&self, block_id: i64) -> bool {
         self.blocks
             .get(&block_id)
-            .map(|block| !matches!(block.terminator, ControlFlow::Fallthrough(_)))
+            .map(|block| !matches!(block.terminator, ControlFlow::Unterminated))
             .unwrap_or(false)
     }
 
-    pub fn make_jump_if_no_terminator(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
-        if !self.has_terminator(self.current_block) {
-            self.make_jump(target, writes);
+    // Ensures the current block has a terminator. Panics if trying to overwrite one.
+    fn set_terminator(&mut self, terminator: ControlFlow) {
+        let current_block = self.get_current_block_mut();
+        if matches!(current_block.terminator, ControlFlow::Unterminated) {
+            current_block.terminator = terminator;
+        } else {
+            panic!(
+                "Block {} already has a terminator, cannot set new terminator.",
+                current_block.label.name(),
+            );
         }
     }
 
-    pub fn make_assign(&mut self, target_name: Ustr, value: Operand) -> Variable {
-        let target = self.fresh_variable(target_name, value.ty());
-        let block = self.get_current_block_mut();
-        block
-            .instructions
-            .push(Instruction::Assign { target, value });
-        target
-    }
-
-    pub fn make_jump(&mut self, target: Label, writes: Vec<(Variable, Operand)>) {
-        let writes = self.gen_writes_if_not_nop(writes);
-        self.update_omega_writes(writes.iter());
-        self.get_current_block_mut().terminator = ControlFlow::Jump { target, writes };
-    }
-
-    pub fn make_return(&mut self, value: Option<Operand>) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.terminator = ControlFlow::Return(value);
+    pub fn make_jump_if_no_terminator(&mut self, target: Label) {
+        let current_block = self.get_current_block_mut();
+        if matches!(current_block.terminator, ControlFlow::Unterminated) {
+            current_block.terminator = ControlFlow::Jump { target };
         }
     }
 
-    pub fn make_fallthrough(&mut self, writes: Vec<(Variable, Operand)>) {
-        let writes = self.gen_writes_if_not_nop(writes);
-        self.update_omega_writes(writes.iter());
-        self.blocks
-            .get_mut(&self.current_block)
-            .expect("Compiler Error: No current block")
-            .terminator = ControlFlow::Fallthrough(writes);
-    }
-
-    pub fn set_branch_writes(
+    // Builder method for DeclareVar
+    pub fn declare_var(
         &mut self,
-        condition: Operand,
-        if_true: (Label, Vec<(Variable, Operand)>),
-        if_false: (Label, Vec<(Variable, Operand)>),
-    ) {
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.terminator = ControlFlow::Branch {
-                condition,
-                if_true,
-                if_false,
-            };
-        }
-    }
-
-    pub fn make_unary(
-        &mut self,
-        target_name: Ustr,
+        name_hint: Ustr,
         ty: &'static TypeInfo,
-        op: UnaryOp,
-        operand: Operand,
+        init_value: Option<Operand>,
     ) -> Variable {
-        let target = self.fresh_variable(target_name, ty);
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Unary {
-                target,
-                op,
-                operand,
-            });
+        let target = self.fresh_variable(name_hint, ty);
+        if let Some(ref val) = init_value {
+            debug_assert_eq!(
+                val.ty(),
+                ty,
+                "Type mismatch in DeclareVar initialization: target is {}, value is {}",
+                ty,
+                val.ty()
+            );
         }
+        let instr = Instruction::DeclareVar { target, init_value };
+        self.get_current_block_mut().instructions.push(instr);
         target
     }
 
-    pub fn make_get_field_ptr(
-        &mut self,
-        target_name: Ustr,
-        base: Operand,
-        field_info: &StructFieldInfo,
-    ) -> Variable {
-        let ty = field_info.ty.ptr_to();
-        let target = self.fresh_variable(target_name, ty);
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::GetFieldPtr {
-            target,
-            base,
-            field: field_info.name,
-        });
-        target
+    // Builder method for Assign
+    pub fn make_assign(&mut self, target: Variable, value: Operand) {
+        // Don't allow assignment of NoOp to a variable
+        if value == Operand::NoOp {
+            return;
+        }
+        debug_assert_eq!(
+            target.ty(),
+            value.ty(),
+            "Type mismatch in Assign: target is {}, value is {}",
+            target.ty(),
+            value.ty()
+        );
+        let instr = Instruction::Assign { target, value };
+        self.get_current_block_mut().instructions.push(instr);
     }
-
-    pub fn make_binary(
-        &mut self,
-        target_name: Ustr,
-        op: BinOp,
-        lhs: Operand,
-        rhs: Operand,
-        ty: &'static TypeInfo,
-    ) -> Variable {
-        let target = self.fresh_variable(target_name, ty);
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::Binary {
-            target: target,
-            op,
-            lhs,
-            rhs,
-        });
-        target
-    }
-
-    pub fn make_store(&mut self, dest: Operand, src: Operand) {
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::Store { dest, src });
-    }
-
-    pub fn make_take_address(
-        &mut self,
-        name: Ustr,
-        value: Operand,
-        value_type: &'static TypeInfo,
-    ) -> Variable {
-        let target = self.fresh_variable(name, value_type.ptr_to());
-        let block = self.get_current_block_mut();
-        block
-            .instructions
-            .push(Instruction::TakeAddress { target, value });
-        target
-    }
-
-    pub fn make_alloca(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let target = self.fresh_variable(name, ty);
-        let block = self.get_current_block_mut();
-        block.instructions.push(Instruction::Alloca { target });
-        target
-    }
-
-    // pub fn make_sizeof(&mut self, target_name: Ustr, ty: &'static TypeInfo) {
-    //     let target = self.fresh_variable(target_name, primitive_i64());
-    //     let block = self.get_current_block_mut();
-    //     block.instructions.push(Instruction::SizeOf { target, ty });
-    // }
-
-    // pub fn make_alignof(&mut self, target: Variable, ty: &'static TypeInfo) {
-    //     let block = self.get_current_block_mut();
-    //     block.instructions.push(Instruction::AlignOf { target, ty });
-    // }
 
     pub fn make_call(
         &mut self,
+        target: Ustr,
         name: Ustr,
-        func_name: Ustr,
         args: Vec<Operand>,
         return_type: &'static TypeInfo,
     ) -> Option<Variable> {
-        if return_type.is_nil() {
-            return None;
+        let target = if return_type.is_nil() {
+            None
+        } else {
+            Some(self.fresh_variable(target, return_type))
+        };
+        let current_block = self.get_current_block_mut();
+        let instr = Instruction::Call { target, name, args };
+        current_block.instructions.push(instr);
+        target
+    }
+
+    // Builder method for TakeAddress
+    pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
+        let target_type = source.ty().ptr_to();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::TakeAddress { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for GetFieldPtr
+    pub fn make_get_field_ptr(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        field_info: &StructFieldInfo,
+    ) -> Variable {
+        // TODO: Add validation for checking that base is a pointer to a struct type
+        let target_type = field_info.ty.ptr_to();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::GetFieldPtr {
+            target,
+            base,
+            field: field_info.name,
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for Load
+    pub fn make_load(&mut self, name_hint: Ustr, source: Operand) -> Variable {
+        let source_ty = source.ty();
+        debug_assert!(
+            source_ty.is_ptr(),
+            "Load source must be a pointer, got {}",
+            source_ty
+        );
+        let target_type = source_ty.deref_ptr();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::Load { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for Store
+    pub fn make_store(&mut self, dest: Operand, value: Operand) {
+        let dest_ty = dest.ty();
+        debug_assert!(
+            dest_ty.is_ptr(),
+            "Store destination must be a pointer, got {}",
+            dest_ty
+        );
+        let expected_value_type = dest_ty.deref_ptr();
+        debug_assert_eq!(
+            value.ty(),
+            expected_value_type,
+            "Store type mismatch: dest expects *{}, value is {}",
+            expected_value_type,
+            value.ty()
+        );
+        let instr = Instruction::Store { dest, value };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for MakeStruct
+    pub fn make_struct(
+        &mut self,
+        name_hint: Ustr,
+        struct_info: &StructInfo,
+        fields: Vec<(Ustr, Operand)>,
+    ) -> Variable {
+        // TODO: Add validation for field names and types against struct_type definition
+        let target = self.fresh_variable(name_hint, struct_info.ty);
+        let instr = Instruction::MakeStruct {
+            target,
+            type_ident: struct_info.name,
+            fields,
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for Binary operation
+    pub fn make_binary(
+        &mut self,
+        name_hint: Ustr,
+        op: BinOp,
+        lhs: Operand,
+        rhs: Operand,
+        result_type: &'static TypeInfo,
+    ) -> Variable {
+        let target = self.fresh_variable(name_hint, result_type);
+        let instr = Instruction::Binary {
+            target,
+            op,
+            lhs,
+            rhs,
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for Unary operation
+    pub fn make_unary(
+        &mut self,
+        name_hint: Ustr,
+        result_type: &'static TypeInfo,
+        op: UnaryOp,
+        operand: Operand,
+    ) -> Variable {
+        let target = self.fresh_variable(name_hint, result_type);
+        let instr = Instruction::Unary {
+            target,
+            op,
+            operand,
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    pub fn make_jump(&mut self, target: Label) {
+        self.set_terminator(ControlFlow::Jump { target });
+    }
+
+    pub fn make_return(&mut self, value: Option<Operand>) {
+        match (value.as_ref().map(|op| op.ty()), self.return_type) {
+            (Some(ty), ret_ty) if ty == ret_ty => {}
+            (None, ret_ty) if ret_ty.is_nil() => {}
+            (val_ty, ret_ty) => panic!(
+                "Return type mismatch: expected {}, got {:?}",
+                ret_ty,
+                val_ty.map(|t| t)
+            ),
         }
-        let target = self.fresh_variable(name, return_type);
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            block.instructions.push(Instruction::Call {
-                target: Some(target),
-                name: func_name,
-                args,
-            });
-        }
-        Some(target)
+        self.set_terminator(ControlFlow::Return(value));
     }
 
     pub fn make_branch_to_existing(
         &mut self,
         condition: Operand,
-        then: Label,
-        else_: Label,
-        then_writes: Vec<(Variable, Operand)>,
-        else_writes: Vec<(Variable, Operand)>,
+        then_label: Label,
+        else_label: Label,
     ) {
-        let then_writes = self.gen_writes_if_not_nop(then_writes);
-        let else_writes = self.gen_writes_if_not_nop(else_writes);
-        self.update_omega_writes(then_writes.iter());
-        self.update_omega_writes(else_writes.iter());
-
-        self.blocks
-            .get_mut(&self.current_block)
-            .expect("Compiler Error: No current block")
-            .terminator = ControlFlow::Branch {
+        debug_assert_eq!(
+            condition.ty(),
+            primitive_bool(),
+            "Branch condition must be boolean, got {}",
+            condition.ty()
+        );
+        self.set_terminator(ControlFlow::Branch {
             condition,
-            if_true: (then, then_writes),
-            if_false: (else_, else_writes),
-        };
+            if_true: then_label,
+            if_false: else_label,
+        });
     }
 
-    pub fn make_branch(
-        &mut self,
-        condition: Operand,
-        then_writes: Vec<(Variable, Operand)>,
-        else_writes: Vec<(Variable, Operand)>,
-    ) -> (Label, Label) {
-        let true_label = self.fresh_label("then".intern());
-        let false_label = self.fresh_label("else".intern());
+    pub fn make_branch(&mut self, condition: Operand) -> (Label, Label) {
+        debug_assert_eq!(
+            condition.ty(),
+            primitive_bool(),
+            "Branch condition must be boolean, got {}",
+            condition.ty()
+        );
 
-        let then_writes = self.gen_writes_if_not_nop(then_writes);
-        let else_writes = self.gen_writes_if_not_nop(else_writes);
+        let true_label = self.add_block("then".intern());
+        let false_label = self.add_block("else".intern());
 
-        self.update_omega_writes(then_writes.iter());
-        self.update_omega_writes(else_writes.iter());
-
-        self.blocks
-            .get_mut(&self.current_block)
-            .expect("Compiler Error: No current block")
-            .terminator = ControlFlow::Branch {
+        self.set_terminator(ControlFlow::Branch {
             condition,
-            if_true: (true_label, then_writes),
-            if_false: (false_label, else_writes),
-        };
-
-        self.blocks.insert(
-            true_label.id(),
-            BasicBlock {
-                label: true_label,
-                instructions: Vec::new(),
-                terminator: ControlFlow::Fallthrough(Vec::new()),
-            },
-        );
-
-        self.blocks.insert(
-            false_label.id(),
-            BasicBlock {
-                label: false_label,
-                instructions: Vec::new(),
-                terminator: ControlFlow::Fallthrough(Vec::new()),
-            },
-        );
+            if_true: true_label,
+            if_false: false_label,
+        });
 
         (true_label, false_label)
     }
 
     pub fn set_current_block(&mut self, current: &Label) {
         self.current_block = current.id();
-    }
-
-    // fn set_terminator(&mut self, terminator: ControlFlow) {
-    //     if let Some(block) = self.blocks.get_mut(&self.current_block) {
-    //         block.terminator = terminator;
-    //     }
-    // }
-
-    pub fn make_omega(&mut self, target_name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let target = self.fresh_variable(target_name, ty);
-        let blocks = Arc::new(Mutex::new(Vec::new()));
-
-        if let Some(block) = self.blocks.get_mut(&self.current_block) {
-            // Use the same Arc<Mutex> for both the instruction and the tracking map
-            block.instructions.push(Instruction::Omega {
-                target: target,
-                writable_blocks: Arc::clone(&blocks), // Share the same Arc
-            });
-            self.omega_blocks.insert(target, blocks);
-        }
-        target
     }
 
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {

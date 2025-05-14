@@ -17,8 +17,10 @@ use yuu_shared::{
 pub struct TransientData<'a> {
     pub function: Function,
     tr: &'a TypeRegistry,
-    variable_bindings: IndexMap<NodeId, Variable>,
-    block_labels: IndexMap<NodeId, (yir::Label, Variable)>, // Maps block ID to its label and omega variable
+    // Renamed from variable_bindings
+    var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
+    // New map for labeled blocks: Maps AST BlockExpr NodeId -> (Merge Label, Result Variable)
+    labeled_block_info: IndexMap<NodeId, (yir::Label, Variable)>,
 }
 
 enum StmtRes {
@@ -32,8 +34,8 @@ impl<'a> TransientData<'a> {
         Self {
             function,
             tr,
-            variable_bindings: IndexMap::new(),
-            block_labels: IndexMap::new(),
+            var_map: IndexMap::new(),
+            labeled_block_info: IndexMap::new(), // Initialize the new map
         }
     }
 
@@ -43,23 +45,6 @@ impl<'a> TransientData<'a> {
             .types
             .get(&node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
-    }
-
-    fn allocate_and_initialize_ident_binding(&mut self, ident: Ustr, id: NodeId, value: Operand) {
-        let target = self.function.make_assign(ident, value);
-        self.variable_bindings.insert(id, target);
-    }
-
-    fn allocate_and_initialize_binding(&mut self, binding: &BindingNode, value: Operand) {
-        match binding {
-            BindingNode::Ident(ident_binding) => {
-                self.allocate_and_initialize_ident_binding(
-                    ident_binding.name.clone(),
-                    ident_binding.id,
-                    value,
-                );
-            }
-        }
     }
 
     fn lower_expr(&mut self, expr: &ExprNode) -> Operand {
@@ -125,21 +110,23 @@ impl<'a> TransientData<'a> {
             }
             ExprNode::If(if_expr) => self.lower_if_expr(if_expr),
             ExprNode::Ident(ident_expr) => {
-                debug_assert!(self.tr.bindings.contains_key(&ident_expr.id));
-                debug_assert!(
-                    self.variable_bindings
-                        .contains_key(&self.tr.bindings[&ident_expr.id])
-                );
-                if let Some(reg) = self
-                    .tr
-                    .bindings
-                    .get(&ident_expr.id)
-                    .and_then(|x| self.variable_bindings.get(x))
-                {
-                    Operand::Variable(*reg)
-                } else {
-                    Operand::NoOp
-                }
+                // Find the NodeId of the variable declaration this identifier refers to
+                let binding_id = *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
+                    panic!(
+                        "Compiler Bug: No binding found for ident expr {}",
+                        ident_expr.id
+                    )
+                });
+
+                // Find the YIR variable associated with that declaration
+                let yir_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
+                    panic!(
+                        "Compiler Bug: No YIR variable found for binding ID {} (ident: {})",
+                        binding_id, ident_expr.ident
+                    )
+                });
+
+                Operand::Variable(yir_var)
             }
             ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
             ExprNode::FuncCall(func_call_expr) => {
@@ -162,11 +149,35 @@ impl<'a> TransientData<'a> {
 
                 result.map(Operand::Variable).unwrap_or(Operand::NoOp)
             }
+
             ExprNode::Assignment(assignment_expr) => {
-                let lhs = self.lower_expr(&assignment_expr.lhs);
                 let rhs = self.lower_expr(&assignment_expr.rhs);
 
-                // TODO: How do I lower this?A
+                // Compute the r-value of the assignment
+                match assignment_expr.lhs.as_ref() {
+                    ExprNode::Ident(ident_expr) => {
+                        // 1. Find the YIR Variable for this identifier
+                        let binding_id =
+                            *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
+                                panic!(
+                                    "Compiler Bug: No binding found for ident expr {}",
+                                    ident_expr.id
+                                )
+                            });
+                        let target_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
+                            panic!(
+                                "Compiler Bug: No YIR variable found for binding ID {} (ident: {})",
+                                binding_id, ident_expr.ident
+                            )
+                        });
+
+                        // 2. Use make_assign for direct variable assignment
+                        self.function.make_assign(target_var, rhs);
+                        Operand::Variable(target_var)
+                    }
+
+                    _ => unreachable!("Invalid assignment target - can only assign to variables"),
+                }
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 let sinfo = self
@@ -175,7 +186,7 @@ impl<'a> TransientData<'a> {
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
                 // Allocate
-                let struct_reg = self.function.make_alloca(sinfo.name, sinfo.ty);
+                let struct_var = self.function.declare_var(sinfo.name, sinfo.ty, None);
 
                 // Generate code for the struct's fields expressions:
                 for (field, field_expr) in &struct_instantiation_expr.fields {
@@ -186,59 +197,63 @@ impl<'a> TransientData<'a> {
                         .get(&field_name)
                         .expect("Compiler bug: field not found in lowering to YIR");
                     // Use the GetFieldPtr instruction to get the pointer to the field
-                    let field_reg = self.function.make_get_field_ptr(
+                    let field_var = self.function.make_get_field_ptr(
                         field_name,
-                        Operand::Variable(struct_reg),
+                        Operand::Variable(struct_var),
                         field,
                     );
 
                     // Store the value into the field
-                    self.function.make_store(field_reg, field_op);
+                    self.function
+                        .make_store(Operand::Variable(field_var), field_op);
                 }
 
                 // Return the pointer to the struct
-                Operand::Variable(struct_reg)
+                Operand::Variable(struct_var)
             }
             ExprNode::While(while_expr) => {
-                // Lower condition:
+                // Create labels
+                let cond_label = self.function.add_block("while_cond".intern());
+                let body_label = self.function.add_block("while_body".intern());
+                let exit_label = self.function.add_block("while_exit".intern());
+                // Jump into the condition check
+                self.function.make_jump(cond_label.clone());
+                // Condition block
+                self.function.set_current_block(&cond_label);
                 let cond = self.lower_expr(&while_expr.condition_block.condition);
-
-                // Make a branch for the loop body and the merge point
-                let (loop_body_label, merge_label) =
-                    self.function.make_branch(cond, vec![], vec![]);
-
-                // Create omega variable for the loop body
-                let omega = self
-                    .function
-                    .make_omega("while_result".intern(), self.get_type(while_expr.id));
-
-                // Lower the loop body, set merge as its next block and loop body as current block
-                self.function.set_current_block(&loop_body_label);
-                let loop_body_operand = self.lower_block_expr(&while_expr.condition_block.body);
+                // Branch to body or exit
                 self.function
-                    .make_jump_if_no_terminator(merge_label, vec![(omega, loop_body_operand)]);
-
-                self.function.set_current_block(&merge_label);
-
-                Operand::Variable(omega)
+                    .make_branch_to_existing(cond, body_label, exit_label);
+                // Body block
+                self.function.set_current_block(&body_label);
+                let body_val = self.lower_block_expr(&while_expr.condition_block.body);
+                // After body (if not broken out), loop back to condition
+                self.function.make_jump_if_no_terminator(cond_label.clone());
+                // Exit block
+                self.function.set_current_block(&exit_label);
+                // Loop yields the last body value (or NoOp)
+                body_val
             }
         }
     }
 
     fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
-        // For labeled blocks, create omega variable
-        let omega_with_label = if let Some(label_name) = block_expr.label {
-            let omega = self
-                .function
-                .make_omega("block_return".intern(), self.get_type(block_expr.id));
+        // For labeled blocks, create result variable
+        let result_with_label = if let Some(label_name) = block_expr.label {
+            let result = self.function.declare_var(
+                "block_return".intern(),
+                self.get_type(block_expr.id),
+                None,
+            );
 
             // Make a labeld_block_merge bb that we jump to...
             let block = self.function.add_block(
                 /*format!("{}_merge", label_name.as_str()).intern()*/ label_name,
             );
-            self.block_labels.insert(block_expr.id, (block, omega)); // That's where we jump to from deep within the callstack (or from the block itself)
+            self.labeled_block_info
+                .insert(block_expr.id, (block, result)); // That's where we jump to from deep within the callstack (or from the block itself)
 
-            Some((omega, block))
+            Some((result, block))
         } else {
             None
         };
@@ -250,15 +265,14 @@ impl<'a> TransientData<'a> {
             match res {
                 // Direct break, referencing the parent block
                 StmtRes::Break(value) => {
-                    match omega_with_label {
-                        // Labeled block: jump to next with value in omega
-                        Some((omega, label)) => {
-                            self.function.make_jump_if_no_terminator(
-                                label.clone(),
-                                vec![(omega.clone(), value)],
-                            );
+                    match result_with_label {
+                        // Labeled block: jump to next with value in result
+                        Some((result, label)) => {
+                            // Assign the value to the result variable
+                            self.function.make_assign(result, value);
+                            self.function.make_jump_if_no_terminator(label.clone());
                             self.function.set_current_block(&label);
-                            return Operand::Variable(omega);
+                            return Operand::Variable(result);
                         }
                         // Unlabeled block: Just return the value, no jumping around needed
                         _ => return value,
@@ -275,11 +289,10 @@ impl<'a> TransientData<'a> {
         }
 
         // no break stmt - jump to the next block, not writing anything
-        if let Some((omega, label)) = omega_with_label {
-            self.function
-                .make_jump_if_no_terminator(label.clone(), vec![]);
+        if let Some((result, label)) = result_with_label {
+            self.function.make_jump_if_no_terminator(label.clone());
             self.function.set_current_block(&label);
-            Operand::Variable(omega)
+            Operand::Variable(result)
         } else {
             Operand::NoOp
         }
@@ -288,33 +301,54 @@ impl<'a> TransientData<'a> {
     fn lower_stmt(&mut self, stmt: &StmtNode) -> StmtRes {
         match stmt {
             StmtNode::Let(let_stmt) => {
-                let value = self.lower_expr(&let_stmt.expr);
-                self.allocate_and_initialize_binding(&let_stmt.binding, value);
+                // Lower the initializer expression first
+                let init_value_operand = self.lower_expr(&let_stmt.expr);
+
+                // Handle the binding pattern
+                match let_stmt.binding.as_ref() {
+                    BindingNode::Ident(ident_binding) => {
+                        let binding_id = ident_binding.id;
+                        let name_hint = ident_binding.name;
+                        let var_type = self.get_type(binding_id); // Get type associated with the binding ID
+
+                        // Declare the variable in YIR
+                        let yir_var = self.function.declare_var(
+                            name_hint,
+                            var_type,
+                            Some(init_value_operand), // Pass the lowered initializer
+                        );
+
+                        // Map the AST binding ID to the new YIR variable
+                        self.var_map.insert(binding_id, yir_var);
+                    } // If other BindingNode variants existed, they would be handled here
+                      // e.g., BindingNode::StructPattern(...) => { /* Destructuring logic */ }
+                }
+
                 StmtRes::Proceed
             }
             StmtNode::Atomic(expr) => {
-                let _ = self.lower_expr(expr);
+                let _ = self.lower_expr(expr); // Lower expression for side effects
                 StmtRes::Proceed
             }
             StmtNode::Break(exit_stmt) => {
+                // ... (Keep existing Break logic for now, will update later) ...
                 let value = self.lower_expr(&exit_stmt.expr);
                 if exit_stmt.target.is_none() {
                     return StmtRes::Break(value);
                 }
                 debug_assert!(self.tr.bindings.contains_key(&exit_stmt.id));
                 debug_assert!(
-                    self.block_labels
+                    self.labeled_block_info
                         .contains_key(&self.tr.bindings[&exit_stmt.id])
                 );
-                if let Some((target_label, omega_var)) = self
+                if let Some((target_label, result_var)) = self
                     .tr
                     .bindings
                     .get(&exit_stmt.id)
-                    .and_then(|x| self.block_labels.get(x))
+                    .and_then(|x| self.labeled_block_info.get(x))
                 {
-                    // Write the break value to the block's omega variable
-                    self.function
-                        .make_jump(*target_label, vec![(*omega_var, value)]);
+                    self.function.make_assign(*result_var, value);
+                    self.function.make_jump(*target_label); // Still uses writes, needs update
                 }
                 StmtRes::BreakWithLabel
             }
@@ -328,35 +362,36 @@ impl<'a> TransientData<'a> {
         // Evaluate the condition
         let cond = self.lower_expr(&if_expr.if_block.condition);
 
-        // Create all blocks first, merge will be the next block for both branches
-        let (then_label, else_label) = self.function.make_branch(cond, vec![], vec![]);
-        let merge_label = self.function.add_block("merge".intern());
-
-        // Create omega variable and declare it in current block
-        let omega = self
+        // Get the result type for the if expression
+        let result_type = self.get_type(if_expr.id);
+        // Declare a variable to hold the result of the if-expression
+        let if_result_var = self
             .function
-            .make_omega("if_result".intern(), self.get_type(if_expr.id));
+            .declare_var("if_result".intern(), result_type, None);
+
+        // Create all blocks first, merge will be the next block for both branches
+        let (then_label, else_label) = self.function.make_branch(cond);
+        let merge_label = self.function.add_block("merge".intern());
 
         // Lower the then block, setting merge as its next block
         self.function.set_current_block(&then_label);
         let then_value = self.lower_block_expr(&if_expr.if_block.body);
-        self.function
-            .make_jump_if_no_terminator(merge_label, vec![(omega, then_value)]);
+        self.function.make_assign(if_result_var, then_value); // Assign then_value to if_result_var
+        self.function.make_jump_if_no_terminator(merge_label);
 
         // Lower the else block, also setting merge as its next block
         self.function.set_current_block(&else_label);
         let else_value = if let Some(else_block) = &if_expr.else_block {
             self.lower_block_expr(else_block)
         } else {
-            Operand::NoOp
+            Operand::NoOp // If there's no else block, the value is NoOp
         };
-
-        self.function
-            .make_jump_if_no_terminator(merge_label, vec![(omega, else_value)]);
+        self.function.make_assign(if_result_var, else_value); // Assign else_value to if_result_var
+        self.function.make_jump_if_no_terminator(merge_label);
 
         // Set merge block as current (no next block needed since it's the end)
         self.function.set_current_block(&merge_label);
-        Operand::Variable(omega)
+        Operand::Variable(if_result_var)
     }
 }
 
@@ -393,7 +428,7 @@ impl PassAstToYir {
                         let (ty, name) = (data.get_type(arg.id), arg.name.clone());
                         let param = data.function.add_param(name, ty);
                         // variable the parameter
-                        data.variable_bindings.insert(arg.id, param);
+                        data.var_map.insert(arg.id, param);
                     }
 
                     // Process the function body block
