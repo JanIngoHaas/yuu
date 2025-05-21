@@ -94,9 +94,6 @@ pub enum TokenKind {
     #[token("return")]
     Return,
 
-    #[token("out")]
-    OutKw,
-
     #[token(":")]
     Colon,
 
@@ -170,7 +167,7 @@ impl TokenKind {
     pub fn from_keyword(keyword: &str) -> Option<TokenKind> {
         match keyword {
             "return" => Some(TokenKind::Return),
-            "out" => Some(TokenKind::OutKw),
+            "break" => Some(TokenKind::Break),
             _ => None,
         }
     }
@@ -194,7 +191,6 @@ impl Display for TokenKind {
             TokenKind::FnKw => "'fn'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
             TokenKind::Return => "'return'".fmt(f),
-            TokenKind::OutKw => "'out'".fmt(f),
             TokenKind::Colon => "':'".fmt(f),
             TokenKind::DoubleColon => "'::'".fmt(f),
             TokenKind::Equal => "'='".fmt(f),

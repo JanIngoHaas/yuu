@@ -108,6 +108,31 @@ impl Lexer {
         }
     }
 
+    pub fn expect_semicolon(&mut self, errors: &mut Vec<ParseError>) -> ParseResult<Token> {
+        let next = self.next_token();
+        if next.kind == TokenKind::Semicolon {
+            Ok(next)
+        } else {
+            // Error case: Expected semicolon
+            let span = next.span.clone();
+            let expected_str = format!("{:?}", TokenKind::Semicolon);
+            let found_str = format!("{:?}", next.kind);
+
+            let mut error = YuuError::unexpected_token(
+                span,
+                expected_str,
+                found_str,
+                self.code_info.source.clone(),
+                self.code_info.file_name.clone(),
+            );
+
+            error = error.with_help("Expected a ';' after the statement");
+
+            errors.push(error);
+            Err(self.synchronize())
+        }
+    }
+
     pub fn expect_tag(
         &mut self,
         expected: TokenKind,

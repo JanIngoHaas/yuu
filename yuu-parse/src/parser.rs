@@ -424,6 +424,17 @@ impl Parser {
 
     pub fn parse_atomic_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (span, expr) = self.parse_expr()?;
+
+        // Only expect semicolon if the expression is not a block
+        let span = if matches!(expr, ExprNode::If(_))
+            || matches!(expr, ExprNode::While(_))
+            || matches!(expr, ExprNode::Block(_))
+        {
+            span
+        } else {
+            let semicolon = self.lexer.expect_semicolon(&mut self.errors)?;
+            span.start..semicolon.span.end
+        };
         Ok((span, StmtNode::Atomic(expr)))
     }
 
@@ -473,8 +484,10 @@ impl Parser {
             None
         };
         let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
-        let (expr_span, expr) = self.parse_expr()?;
-        let span = let_tkn.span.start..expr_span.end;
+        let (_expr_span, expr) = self.parse_expr()?;
+        // Parse semicolon
+        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
+        let span = let_tkn.span.start..sem.span.end;
 
         Ok((
             span.clone(),
@@ -814,55 +827,61 @@ impl Parser {
 
             let node = match stmt_res {
                 Ok((_, b)) => b,
-                Err(CatchIn::Statement) => StmtNode::Error(0),
+                Err(CatchIn::Statement) => {
+                    // Eat the ";"
+                    self.lexer.eat();
+                    StmtNode::Error(0)
+                }
                 Err(x) => return Err(x),
             };
 
-            // Check if the statement requires a semicolon
-            let requires_semicolon = match &node {
-                // Control flow and block expressions used as statements don't need semicolons
-                StmtNode::Atomic(expr)
-                    if !matches!(
-                        expr,
-                        ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)
-                    ) =>
-                {
-                    true
-                }
-                StmtNode::Let(_) | StmtNode::Break(_) => true,
-                StmtNode::Atomic(_) => true,
-                StmtNode::Error(_) => false,
-            };
+            stmts.push(node);
 
-            if requires_semicolon {
-                // Look for terminator (semicolon)
-                let terminator = self.lexer.peek();
-                match terminator.kind {
-                    TokenKind::Semicolon => {
-                        self.lexer.next_token(); // Consume the semicolon
-                        stmts.push(node);
-                    }
-                    _ => {
-                        // Error: Expected semicolon
-                        let terminator_token = self.lexer.next_token();
-                        self.errors.push(
-                            YuuError::unexpected_token(
-                                terminator_token.span.clone(),
-                                "';'".to_string(),
-                                terminator_token.kind,
-                                self.lexer.code_info.source.clone(),
-                                self.lexer.code_info.file_name.clone(),
-                            )
-                            .with_help("Expected ';' after this statement.".to_string()),
-                        );
-                        // Attempt synchronization
-                        return Err(self.lexer.synchronize());
-                    }
-                }
-            } else {
-                // Statement doesn't require a semicolon (if, while, block expr, ...)
-                stmts.push(node);
-            }
+            // // Check if the statement requires a semicolon
+            // let requires_semicolon = match &node {
+            //     // Control flow and block expressions used as statements don't need semicolons
+            //     StmtNode::Atomic(expr)
+            //         if !matches!(
+            //             expr,
+            //             ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)
+            //         ) =>
+            //     {
+            //         false
+            //     }
+            //     StmtNode::Let(_) | StmtNode::Break(_) | StmtNode::Atomic(_) => true,
+            //     StmtNode::Error(_) => false,
+            // };
+
+            // if requires_semicolon {
+            //     // Look for terminator (semicolon)
+            //     let terminator = self.lexer.peek();
+            //     match terminator.kind {
+            //         TokenKind::Semicolon => {
+            //             self.lexer.next_token(); // Consume the semicolon
+            //             stmts.push(node);
+            //         }
+            //         _ => {
+            //             // Error: Expected semicolon
+            //             let terminator_token = self.lexer.next_token();
+            //             self.errors.push(
+            //                 YuuError::unexpected_token(
+            //                     terminator_token.span.clone(),
+            //                     "';'".to_string(),
+            //                     terminator_token.kind,
+            //                     self.lexer.code_info.source.clone(),
+            //                     self.lexer.code_info.file_name.clone(),
+            //                 )
+            //                 .with_help("Expected ';' after this statement.".to_string()),
+            //             );
+            //             // Attempt synchronization
+            //             return Err(self.lexer.synchronize());
+            //         }
+            //     }
+            // } else {
+            //     // Statement doesn't require a semicolon (if, while, block expr, ...)
+            //     println!("No semicolon needed for this statement");
+            //     stmts.push(node);
+            // }
         }
     }
 
@@ -894,8 +913,10 @@ impl Parser {
         };
 
         // Parse the value expression
-        let (expr_span, expr) = self.parse_expr()?;
-        let span = break_token.span.start..expr_span.end;
+        let (_expr_span, expr) = self.parse_expr()?;
+
+        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
+        let span = break_token.span.start..sem.span.end;
 
         Ok((
             span.clone(),
@@ -1038,62 +1059,64 @@ impl Parser {
         let peek = self.lexer.peek();
         match peek.kind {
             TokenKind::LetKw => self.parse_let_stmt(),
-            TokenKind::OutKw => self.parse_out_stmt(),
+            //TokenKind::OutKw => self.parse_out_stmt(),
             TokenKind::Break => self.parse_break_stmt(),
             TokenKind::Return => self.parse_return_stmt(),
             _ => self.parse_atomic_stmt(),
         }
     }
 
-    fn parse_out_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let out_token = self.lexer.expect(&[TokenKind::OutKw], &mut self.errors)?;
+    // fn parse_out_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+    //     let out_token = self.lexer.expect(&[TokenKind::OutKw], &mut self.errors)?;
 
-        // Check for :
-        let colon = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
-        // Must be followed by identifier (i.e. :label)
-        let label_token = self.lexer.next_token();
-        let target = match label_token.kind {
-            TokenKind::Ident(label) => Some(label),
-            _ => {
-                let mut error = YuuError::unexpected_token(
-                    label_token.span.clone(),
-                    "a label identifier".to_string(),
-                    label_token.kind,
-                    self.lexer.code_info.source.clone(),
-                    self.lexer.code_info.file_name.clone(),
-                )
-                .with_help("Expected a label identifier after colon".to_string());
+    //     // Check for :
+    //     let colon = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+    //     // Must be followed by identifier (i.e. :label)
+    //     let label_token = self.lexer.next_token();
+    //     let target = match label_token.kind {
+    //         TokenKind::Ident(label) => Some(label),
+    //         _ => {
+    //             let mut error = YuuError::unexpected_token(
+    //                 label_token.span.clone(),
+    //                 "a label identifier".to_string(),
+    //                 label_token.kind,
+    //                 self.lexer.code_info.source.clone(),
+    //                 self.lexer.code_info.file_name.clone(),
+    //             )
+    //             .with_help("Expected a label identifier after colon".to_string());
 
-                error = error.with_related_info(
-                    "The preceding colon is here - this marks the start of a block label, so a block identifier is expected".to_string(),
-                    Some((colon.span.clone(), "colon")),
-                );
+    //             error = error.with_related_info(
+    //                 "The preceding colon is here - this marks the start of a block label, so a block identifier is expected".to_string(),
+    //                 Some((colon.span.clone(), "colon")),
+    //             );
 
-                self.errors.push(error);
-                return Err(self.lexer.synchronize());
-            }
-        };
+    //             self.errors.push(error);
+    //             return Err(self.lexer.synchronize());
+    //         }
+    //     };
 
-        // Parse the value expression
-        let (expr_span, expr) = self.parse_expr()?;
-        let span = out_token.span.start..expr_span.end;
+    //     // Parse the value expression
+    //     let (expr_span, expr) = self.parse_expr()?;
+    //     let span = out_token.span.start..expr_span.end;
 
-        Ok((
-            span.clone(),
-            StmtNode::Break(BreakStmt {
-                span,
-                expr: Box::new(expr),
-                target,
-                id: 0,
-            }),
-        ))
-    }
+    //     Ok((
+    //         span.clone(),
+    //         StmtNode::Break(BreakStmt {
+    //             span,
+    //             expr: Box::new(expr),
+    //             target,
+    //             id: 0,
+    //         }),
+    //     ))
+    // }
 
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let ret_token = self.lexer.expect(&[TokenKind::Return], &mut self.errors)?;
 
-        let (expr_span, expr) = self.parse_expr()?;
-        let span = ret_token.span.start..expr_span.end;
+        let (_expr_span, expr) = self.parse_expr()?;
+
+        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
+        let span = ret_token.span.start..sem.span.end;
 
         Ok((
             span.clone(),
@@ -1175,11 +1198,6 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-
-    use yuu_shared::graphviz_output;
-
-    use crate::add_ids::{self};
-
     use super::*;
 
     #[test]

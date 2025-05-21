@@ -108,7 +108,7 @@ mod tests {
                             i = i + 1;
                         }
                         break 999;
-                    }
+                    };
                     return result;
                 }"#,
             ),

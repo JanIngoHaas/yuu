@@ -5,7 +5,7 @@ use yuu_shared::{
         LiteralExpr, Spanned, UnaryExpr,
     },
     binding_info::BindingInfo,
-    block::{Block, IdentResolutionKind},
+    block::Block,
     error::{ErrorKind, YuuError, create_no_overload_error},
     type_info::{
         TypeInfo, error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64,

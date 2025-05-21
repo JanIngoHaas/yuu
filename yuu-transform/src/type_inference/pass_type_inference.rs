@@ -133,6 +133,7 @@ impl Pass for PassTypeInference {
 
         context.add_pass_data(TypeInferenceErrors(data.errors));
         context.add_pass_data(type_registry);
+        context.add_pass_data(root_block);
         Ok(())
     }
 

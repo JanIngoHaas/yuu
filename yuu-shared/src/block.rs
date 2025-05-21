@@ -1,3 +1,5 @@
+// TODO: THIS NEEDS TO BE REWRITTEN - USE BUMPALO OR SIMILAR FOR MEMORY MANAGEMENT, DON'T GIVE OUT REFERENCES TO BLOCKS - for now just save things in Box<> so the pointers do not become invalidated when the vec needs to realloc.
+
 use std::ops::{Deref, DerefMut};
 
 use crate::Span;
@@ -15,7 +17,6 @@ use ustr::{Ustr, UstrMap};
 
 pub const FUNC_BLOCK_NAME: &str = "_fn";
 
-#[derive(Clone)]
 pub struct Block {
     pub bindings: UstrMap<VariableBinding>,
     pub parent: Option<usize>,
@@ -34,7 +35,7 @@ impl ResourceId for Box<RootBlock> {
 
 // TODO: Wrap this in a box; we have pointers to it. When the root block is moved, the pointers are invalidated and point to garbage / other data.
 pub struct RootBlock {
-    arena: Vec<Block>,
+    arena: Vec<Box<Block>>,
     root: usize,
 }
 
@@ -85,7 +86,7 @@ impl RootBlock {
             ),
         };
 
-        arena.push(top_level_block);
+        arena.push(Box::new(top_level_block));
 
         let mut root = Box::new(Self {
             root: arena.len() - 1,
@@ -115,12 +116,15 @@ impl Block {
     }
 
     pub fn get_parent(&self) -> Option<&Block> {
-        self.parent.and_then(|p| self.get_root_block().arena.get(p))
+        self.parent
+            .and_then(|p| self.get_root_block().arena.get(p))
+            .map(|v| &**v)
     }
 
     pub fn get_parent_mut(&mut self) -> Option<&mut Block> {
         self.parent
             .and_then(|p| self.get_root_block_mut().arena.get_mut(p))
+            .map(|v| &mut **v)
     }
 
     pub fn get_binding(&self, name: Ustr) -> Option<VariableBinding> {
@@ -158,7 +162,7 @@ impl Block {
             id: len,
             named_block_binding: name,
         };
-        root_block.arena.push(child);
+        root_block.arena.push(Box::new(child));
         &mut root_block.arena[len]
     }
 
