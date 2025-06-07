@@ -1,0 +1,232 @@
+use crate::{
+    pass_yir_lowering::yir::Module,
+    scheduling::context::Context,
+    scheduling::scheduler::{Pass, ResourceId, ResourceName},
+};
+
+pub struct PassYirToString;
+
+impl Default for PassYirToString {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PassYirToString {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+pub struct PassYirToColoredString;
+
+impl Default for PassYirToColoredString {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl Pass for PassYirToColoredString {
+    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+        let module = context.get_resource::<Module>(self);
+        let module = module.lock().unwrap();
+        let mut f = String::new();
+        module.format_yir(true, &mut f)?;
+        context.add_pass_data(YirTextualRepresentation(f));
+        Ok(())
+    }
+    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    where
+        Self: Sized,
+    {
+        schedule.requires_resource_read::<Module>(&self);
+        schedule.produces_resource::<YirTextualRepresentation>(&self);
+        schedule.add_pass(self);
+    }
+
+    fn get_name(&self) -> &'static str {
+        "YirToColoredString"
+    }
+}
+
+pub struct YirTextualRepresentation(pub String);
+
+impl ResourceId for YirTextualRepresentation {
+    fn resource_name() -> ResourceName {
+        "YirTextualRepresentation"
+    }
+}
+
+impl Pass for PassYirToString {
+    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+        let module = context.get_resource::<Module>(self);
+        let module = module.lock().unwrap();
+        let ir_string = format!("{}", module);
+        context.add_pass_data(YirTextualRepresentation(ir_string));
+        Ok(())
+    }
+    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule) {
+        schedule.requires_resource_read::<Module>(&self);
+        schedule.produces_resource::<YirTextualRepresentation>(&self);
+        schedule.add_pass(self);
+    }
+
+    fn get_name(&self) -> &'static str {
+        "YirToString"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::pass_parse::pass_parse::PassParse;
+    use crate::pass_type_inference::PassTypeInference;
+    use crate::{
+        pass_diagnostics::pass_check_errors::PassPrintErrors, pass_yir_lowering::PassAstToYir,
+    };
+    use crate::{
+        pass_parse::ast::SourceInfo,
+        scheduling::scheduler::{Schedule, Scheduler},
+    };
+
+    #[test]
+    fn test_while_loop() {
+        // Test a while loop with a labeled break
+        let code_info = SourceInfo {
+            source: Arc::from(
+                r#"fn test_while() -> i64 {
+                    let mut i = 0;
+                    let result = :outer_block {
+                        while i < 10 {
+                            if i == 5 {
+                                break :outer_block 100;
+                            }
+                            i = i + 1;
+                        }
+                        break 999;
+                    };
+                    return result;
+                }"#,
+            ),
+            file_name: Arc::from("test_while.yuu"),
+        };
+
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+        let mut schedule = Schedule::new();
+
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
+        PassPrintErrors.install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR for while loop:\n{}", yir_output.0);
+    }
+
+    #[test]
+    fn test_struct_yir() {
+        // Define a struct (three members, f32, i64, f32). Define function which takes a such a struct and returns a struct. We create a struct in the function and return it.
+        let code_info = SourceInfo {
+            source: Arc::from(
+                r#"struct Point {
+                    x: f32,
+                    y: i64,
+                    z: f32,
+                }
+                fn test() -> Point
+                {
+                    let p = create_point(1.0, 2, 3.0);
+                    return p;
+                }                
+                fn create_point(x: f32, y: i64, z: f32) -> Point {
+                    break Point { x:x, y:y, z:z };
+                }
+                "#,
+            ),
+            file_name: Arc::from("test.yuu"),
+        };
+
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+        let mut schedule = Schedule::new();
+
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
+        PassPrintErrors.install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR:\n{}", yir_output.0);
+    }
+
+    #[test]
+    fn test_fac_yir() {
+        // Create the factorial function code
+        let code_info = SourceInfo {
+            source: Arc::from(
+                r#"fn fac(n: i64) -> i64 {
+                break if n == 0 {
+                    break 1;
+                }
+                else {
+                    let n_out = n * fac(n - 1);
+                    return n_out;
+                };
+            }"#,
+            ),
+            file_name: Arc::from("test.yuu"),
+        };
+
+        // Create a new context and add the code info
+        let mut context = Context::new();
+        context.add_pass_data(code_info);
+
+        // Create and configure the schedule
+        let mut schedule = Schedule::new();
+
+        // Add passes
+        PassParse.install(&mut schedule);
+        PassTypeInference.install(&mut schedule);
+        PassPrintErrors.install(&mut schedule);
+        PassAstToYir.install(&mut schedule);
+        PassYirToColoredString.install(&mut schedule);
+
+        // // Print the pass dependency graph in DOT format for debugging
+        // println!("Pass Dependencies:");
+        // schedule.print_dot();
+
+        // Run the schedule
+        let scheduler = Scheduler::new();
+        let context = scheduler
+            .run(schedule, context)
+            .expect("Failed to run schedule");
+
+        // Get the YIR output
+        let yir_output = context.get_resource::<YirTextualRepresentation>(&PassYirToString);
+        let yir_output = yir_output.lock().unwrap();
+        println!("Generated YIR:\n{}", yir_output.0);
+    }
+}

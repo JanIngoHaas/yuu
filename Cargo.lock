@@ -969,52 +969,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "yuu-codegen"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ustr",
- "yuu-parse",
- "yuu-shared",
- "yuu-transform",
-]
-
-[[package]]
-name = "yuu-main"
-version = "0.1.0"
-dependencies = [
- "miette",
- "yuu-codegen",
- "yuu-parse",
- "yuu-shared",
- "yuu-transform",
-]
-
-[[package]]
-name = "yuu-parse"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "logos",
- "miette",
- "ron",
- "serde",
- "thiserror 2.0.3",
- "ustr",
- "yuu-shared",
-]
-
-[[package]]
-name = "yuu-shared"
+name = "yuu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bumpalo",
+ "colored",
  "indexmap",
  "logos",
  "miette",
  "petgraph",
  "rayon",
+ "ron",
  "scc",
  "serde",
  "serde_json",
@@ -1022,21 +988,6 @@ dependencies = [
  "termcolor",
  "thiserror 2.0.3",
  "ustr",
-]
-
-[[package]]
-name = "yuu-transform"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "colored",
- "indexmap",
- "miette",
- "serde_json",
- "thiserror 2.0.3",
- "ustr",
- "yuu-parse",
- "yuu-shared",
 ]
 
 [[package]]
