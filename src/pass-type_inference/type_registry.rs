@@ -349,7 +349,7 @@ impl TypeRegistry {
         let funcs = self
             .functions
             .entry(info.name)
-            .or_insert_with(IndexMap::new);
+            .or_default();
 
         let succ = self
             .type_info_table

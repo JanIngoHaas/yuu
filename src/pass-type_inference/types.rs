@@ -7,7 +7,7 @@ use crate::{
     },
 };
 
-use super::pass_type_inference::TransientData;
+use super::pass_type_inference_impl::TransientData;
 
 pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo {
     let semantic_type = match ty {

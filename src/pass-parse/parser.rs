@@ -630,7 +630,7 @@ impl Parser {
         // Track function name for better error messages
         let opening_paren_span = op_token.span.clone();
         let func_name = match &lhs {
-            ExprNode::Ident(ident) => ident.ident.clone(),
+            ExprNode::Ident(ident) => ident.ident,
             _ => ustr("function"),
         };
 
@@ -786,9 +786,9 @@ impl Parser {
                     )
                     .with_help("Expected a struct name identifier".to_string()),
                 );
-                return Err(self.lexer.synchronize());
+                Err(self.lexer.synchronize())
             }
-        };
+        }
     }
 
     pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {

@@ -7,7 +7,7 @@ use crate::{
 use logos::Span;
 use ustr::Ustr;
 
-use super::{infer_block_no_child_creation, infer_type, pass_type_inference::TransientData};
+use super::{infer_block_no_child_creation, infer_type, pass_type_inference_impl::TransientData};
 
 pub fn declare_function(
     name: Ustr,
@@ -46,7 +46,7 @@ pub fn declare_function(
         ret_type,
         name,
         BindingInfo {
-            id: id,
+            id,
             src_location: Some(span),
         },
     );

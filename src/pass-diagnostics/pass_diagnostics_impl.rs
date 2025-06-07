@@ -1,20 +1,20 @@
 use crate::pass_diagnostics::{YuuError, setup_error_formatter};
-use crate::pass_parse::pass_parse::SyntaxErrors;
+use crate::pass_parse::pass_parse_impl::SyntaxErrors;
 use anyhow::bail;
 use colored::*;
 
 use crate::{scheduling::context::Context, scheduling::scheduler::Pass};
 
 use crate::pass_type_inference::TypeInferenceErrors;
-pub struct PassPrintErrors;
+pub struct PassDiagnostics;
 
-impl Default for PassPrintErrors {
+impl Default for PassDiagnostics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassPrintErrors {
+impl PassDiagnostics {
     pub fn new() -> Self {
         Self {}
     }
@@ -79,7 +79,7 @@ impl PassPrintErrors {
     }
 }
 
-impl Pass for PassPrintErrors {
+impl Pass for PassDiagnostics {
     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
         // Set up proper error formatting with syntax highlighting
         setup_error_formatter(Some("WarmEmber"), true).unwrap();
@@ -145,8 +145,8 @@ impl Pass for PassPrintErrors {
 
 #[cfg(test)]
 mod tests {
-    use crate::pass_diagnostics::pass_check_errors::PassPrintErrors;
-    use crate::pass_parse::pass_parse::PassParse;
+    use crate::pass_diagnostics::pass_diagnostics_impl::PassDiagnostics;
+    use crate::pass_parse::pass_parse_impl::PassParse;
     use crate::pass_type_inference::PassTypeInference;
     use crate::{
         pass_parse::ast::SourceInfo,
@@ -195,7 +195,7 @@ mod tests {
         // Add passes
         PassParse.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
-        PassPrintErrors.install(&mut schedule);
+        PassDiagnostics.install(&mut schedule);
 
         // schedule.print_dot();
         // Run the schedule - should fail due to errors

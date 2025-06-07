@@ -81,10 +81,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::pass_parse::pass_parse::PassParse;
+    use crate::pass_parse::pass_parse_impl::PassParse;
     use crate::pass_type_inference::PassTypeInference;
     use crate::{
-        pass_diagnostics::pass_check_errors::PassPrintErrors, pass_yir_lowering::PassAstToYir,
+        pass_diagnostics::pass_diagnostics_impl::PassDiagnostics, pass_yir_lowering::PassAstToYir,
     };
     use crate::{
         pass_parse::ast::SourceInfo,
@@ -120,7 +120,7 @@ mod tests {
         // Add passes
         PassParse.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
-        PassPrintErrors.install(&mut schedule);
+        PassDiagnostics.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 
@@ -166,7 +166,7 @@ mod tests {
         // Add passes
         PassParse.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
-        PassPrintErrors.install(&mut schedule);
+        PassDiagnostics.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 
@@ -210,7 +210,7 @@ mod tests {
         // Add passes
         PassParse.install(&mut schedule);
         PassTypeInference.install(&mut schedule);
-        PassPrintErrors.install(&mut schedule);
+        PassDiagnostics.install(&mut schedule);
         PassAstToYir.install(&mut schedule);
         PassYirToColoredString.install(&mut schedule);
 

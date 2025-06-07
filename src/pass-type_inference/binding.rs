@@ -1,6 +1,6 @@
 use crate::{pass_parse::BindingNode, pass_type_inference::TypeInfo, pass_yir_lowering::Block};
 
-use super::pass_type_inference::TransientData;
+use super::pass_type_inference_impl::TransientData;
 
 pub fn match_binding_node_to_type(
     block: &mut Block,

@@ -357,10 +357,7 @@ pub enum TypeInfo {
 
 impl TypeInfo {
     pub fn is_ptr(&self) -> bool {
-        match self {
-            TypeInfo::Pointer(_) => true,
-            _ => false,
-        }
+        matches!(self, TypeInfo::Pointer(_))
     }
 
     pub fn is_primitive(&self) -> bool {

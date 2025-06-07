@@ -1,12 +1,12 @@
-use crate::scheduling::{
-    context::Context,
-    scheduler::{Pass, ResourceId},
-};
+use crate::pass_diagnostics::error::YuuError;
 use crate::pass_parse::{
     ast::{AST, SourceInfo},
     parser::Parser,
 };
-use crate::pass_diagnostics::error::YuuError;
+use crate::scheduling::{
+    context::Context,
+    scheduler::{Pass, ResourceId},
+};
 
 pub struct SyntaxErrors(pub Vec<YuuError>);
 

@@ -80,7 +80,7 @@ impl RootBlock {
             named_block_binding: (
                 None,
                 BindingInfo {
-                    id: std::i64::MIN,
+                    id: i64::MIN,
                     src_location: None,
                 },
             ),
@@ -318,82 +318,82 @@ impl Block {
         // }
     }
 
-    fn create_variable_as_function_error(
-        &self,
-        name: &str,
-        binding: &BindingInfo,
-        src: &SourceInfo,
-        sp: Span,
-    ) -> YuuError {
-        let mut builder = YuuError::builder()
-            .kind(ErrorKind::FunctionOverloadError)
-            .message(format!("Cannot call '{}' as a function", name))
-            .source(src.source.clone(), src.file_name.clone())
-            .span(
-                (sp.start, (sp.end - sp.start)),
-                format!("'{}' is a variable, not a function", name),
-            );
+    // fn create_variable_as_function_error(
+    //     &self,
+    //     name: &str,
+    //     binding: &BindingInfo,
+    //     src: &SourceInfo,
+    //     sp: Span,
+    // ) -> YuuError {
+    //     let mut builder = YuuError::builder()
+    //         .kind(ErrorKind::FunctionOverloadError)
+    //         .message(format!("Cannot call '{}' as a function", name))
+    //         .source(src.source.clone(), src.file_name.clone())
+    //         .span(
+    //             (sp.start, (sp.end - sp.start)),
+    //             format!("'{}' is a variable, not a function", name),
+    //         );
 
-        if let Some(decl_span) = &binding.src_location {
-            builder = builder.label(
-                (decl_span.start, (decl_span.end - decl_span.start)),
-                format!("'{}' was defined here as a variable", name),
-            );
-        }
+    //     if let Some(decl_span) = &binding.src_location {
+    //         builder = builder.label(
+    //             (decl_span.start, (decl_span.end - decl_span.start)),
+    //             format!("'{}' was defined here as a variable", name),
+    //         );
+    //     }
 
-        builder.build()
-    }
+    //     builder.build()
+    // }
 
-    fn create_function_as_variable_error(
-        &self,
-        name: &str,
-        funcs: &[BindingInfo],
-        src: &SourceInfo,
-        sp: Span,
-    ) -> YuuError {
-        let mut builder = YuuError::builder()
-            .kind(ErrorKind::FunctionOverloadError)
-            .message(format!(
-                "Identifier '{}' refers to a function, but used like a variable (no arguments were provided)",
-                name
-            ))
-            .source(src.source.clone(), src.file_name.clone())
-            .span(
-                (sp.start, (sp.end - sp.start)),
-                format!("'{}' is a function that needs to be called with arguments", name),
-            );
+    // fn create_function_as_variable_error(
+    //     &self,
+    //     name: &str,
+    //     funcs: &[BindingInfo],
+    //     src: &SourceInfo,
+    //     sp: Span,
+    // ) -> YuuError {
+    //     let mut builder = YuuError::builder()
+    //         .kind(ErrorKind::FunctionOverloadError)
+    //         .message(format!(
+    //             "Identifier '{}' refers to a function, but used like a variable (no arguments were provided)",
+    //             name
+    //         ))
+    //         .source(src.source.clone(), src.file_name.clone())
+    //         .span(
+    //             (sp.start, (sp.end - sp.start)),
+    //             format!("'{}' is a function that needs to be called with arguments", name),
+    //         );
 
-        // If we have function definitions available, add more helpful information
-        if !funcs.is_empty() {
-            // Find the first function with location info to show where it was defined
-            if let Some(func) = funcs.iter().find(|f| f.src_location.is_some()) {
-                if let Some(decl_span) = &func.src_location {
-                    builder = builder.label(
-                        (decl_span.start, (decl_span.end - decl_span.start)),
-                        format!("'{}' was defined here as a function", name),
-                    );
-                }
-            }
+    //     // If we have function definitions available, add more helpful information
+    //     if !funcs.is_empty() {
+    //         // Find the first function with location info to show where it was defined
+    //         if let Some(func) = funcs.iter().find(|f| f.src_location.is_some()) {
+    //             if let Some(decl_span) = &func.src_location {
+    //                 builder = builder.label(
+    //                     (decl_span.start, (decl_span.end - decl_span.start)),
+    //                     format!("'{}' was defined here as a function", name),
+    //                 );
+    //             }
+    //         }
 
-            builder = builder.help(format!(
-                "To use this function, call it with appropriate arguments: {}(...)",
-                name
-            ));
-        }
+    //         builder = builder.help(format!(
+    //             "To use this function, call it with appropriate arguments: {}(...)",
+    //             name
+    //         ));
+    //     }
 
-        builder.build()
-    }
+    //     builder.build()
+    // }
 }
 
-pub enum IdentResolutionKind {
-    ResolvedAsFunction { func_type: &'static FunctionType },
-    ResolvedAsVariable { type_info: &'static TypeInfo },
-}
+// pub enum IdentResolutionKind {
+//     ResolvedAsFunction { func_type: &'static FunctionType },
+//     ResolvedAsVariable { type_info: &'static TypeInfo },
+// }
 
-pub struct IdentResolutionResult {
-    pub binding: BindingInfo,
-    pub kind: IdentResolutionKind,
-    /// If resolved as a function, this is the RETURN type of the function - if you want the argument types or the function type itself, you have to match on the 'kind' field.
-    /// If resolved as a variable, this is the type of the variable.
-    pub contextual_appropriate_type: &'static TypeInfo,
-}
+// pub struct IdentResolutionResult {
+//     pub binding: BindingInfo,
+//     pub kind: IdentResolutionKind,
+//     /// If resolved as a function, this is the RETURN type of the function - if you want the argument types or the function type itself, you have to match on the 'kind' field.
+//     /// If resolved as a variable, this is the type of the variable.
+//     pub contextual_appropriate_type: &'static TypeInfo,
+// }

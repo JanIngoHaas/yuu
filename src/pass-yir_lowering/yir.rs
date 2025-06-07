@@ -8,8 +8,7 @@ use crate::scheduling::scheduler::{ResourceId, ResourceName};
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
-use std::thread::current;
+use std::sync::Arc;
 use ustr::{Ustr, UstrMap};
 
 /*
@@ -295,7 +294,7 @@ impl Function {
         self.blocks.insert(
             label.id(),
             BasicBlock {
-                label: label,
+                label,
                 instructions: Vec::new(),
                 // Initialize blocks as Unterminated
                 terminator: ControlFlow::Unterminated,
@@ -518,7 +517,7 @@ impl Function {
             (val_ty, ret_ty) => panic!(
                 "Return type mismatch: expected {}, got {:?}",
                 ret_ty,
-                val_ty.map(|t| t)
+                val_ty
             ),
         }
         self.set_terminator(ControlFlow::Return(value));

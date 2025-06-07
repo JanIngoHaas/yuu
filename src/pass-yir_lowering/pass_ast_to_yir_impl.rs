@@ -1,21 +1,17 @@
-use std::vec;
-
 use crate::{
     pass_parse::ast::{
         AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
         StructuralNode, UnaryOp,
     },
     pass_parse::token::{Integer, Token, TokenKind},
-    pass_type_inference::{self, TypeRegistry},
-    pass_type_inference::{TypeInfo, TypeInfoTable},
-    pass_yir_lowering::block::BindingTable,
+    pass_type_inference::TypeInfo,
+    pass_type_inference::TypeRegistry,
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
     scheduling::scheduler::Pass,
 };
 use indexmap::IndexMap;
-use ustr::Ustr;
 
 pub struct TransientData<'a> {
     pub function: Function,
@@ -134,7 +130,7 @@ impl<'a> TransientData<'a> {
             ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
-                    ExprNode::Ident(ident) => ident.ident.clone(),
+                    ExprNode::Ident(ident) => ident.ident,
                     _ => panic!("Function call LHS must be an identifier"),
                 };
 
@@ -220,7 +216,7 @@ impl<'a> TransientData<'a> {
                 let body_label = self.function.add_block("while_body".intern());
                 let exit_label = self.function.add_block("while_exit".intern());
                 // Jump into the condition check
-                self.function.make_jump(cond_label.clone());
+                self.function.make_jump(cond_label);
                 // Condition block
                 self.function.set_current_block(&cond_label);
                 let cond = self.lower_expr(&while_expr.condition_block.condition);
@@ -231,7 +227,7 @@ impl<'a> TransientData<'a> {
                 self.function.set_current_block(&body_label);
                 let body_val = self.lower_block_expr(&while_expr.condition_block.body);
                 // After body (if not broken out), loop back to condition
-                self.function.make_jump_if_no_terminator(cond_label.clone());
+                self.function.make_jump_if_no_terminator(cond_label);
                 // Exit block
                 self.function.set_current_block(&exit_label);
                 // Loop yields the last body value (or NoOp)
@@ -273,7 +269,7 @@ impl<'a> TransientData<'a> {
                         Some((result, label)) => {
                             // Assign the value to the result variable
                             self.function.make_assign(result, value);
-                            self.function.make_jump_if_no_terminator(label.clone());
+                            self.function.make_jump_if_no_terminator(label);
                             self.function.set_current_block(&label);
                             return Operand::Variable(result);
                         }
@@ -293,7 +289,7 @@ impl<'a> TransientData<'a> {
 
         // no break stmt - jump to the next block, not writing anything
         if let Some((result, label)) = result_with_label {
-            self.function.make_jump_if_no_terminator(label.clone());
+            self.function.make_jump_if_no_terminator(label);
             self.function.set_current_block(&label);
             Operand::Variable(result)
         } else {
@@ -424,11 +420,11 @@ impl PassAstToYir {
                     };
 
                     let mut data =
-                        TransientData::new(Function::new(func.decl.name.clone(), return_type), tr);
+                        TransientData::new(Function::new(func.decl.name, return_type), tr);
 
                     // Add parameters
                     for arg in &func.decl.args {
-                        let (ty, name) = (data.get_type(arg.id), arg.name.clone());
+                        let (ty, name) = (data.get_type(arg.id), arg.name);
                         let param = data.function.add_param(name, ty);
                         // variable the parameter
                         data.var_map.insert(arg.id, param);

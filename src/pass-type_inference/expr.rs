@@ -16,7 +16,7 @@ use crate::{
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::pass_type_inference::TransientData;
+use super::pass_type_inference_impl::TransientData;
 
 fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
@@ -48,7 +48,7 @@ fn infer_binary(
                 &op_name,
                 err,
                 &[lhs, rhs],
-                &data.type_registry,
+                data.type_registry,
                 &data.src_code,
                 binary_expr.span.clone(),
             );
@@ -86,7 +86,7 @@ fn infer_unary(
                 &op_name,
                 err,
                 &[ty],
-                &data.type_registry,
+                data.type_registry,
                 &data.src_code,
                 unary_expr.span.clone(),
             );
@@ -125,10 +125,10 @@ fn infer_ident(
                 return res.general_ty;
             }
             Err(err) => Box::new(create_no_overload_error(
-                &ident_expr.ident.as_str(),
+                ident_expr.ident.as_str(),
                 err,
                 args,
-                &data.type_registry,
+                data.type_registry,
                 &data.src_code,
                 ident_expr.span.clone(),
             )),
@@ -159,7 +159,7 @@ fn infer_ident(
     data.type_registry
         .type_info_table
         .insert(ident_expr.id, error_type());
-    return error_type();
+    error_type()
 }
 
 pub fn infer_block_no_child_creation(

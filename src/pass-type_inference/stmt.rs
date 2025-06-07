@@ -5,7 +5,7 @@ use crate::{
     pass_yir_lowering::block::Block,
 };
 
-use super::{infer_expr, match_binding_node_to_type, pass_type_inference::TransientData};
+use super::{infer_expr, match_binding_node_to_type, pass_type_inference_impl::TransientData};
 
 pub enum ExitKind {
     Break,
