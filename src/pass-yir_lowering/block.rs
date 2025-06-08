@@ -9,7 +9,6 @@ use crate::scheduling::scheduler::{ResourceId, ResourceName};
 use crate::{
     pass_parse::ast::NodeId,
     pass_type_inference::BindingInfo,
-    pass_type_inference::{FunctionType, TypeInfo},
 };
 use indexmap::IndexMap;
 use logos::Span;

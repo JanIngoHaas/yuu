@@ -54,10 +54,8 @@ pub enum TokenKind {
         lex.slice().trim_end_matches('f').parse().ok()
     })]
     #[logos(priority = 2)]
-    F64(f64),
-
-    // Integer (i64) with radix support
-    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)?", |lex| parse_integer(lex.slice()))]
+    F64(f64), // Integer (i64) with radix support
+    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)", |lex| parse_integer(lex.slice()))]
     #[logos(priority = 1)]
     Integer(Integer),
 
@@ -156,6 +154,8 @@ pub enum TokenKind {
     LBrace,
     #[token("}")]
     RBrace,
+    #[token(".")]
+    Dot,
 
     #[token("#")]
     Hash,
@@ -217,6 +217,7 @@ impl Display for TokenKind {
             TokenKind::Hash => "'#'".fmt(f),
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
+            TokenKind::Dot => "'.'".fmt(f),
         }
     }
 }

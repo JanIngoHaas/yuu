@@ -327,27 +327,19 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::DeclareVar { target, init_value } => {
-            if let Some(val) = init_value {
-                writeln!(
-                    f,
-                    "{} := {}",
-                    format_variable(target, do_color),
-                    format_operand(val, do_color)
-                )
-            } else {
-                writeln!(
-                    f,
-                    "{} := {}",
-                    format_variable(target, do_color),
-                    colorize("nop", "operator", do_color)
-                )
-            }
-        }
-        Instruction::Assign { target, value } => {
+        Instruction::Alloca { target } => {
             writeln!(
                 f,
-                "{} := {}",
+                "{} := {}{}",
+                format_variable(target, do_color),
+                colorize("alloca", "operator", do_color),
+                format_type(target.ty().deref_ptr(), do_color),
+            )
+        }
+        Instruction::StoreImmediate { target, value } => {
+            writeln!(
+                f,
+                "{} <- {}",
                 format_variable(target, do_color),
                 format_operand(value, do_color)
             )
@@ -357,7 +349,7 @@ pub fn format_instruction(
                 f,
                 "{} := {} {}",
                 format_variable(target, do_color),
-                format_keyword("&", do_color),
+                format_keyword("addr", do_color),
                 format_variable(source, do_color)
             )
         }
@@ -378,17 +370,18 @@ pub fn format_instruction(
         Instruction::Load { target, source } => {
             writeln!(
                 f,
-                "{} := *{}",
+                "{} := {} {}",
                 format_variable(target, do_color),
+                format_keyword("load", do_color),
                 format_operand(source, do_color)
             )
         }
         Instruction::Store { dest, value } => {
             writeln!(
                 f,
-                "{} {} <- {}",
-                format_keyword("store", do_color),
+                "{} <- {} {}",
                 format_operand(dest, do_color),
+                format_keyword("load", do_color),
                 format_operand(value, do_color)
             )
         }
@@ -432,26 +425,25 @@ pub fn format_instruction(
                 write!(f, "{}", format_operand(arg, do_color))?;
             }
             writeln!(f, ")")
-        }
-        Instruction::MakeStruct {
-            target,
-            type_ident,
-            fields,
-        } => {
-            write!(
-                f,
-                "{} := {} {{ ",
-                format_variable(target, do_color),
-                format_keyword("make_struct", do_color)
-            )?;
-            for (i, (field, val)) in fields.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}: {}", field, format_operand(val, do_color))?;
-            }
-            writeln!(f, " }}")
-        }
+        } // Instruction::MakeStruct {
+          //     target,
+          //     type_ident,
+          //     fields,
+          // } => {
+          //     write!(
+          //         f,
+          //         "{} := {} {{ ",
+          //         format_variable(target, do_color),
+          //         format_keyword("make_struct", do_color)
+          //     )?;
+          //     for (i, (field, val)) in fields.iter().enumerate() {
+          //         if i > 0 {
+          //             write!(f, ", ")?;
+          //         }
+          //         write!(f, "{}: {}", field, format_operand(val, do_color))?;
+          //     }
+          //     writeln!(f, " }}")
+          // }
     }
 }
 
@@ -510,7 +502,12 @@ pub fn format_yir(
         function
             .params
             .iter()
-            .map(|p| format_variable(p, do_color))
+            .map(|p| format!(
+                "{} := {}{}",
+                format_variable(p, do_color),
+                format_keyword("alloca", do_color),
+                format_type(p.ty().deref_ptr(), do_color)
+            ))
             .collect::<Vec<_>>()
             .join(", "),
         format_type(function.return_type, do_color)

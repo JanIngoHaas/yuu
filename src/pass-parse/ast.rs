@@ -176,6 +176,14 @@ pub struct AssignmentExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MemberAccessExpr {
+    pub lhs: Box<ExprNode>,
+    pub field: Field,
+    pub span: Span,
+    pub id: NodeId,
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
 pub enum ExprNode {
@@ -189,6 +197,7 @@ pub enum ExprNode {
     While(WhileExpr),
     Assignment(AssignmentExpr),
     StructInstantiation(StructInstantiationExpr),
+    MemberAccess(MemberAccessExpr),
     //Error,
 }
 
@@ -418,6 +427,7 @@ impl Spanned for ExprNode {
                 struct_instantiation_expr.span.clone()
             }
             ExprNode::While(while_expr) => while_expr.span.clone(),
+            ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
         }
     }
 }
@@ -466,26 +476,6 @@ impl Spanned for BindingNode {
 }
 
 pub type NodeId = i64;
-
-impl ExprNode {
-    #[allow(dead_code)]
-    fn node_id(&self) -> NodeId {
-        match self {
-            ExprNode::Literal(lit) => lit.id,
-            ExprNode::Binary(bin) => bin.id,
-            ExprNode::Unary(un) => un.id,
-            ExprNode::Ident(id) => id.id,
-            ExprNode::Block(block) => block.id,
-            ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
-            ExprNode::If(if_expr) => if_expr.id,
-            ExprNode::Assignment(assign) => assign.id,
-            ExprNode::StructInstantiation(struct_instantiation_expr) => {
-                struct_instantiation_expr.id
-            }
-            ExprNode::While(while_expr) => while_expr.id,
-        }
-    }
-}
 
 pub trait InternUstr {
     fn intern(&self) -> Ustr;

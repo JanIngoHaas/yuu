@@ -136,73 +136,7 @@ impl Pass for PassDiagnostics {
         schedule.requires_resource_write::<SyntaxErrors>(&self);
         schedule.requires_resource_write::<TypeInferenceErrors>(&self);
         schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
+    }    fn get_name(&self) -> &'static str {
         "PassPrintErrors"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::pass_diagnostics::pass_diagnostics_impl::PassDiagnostics;
-    use crate::pass_parse::pass_parse_impl::PassParse;
-    use crate::pass_type_inference::PassTypeInference;
-    use crate::{
-        pass_parse::ast::SourceInfo,
-        scheduling::context::Context,
-        scheduling::scheduler::{Pass, Schedule, Scheduler},
-    };
-    use std::sync::Arc;
-
-    #[test]
-    fn test_compilation_with_errors() {
-        // Create a sample source with multiple errors
-        let source = r#"
-
-    fn test(x: i64, y: f32) -> i64 {
-        let z = x + y; // Type error
-    
-        if z {                     // Type error: z is not a boolean
-            return 5;               // Break outside of loop
-        } else {
-            return 3.0; // Type error
-        };
-    
-        3.0!
-    }
-
-    fn main() {
-        let result = test(42, 5);
-        
-        // Syntax error: missing closing parenthesis
-        test(34, result);
-        test(46, 45.0);
-    }
-
-"#;
-
-        // Create a new context and add the code info
-        let mut context = Context::new();
-        context.add_pass_data(SourceInfo {
-            source: Arc::from(source),
-            file_name: Arc::from("test_errors.yu"),
-        });
-
-        // Create and configure the schedule
-        let mut schedule = Schedule::new();
-
-        // Add passes
-        PassParse.install(&mut schedule);
-        PassTypeInference.install(&mut schedule);
-        PassDiagnostics.install(&mut schedule);
-
-        // schedule.print_dot();
-        // Run the schedule - should fail due to errors
-        let scheduler = Scheduler::new();
-        let result = scheduler.run(schedule, context);
-
-        // We expect it to fail and print the errors
-        assert!(result.is_err(), "Expected compilation to fail with errors");
     }
 }

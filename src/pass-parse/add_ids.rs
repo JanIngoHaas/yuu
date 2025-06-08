@@ -91,6 +91,11 @@ impl AddId for ExprNode {
                 while_expr.condition_block.body.add_id(generator);
                 while_expr.condition_block.condition.add_id(generator);
             }
+            ExprNode::MemberAccess(member_access_expr) => {
+                member_access_expr.id = generator.next();
+                member_access_expr.lhs.add_id(generator);
+                // Field doesn't need an ID as it's just a name + span
+            }
         }
     }
 }
@@ -238,6 +243,7 @@ impl GetId for ExprNode {
                 struct_instantiation_expr.id
             }
             ExprNode::While(while_expr) => while_expr.id,
+            ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
         }
     }
 }

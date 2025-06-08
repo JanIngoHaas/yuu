@@ -78,33 +78,35 @@ pub struct TypeInterner {
     pub combination_to_type: HashMap<TypeCombination, Box<TypeInfo>>,
 }
 
+// Use static references to ensure consistent memory addresses across calls
+static PRIMITIVE_I64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I64);
+static PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
+static PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
+static PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
+static PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
+static INACTIVE_TYPE: TypeInfo = TypeInfo::Inactive;
+
 pub fn primitive_i64() -> &'static TypeInfo {
-    const PRIMITIVE_U64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I64);
-    &PRIMITIVE_U64
+    &PRIMITIVE_I64
 }
 
 pub fn primitive_f32() -> &'static TypeInfo {
-    const PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
     &PRIMITIVE_F32
 }
 
 pub fn primitive_f64() -> &'static TypeInfo {
-    const PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
     &PRIMITIVE_F64
 }
 
 pub fn primitive_nil() -> &'static TypeInfo {
-    const PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
     &PRIMITIVE_NIL
 }
 
 pub fn primitive_bool() -> &'static TypeInfo {
-    const PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
     &PRIMITIVE_BOOL
 }
 
 pub fn inactive_type() -> &'static TypeInfo {
-    const INACTIVE_TYPE: TypeInfo = TypeInfo::Inactive;
     &INACTIVE_TYPE
 }
 
@@ -358,6 +360,22 @@ pub enum TypeInfo {
 impl TypeInfo {
     pub fn is_ptr(&self) -> bool {
         matches!(self, TypeInfo::Pointer(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, TypeInfo::Struct(_))
+    }
+
+    pub fn is_inactive(&self) -> bool {
+        matches!(self, TypeInfo::Inactive)
+    }
+
+    pub fn is_struct_or_ptr_to_struct(&self) -> bool {
+        match self {
+            TypeInfo::Struct(_) => true,
+            TypeInfo::Pointer(inner) => matches!(**inner, TypeInfo::Struct(_)),
+            _ => false,
+        }
     }
 
     pub fn is_primitive(&self) -> bool {

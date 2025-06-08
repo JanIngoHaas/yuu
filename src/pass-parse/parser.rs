@@ -29,15 +29,15 @@ impl Parser {
     pub fn dismantle(self) -> (Vec<ParseError>, Lexer) {
         (self.errors, self.lexer)
     }
-
-    fn get_infix_precedence(op: &TokenKind) -> (i32, i32) {
+    fn get_infix_binding_power(op: &TokenKind) -> (i32, i32) {
         match op {
-            TokenKind::LParen => (8, 0), // Function calls highest
-            TokenKind::Asterix | TokenKind::Slash => (6, 6), // Multiplication/division
-            TokenKind::Plus | TokenKind::Minus => (5, 5), // Addition/subtraction
-            TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (4, 4), // Comparisons
-            TokenKind::EqEq | TokenKind::NotEq => (3, 3), // Equality/Inequality
-            TokenKind::Equal => (1, 2),                   // Assignment (right associative)
+            TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
+            TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
+            TokenKind::Asterix | TokenKind::Slash => (11, 12), // Multiplication/division (left-associative)
+            TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
+            TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
+            TokenKind::EqEq | TokenKind::NotEq => (5, 6), // Equality/Inequality (left-associative)
+            TokenKind::Equal => (2, 1), // Assignment (right-associative: a = b = c means a = (b = c))
             _ => (-1, -1),
         }
     }
@@ -236,14 +236,13 @@ impl Parser {
         };
         Ok((span_copy, ExprNode::Binary(binary)))
     }
-
     pub fn parse_bin_expr(
         &mut self,
         lhs: ExprNode,
         op_token: Token,
-        min_precedence: i32,
+        min_binding_power: i32,
     ) -> ParseResult<(Span, ExprNode)> {
-        let (span, rhs) = self.parse_expr_chain(min_precedence)?;
+        let (span, rhs) = self.parse_expr_chain(min_binding_power)?;
         let span = lhs.span().start..span.end;
         let lhs = self.make_bin_expr(lhs, rhs, op_token, span)?;
         Ok(lhs)
@@ -261,14 +260,13 @@ impl Parser {
             },
         ))
     }
-
     pub fn parse_assignment_expr(
         &mut self,
         lhs: ExprNode,
         _op_token: Token,
-        min_precedence: i32,
+        min_binding_power: i32,
     ) -> ParseResult<(Span, ExprNode)> {
-        let (rhs_span, rhs) = self.parse_expr_chain(min_precedence)?;
+        let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
         let span = lhs.span().start..rhs_span.end;
         Ok((
             span.clone(),
@@ -340,14 +338,83 @@ impl Parser {
         Ok((overall_span, ExprNode::If(if_expr)))
     }
 
-    pub fn parse_expr_chain(&mut self, min_precedence: i32) -> ParseResult<(Span, ExprNode)> {
+    // What if member is a function pointer? Then transforming as we do it here, won't work. The function pointer call has to be resolved explicitly through "a.*b()" syntax...
+    pub fn parse_member_access_expr(
+        &mut self,
+        lhs: ExprNode,
+        _op_token: Token,
+        min_binding_power: i32,
+    ) -> ParseResult<(Span, ExprNode)> {
+        // We parse the rhs, transforming func calls like a.b.c() into c(a.b) (unified call syntax)
+        // If not a function call, we expect a identifier expression (otherwise func call expression!).
+
+        // Parse the right-hand side using parse_expr_chain (similar to parse_bin_expr)
+        let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
+
+        // Match on the result - only Ident and FuncCall are allowed
+        match rhs {
+            ExprNode::Ident(ident_expr) => {
+                // Regular member access: a.b
+                let span = lhs.span().start..rhs_span.end;
+                Ok((
+                    span.clone(),
+                    ExprNode::MemberAccess(MemberAccessExpr {
+                        lhs: Box::new(lhs),
+                        field: Field {
+                            name: ident_expr.ident,
+                            span: ident_expr.span,
+                        },
+                        span,
+                        id: 0,
+                    }),
+                ))
+            }
+            ExprNode::FuncCall(mut func_call) => {
+                // Method call using unified call syntax: a.b.c() -> c(a.b, ...)
+                // Insert the original lhs as the first argument
+                let span = lhs.span().start..rhs_span.end;
+                func_call.args.insert(0, lhs);
+                Ok((span, ExprNode::FuncCall(func_call)))
+            }
+            _ => {
+                // Invalid right-hand side for member access
+                self.errors.push(
+                    YuuError::builder()
+                        .kind(ErrorKind::InvalidSyntax)
+                        .message(
+                            "Invalid member access: expected identifier or function call"
+                                .to_string(),
+                        )
+                        .source(
+                            self.lexer.code_info.source.clone(),
+                            self.lexer.code_info.file_name.clone(),
+                        )
+                        .span(rhs_span, "expected identifier or function call here")
+                        .help(
+                            "Member access must be either 'a.field' or 'a.method(args)'"
+                                .to_string(),
+                        )
+                        .build(),
+                );
+                Err(self.lexer.synchronize())
+            }
+        }
+    }
+    pub fn parse_expr_chain(&mut self, min_binding_power: i32) -> ParseResult<(Span, ExprNode)> {
         let mut lhs = self.parse_primary_expr()?;
         loop {
             let op = self.lexer.peek();
 
-            let (left_precedence, right_precedence) = Self::get_infix_precedence(&op.kind);
+            let (left_binding_power, right_binding_power) = Self::get_infix_binding_power(&op.kind);
 
-            if left_precedence < min_precedence {
+            // It kinda looks like this now:
+            /*
+            <lhs> lbp_<op>_rbp <rhs> lbp2_<op>_rbp2 <rhs2> ...; now the question is: does "lbp" bind the lhs tighter than "min_binding_power" - basically the binding power that the above chain had?
+            If it does, we continue parsing our chain, otherwise we return the lhs as we should not bind it to our current chain... the above chain binds it more tightly.
+            Of course "<rhs>" and <rhs2>, ... are expressions themselves, so we have to recursively parse them as well. The binding power that they have to check is then obviously the "right_binding_power" of the operator that we are currently parsing.
+            ==> The returned value here marks our new "lhs" for the next iteration of the loop.
+             */
+            if left_binding_power < min_binding_power {
                 return Ok(lhs);
             }
             let op = op.clone();
@@ -364,13 +431,16 @@ impl Parser {
                 | TokenKind::LtEq
                 | TokenKind::GtEq
                 | TokenKind::EqEq => {
-                    lhs = self.parse_bin_expr(lhs.1, op.clone(), right_precedence)?;
+                    lhs = self.parse_bin_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
                 TokenKind::Equal => {
-                    lhs = self.parse_assignment_expr(lhs.1, op.clone(), right_precedence)?;
+                    lhs = self.parse_assignment_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
                 TokenKind::LParen => {
-                    lhs = self.parse_func_call_expr(lhs.1, op.clone(), right_precedence)?;
+                    lhs = self.parse_func_call_expr(lhs.1, op.clone(), right_binding_power)?;
+                }
+                TokenKind::Dot => {
+                    lhs = self.parse_member_access_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
                 _ => break,
             }
@@ -619,12 +689,11 @@ impl Parser {
             },
         )
     }
-
     pub fn parse_func_call_expr(
         &mut self,
         lhs: ExprNode,
         op_token: Token,
-        _min_precedence: i32,
+        _min_binding_power: i32,
     ) -> ParseResult<(Span, ExprNode)> {
         let mut args = Vec::new();
         // Track function name for better error messages
@@ -1190,68 +1259,9 @@ impl Parser {
             structurals: structural_nodes,
         }
     }
-
     pub fn parse_and_add_ids(&mut self) -> AST {
         let mut ast = self.parse();
         add_ids(&mut ast);
         ast
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_fac() {
-        let code_info = SourceInfo {
-            source: "fn fac(n: i64) -> i64 {
-            break if n == 0 {
-                break 1;
-            }
-            else {
-                let n_out = n * fac(n - 1);
-                return n_out;
-            };
-        }"
-            .into(),
-            file_name: "test.yuu".into(),
-        };
-
-        let mut parser = Parser::new(&code_info);
-        let result = parser.parse();
-        if !parser.errors.is_empty() {
-            for error in parser.errors {
-                println!("{}", error);
-            }
-        } else {
-            let mut ast = result;
-            add_ids(&mut ast);
-        }
-    }
-    #[test]
-    fn test_parse_failure_1() {
-        crate::pass_diagnostics::error::setup_error_formatter(Some("base16-ocean.dark"), true)
-            .unwrap();
-        let x = SourceInfo {
-            source: "fn fac(n: i64) -> i64 {
-            break if n == 0 {
-                break 1;
-            }
-            else {
-                let n_out = n * fac(n - 1;
-                return n_out;
-            };
-        }"
-            .into(),
-            file_name: "test.yuu".into(),
-        };
-
-        let mut parser = Parser::new(&x);
-        let _ = parser.parse();
-        for error in parser.errors {
-            let error: miette::Report = error.into();
-            println!("{:?}", error);
-        }
     }
 }

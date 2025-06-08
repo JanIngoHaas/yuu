@@ -734,5 +734,110 @@ pub fn infer_expr(
                 }
             }
         }
+        ExprNode::MemberAccess(member_access_expr) => {
+            // Infer the type of the left-hand side expression
+            let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
+
+            // Check if lhs is a struct type
+            match lhs_ty {
+                TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
+                    // Let's see if the struct has the field
+                    let si = data
+                        .type_registry
+                        .resolve_struct(s.name)
+                        .expect("Compiler bug: Struct type should be resolved here.");
+
+                    let field = si.fields.get(&member_access_expr.field.name).cloned(); // Cloning is fine - no heap alloc
+
+                    match field {
+                        Some(field_info) => {
+                            // Register the field type in the type registry
+                            data.type_registry
+                                .type_info_table
+                                .insert(member_access_expr.id, field_info.ty);
+
+                            // Return the field type
+                            field_info.ty
+                        }
+                        None => {
+                            // error for accessing undefined field
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::ReferencedUndeclaredField)
+                                .message(format!(
+                                    "Struct '{}' has no field named '{}'",
+                                    s.name, member_access_expr.field.name
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(
+                                    member_access_expr.field.span.clone(),
+                                    "attempted to access undefined field",
+                                )
+                                .label(
+                                    member_access_expr.lhs.span().clone(),
+                                    format!("this expression has type '{}'", s.name),
+                                )
+                                .help(format!(
+                                    "Available fields for struct '{}': {}",
+                                    s.name,
+                                    if si.fields.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        si.fields
+                                            .keys()
+                                            .map(|k| k.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    }
+                                ))
+                                .build();
+                            data.errors.push(err);
+
+                            // Register error type and return it
+                            data.type_registry
+                                .type_info_table
+                                .insert(member_access_expr.id, error_type());
+                            error_type()
+                        }
+                    }
+                }
+                _ => {
+                    // error for member access on non-struct type
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::InvalidExpression)
+                        .message(format!(
+                            "Cannot access field '{}' on value of type '{}'",
+                            member_access_expr.field.name, lhs_ty
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(
+                            member_access_expr.span.clone(),
+                            "attempted member access on non-struct type",
+                        )
+                        .label(
+                            member_access_expr.lhs.span().clone(),
+                            format!("this expression has type '{}'", lhs_ty),
+                        )
+                        .label(
+                            member_access_expr.field.span.clone(),
+                            "field access attempted here",
+                        )
+                        .help("Member access is only supported on struct types")
+                        .build();
+                    data.errors.push(err);
+
+                    // Register error type and return it
+                    data.type_registry
+                        .type_info_table
+                        .insert(member_access_expr.id, error_type());
+                    error_type()
+                }
+            }
+        }
     }
 }

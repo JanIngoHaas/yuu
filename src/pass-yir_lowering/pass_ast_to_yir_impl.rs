@@ -1,11 +1,13 @@
 use crate::{
-    pass_parse::ast::{
-        AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
-        StructuralNode, UnaryOp,
+    pass_parse::{
+        BuiltInType, GetId,
+        ast::{
+            AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
+            StructuralNode, UnaryOp,
+        },
+        token::{Integer, Token, TokenKind},
     },
-    pass_parse::token::{Integer, Token, TokenKind},
-    pass_type_inference::TypeInfo,
-    pass_type_inference::TypeRegistry,
+    pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
@@ -70,6 +72,7 @@ impl<'a> TransientData<'a> {
             ExprNode::Binary(bin_expr) => {
                 let lhs = self.lower_expr(&bin_expr.left);
                 let rhs = self.lower_expr(&bin_expr.right);
+
                 let ty = self.get_type(bin_expr.id);
 
                 let op = match bin_expr.op {
@@ -88,6 +91,7 @@ impl<'a> TransientData<'a> {
                 let result = self
                     .function
                     .make_binary("bin_result".intern(), op, lhs, rhs, ty);
+
                 Operand::Variable(result)
             }
             ExprNode::Unary(un_expr) => {
@@ -102,6 +106,7 @@ impl<'a> TransientData<'a> {
                             YirUnaryOp::Neg,
                             operand,
                         );
+
                         Operand::Variable(target)
                     }
                     UnaryOp::Pos => operand,
@@ -141,7 +146,6 @@ impl<'a> TransientData<'a> {
                     .collect();
 
                 let return_type = self.get_type(func_call_expr.id);
-
                 let result =
                     self.function
                         .make_call("call_result".intern(), func_name, args, return_type);
@@ -151,32 +155,43 @@ impl<'a> TransientData<'a> {
 
             ExprNode::Assignment(assignment_expr) => {
                 let rhs = self.lower_expr(&assignment_expr.rhs);
+                let lhs = self.lower_expr(&assignment_expr.lhs);
 
-                // Compute the r-value of the assignment
-                match assignment_expr.lhs.as_ref() {
-                    ExprNode::Ident(ident_expr) => {
-                        // 1. Find the YIR Variable for this identifier
-                        let binding_id =
-                            *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
-                                panic!(
-                                    "Compiler Bug: No binding found for ident expr {}",
-                                    ident_expr.id
-                                )
-                            });
-                        let target_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
-                            panic!(
-                                "Compiler Bug: No YIR variable found for binding ID {} (ident: {})",
-                                binding_id, ident_expr.ident
-                            )
-                        });
+                // Store rhs into lhs
 
-                        // 2. Use make_assign for direct variable assignment
-                        self.function.make_assign(target_var, rhs);
-                        Operand::Variable(target_var)
-                    }
-
+                let lhs_var = match lhs {
+                    Operand::Variable(var) => var,
                     _ => unreachable!("Invalid assignment target - can only assign to variables"),
-                }
+                };
+
+                self.function.make_store(lhs_var, rhs);
+                lhs
+
+                // // Compute the r-value of the assignment
+                // match assignment_expr.lhs.as_ref() {
+                //     ExprNode::Ident(ident_expr) => {
+                //         // 1. Find the YIR Variable for this identifier
+                //         let binding_id =
+                //             *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
+                //                 panic!(
+                //                     "Compiler Bug: No binding found for ident expr {}",
+                //                     ident_expr.id
+                //                 )
+                //             });
+                //         let target_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
+                //             panic!(
+                //                 "Compiler Bug: No YIR variable found for binding ID {} (ident: {})",
+                //                 binding_id, ident_expr.ident
+                //             )
+                //         });
+
+                //         // 2. Use make_assign for direct variable assignment
+                //         self.function.make_assign(target_var, rhs);
+                //         Operand::Variable(target_var)
+                //     }
+
+                //     _ => unreachable!("Invalid assignment target - can only assign to variables"),
+                // }
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 let sinfo = self
@@ -185,12 +200,13 @@ impl<'a> TransientData<'a> {
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
                 // Allocate
-                let struct_var = self.function.declare_var(sinfo.name, sinfo.ty, None);
+                let struct_var = self.function.make_alloca(sinfo.name, sinfo.ty, None);
 
                 // Generate code for the struct's fields expressions:
                 for (field, field_expr) in &struct_instantiation_expr.fields {
                     let field_name = field.name;
                     let field_op = self.lower_expr(field_expr);
+
                     let field = sinfo
                         .fields
                         .get(&field_name)
@@ -203,11 +219,9 @@ impl<'a> TransientData<'a> {
                     );
 
                     // Store the value into the field
-                    self.function
-                        .make_store(Operand::Variable(field_var), field_op);
+                    self.function.make_store(field_var, field_op);
                 }
-
-                // Return the pointer to the struct
+                // Return the struct variable pointer (already in pointer context from declare_var)
                 Operand::Variable(struct_var)
             }
             ExprNode::While(while_expr) => {
@@ -216,10 +230,10 @@ impl<'a> TransientData<'a> {
                 let body_label = self.function.add_block("while_body".intern());
                 let exit_label = self.function.add_block("while_exit".intern());
                 // Jump into the condition check
-                self.function.make_jump(cond_label);
-                // Condition block
+                self.function.make_jump(cond_label); // Condition block
                 self.function.set_current_block(&cond_label);
                 let cond = self.lower_expr(&while_expr.condition_block.condition);
+
                 // Branch to body or exit
                 self.function
                     .make_branch_to_existing(cond, body_label, exit_label);
@@ -233,13 +247,41 @@ impl<'a> TransientData<'a> {
                 // Loop yields the last body value (or NoOp)
                 body_val
             }
+            ExprNode::MemberAccess(member_access_expr) => {
+                // Lower the left-hand side expression
+                let lhs = self.lower_expr(&member_access_expr.lhs);
+                // Get the field name
+                let field_name = member_access_expr.field.name;
+
+                // Get the type of the left-hand side expression
+                let lhs_type = self.get_type(member_access_expr.lhs.node_id());
+
+                let struct_type = match lhs_type {
+                    TypeInfo::Struct(sinfo) => sinfo,
+                    _ => unreachable!("Member access on non-struct type: {:#?}", lhs_type),
+                };
+
+                let field_info = self
+                    .tr
+                    .resolve_struct(struct_type.name)
+                    .expect("Compiler bug: struct not found in lowering to YIR");
+
+                // Use make_get_field_ptr to get the pointer to the field
+                let field_ptr = self.function.make_get_field_ptr(
+                    "field_ptr".intern(),
+                    lhs,
+                    &field_info.fields[&field_name],
+                );
+
+                Operand::Variable(field_ptr)
+            }
         }
     }
 
     fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
         // For labeled blocks, create result variable
         let result_with_label = if let Some(label_name) = block_expr.label {
-            let result = self.function.declare_var(
+            let result = self.function.make_alloca(
                 "block_return".intern(),
                 self.get_type(block_expr.id),
                 None,
@@ -268,7 +310,7 @@ impl<'a> TransientData<'a> {
                         // Labeled block: jump to next with value in result
                         Some((result, label)) => {
                             // Assign the value to the result variable
-                            self.function.make_assign(result, value);
+                            self.function.make_store(result, value);
                             self.function.make_jump_if_no_terminator(label);
                             self.function.set_current_block(&label);
                             return Operand::Variable(result);
@@ -308,16 +350,14 @@ impl<'a> TransientData<'a> {
                     BindingNode::Ident(ident_binding) => {
                         let binding_id = ident_binding.id;
                         let name_hint = ident_binding.name;
-                        let var_type = self.get_type(binding_id); // Get type associated with the binding ID
-
-                        // Declare the variable in YIR
-                        let yir_var = self.function.declare_var(
+                        let var_type = self.get_type(binding_id);
+                        let yir_var = self.function.make_alloca(
                             name_hint,
                             var_type,
                             Some(init_value_operand), // Pass the lowered initializer
                         );
 
-                        // Map the AST binding ID to the new YIR variable
+                        // Map the AST binding ID to the new YIR variable (already in pointer context)
                         self.var_map.insert(binding_id, yir_var);
                     } // If other BindingNode variants existed, they would be handled here
                       // e.g., BindingNode::StructPattern(...) => { /* Destructuring logic */ }
@@ -330,7 +370,6 @@ impl<'a> TransientData<'a> {
                 StmtRes::Proceed
             }
             StmtNode::Break(exit_stmt) => {
-                // ... (Keep existing Break logic for now, will update later) ...
                 let value = self.lower_expr(&exit_stmt.expr);
                 if exit_stmt.target.is_none() {
                     return StmtRes::Break(value);
@@ -346,8 +385,8 @@ impl<'a> TransientData<'a> {
                     .get(&exit_stmt.id)
                     .and_then(|x| self.labeled_block_info.get(x))
                 {
-                    self.function.make_assign(*result_var, value);
-                    self.function.make_jump(*target_label); // Still uses writes, needs update
+                    self.function.make_store(*result_var, value);
+                    self.function.make_jump(*target_label);
                 }
                 StmtRes::BreakWithLabel
             }
@@ -363,10 +402,22 @@ impl<'a> TransientData<'a> {
 
         // Get the result type for the if expression
         let result_type = self.get_type(if_expr.id);
-        // Declare a variable to hold the result of the if-expression
-        let if_result_var = self
-            .function
-            .declare_var("if_result".intern(), result_type, None);
+
+        println!("result_type: {:#?}", result_type);
+
+        // Declare a variable to hold the result of the if-expression, if it has a result type
+
+        let if_result_var = if !matches!(
+            result_type,
+            TypeInfo::Inactive | TypeInfo::BuiltInPrimitive(PrimitiveType::Nil)
+        ) {
+            Some(
+                self.function
+                    .make_alloca("if_result".intern(), result_type, None),
+            )
+        } else {
+            None // If the result type is inactive, we don't need a variable
+        };
 
         // Create all blocks first, merge will be the next block for both branches
         let (then_label, else_label) = self.function.make_branch(cond);
@@ -375,7 +426,9 @@ impl<'a> TransientData<'a> {
         // Lower the then block, setting merge as its next block
         self.function.set_current_block(&then_label);
         let then_value = self.lower_block_expr(&if_expr.if_block.body);
-        self.function.make_assign(if_result_var, then_value); // Assign then_value to if_result_var
+        if let Some(if_result_var) = if_result_var {
+            self.function.make_store(if_result_var, then_value);
+        } // Assign then_value to if_result_var
         self.function.make_jump_if_no_terminator(merge_label);
 
         // Lower the else block, also setting merge as its next block
@@ -385,12 +438,16 @@ impl<'a> TransientData<'a> {
         } else {
             Operand::NoOp // If there's no else block, the value is NoOp
         };
-        self.function.make_assign(if_result_var, else_value); // Assign else_value to if_result_var
+
+        if let Some(if_result_var) = if_result_var {
+            self.function.make_store(if_result_var, else_value); // Assign else_value to if_result_var
+        }
+
         self.function.make_jump_if_no_terminator(merge_label);
 
         // Set merge block as current (no next block needed since it's the end)
         self.function.set_current_block(&merge_label);
-        Operand::Variable(if_result_var)
+        if_result_var.map_or(Operand::NoOp, Operand::Variable)
     }
 }
 

@@ -346,10 +346,7 @@ impl TypeRegistry {
             binding_info,
         };
 
-        let funcs = self
-            .functions
-            .entry(info.name)
-            .or_default();
+        let funcs = self.functions.entry(info.name).or_default();
 
         let succ = self
             .type_info_table
