@@ -492,23 +492,6 @@ impl Function {
         dest
     }
 
-    // // Builder method for MakeStruct
-    // pub fn make_struct(
-    //     &mut self,
-    //     name_hint: Ustr,
-    //     struct_info: &StructInfo,
-    //     fields: Vec<(Ustr, Operand)>,
-    // ) -> Variable {
-    //     // TODO: Add validation for field names and types against struct_type definition
-    //     let target = self.fresh_variable(name_hint, struct_info.ty);
-    //     let instr = Instruction::MakeStruct {
-    //         target,
-    //         type_ident: struct_info.name,
-    //         fields,
-    //     };
-    //     self.get_current_block_mut().instructions.push(instr);
-    //     target
-    // }    // Builder method for Binary operation
     pub fn make_binary(
         &mut self,
         name_hint: Ustr,
