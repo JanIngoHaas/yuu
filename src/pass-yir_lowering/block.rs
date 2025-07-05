@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use crate::pass_diagnostics::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::pass_parse::ast::SourceInfo;
 use crate::pass_type_inference::VariableBinding;
-use crate::scheduling::scheduler::{ResourceId, ResourceName};
+use crate::utils::scheduler::{ResourceId, ResourceName};
 use crate::{
     pass_parse::ast::NodeId,
     pass_type_inference::BindingInfo,

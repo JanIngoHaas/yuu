@@ -7,7 +7,7 @@ use crate::{
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
     pass_yir_lowering::block::{Block, RootBlock},
-    scheduling::scheduler::{Pass, ResourceId},
+    utils::scheduler::{Pass, ResourceId},
 };
 
 use super::{declare_function, infer_structural, infer_type};
@@ -136,7 +136,7 @@ impl Pass for PassTypeInference {
         context.add_pass_data(root_block);
         Ok(())
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
     where
         Self: Sized,
     {

@@ -5,7 +5,7 @@ use std::{
 
 use indexmap::IndexMap;
 
-use crate::scheduling::scheduler::{Pass, ResourceId};
+use crate::utils::scheduler::{Pass, ResourceId};
 
 pub struct Context {
     passes_data: IndexMap<&'static str, Arc<dyn Any + Send + Sync + 'static>>,

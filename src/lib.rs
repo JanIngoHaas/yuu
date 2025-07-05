@@ -1,4 +1,4 @@
-pub mod scheduling;
+pub mod utils;
 
 // Pass modules
 #[path = "pass-c_lowering/mod.rs"]
@@ -15,4 +15,4 @@ pub mod pass_type_inference;
 pub mod pass_yir_lowering;
 
 // Re-export commonly used types from scheduling
-pub use scheduling::{Context, Pass, ResourceId, ResourceName, Schedule, Scheduler};
+pub use utils::{Context, Pass, ResourceId, ResourceName, Schedule, Scheduler};

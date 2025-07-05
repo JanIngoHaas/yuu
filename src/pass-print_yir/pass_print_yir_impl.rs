@@ -1,7 +1,7 @@
 use crate::{
     pass_yir_lowering::yir::Module,
-    scheduling::context::Context,
-    scheduling::scheduler::{Pass, ResourceId, ResourceName},
+    utils::context::Context,
+    utils::scheduler::{Pass, ResourceId, ResourceName},
 };
 
 pub struct PassYirToString;
@@ -35,7 +35,7 @@ impl Pass for PassYirToColoredString {
         context.add_pass_data(YirTextualRepresentation(f));
         Ok(())
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
     where
         Self: Sized,
     {
@@ -65,7 +65,7 @@ impl Pass for PassYirToString {
         context.add_pass_data(YirTextualRepresentation(ir_string));
         Ok(())
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule) {
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule) {
         schedule.requires_resource_read::<Module>(&self);
         schedule.produces_resource::<YirTextualRepresentation>(&self);
         schedule.add_pass(self);

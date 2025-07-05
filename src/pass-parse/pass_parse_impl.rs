@@ -3,7 +3,7 @@ use crate::pass_parse::{
     ast::{AST, SourceInfo},
     parser::Parser,
 };
-use crate::scheduling::{
+use crate::utils::{
     context::Context,
     scheduler::{Pass, ResourceId},
 };
@@ -33,7 +33,7 @@ impl Pass for PassParse {
 
         Ok(())
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
     where
         Self: Sized,
     {

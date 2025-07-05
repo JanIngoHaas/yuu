@@ -4,8 +4,8 @@ use crate::pass_type_inference::StructFieldInfo;
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
-use crate::scheduling::scheduler::{ResourceId, ResourceName};
-use indexmap::IndexMap;
+use crate::utils::scheduler::{ResourceId, ResourceName};
+use indexmap::{IndexMap, IndexSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -219,6 +219,27 @@ pub struct BasicBlock {
     pub terminator: ControlFlow,
 }
 
+impl BasicBlock {
+    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
+        self.instructions.iter().filter_map(|instr| {
+            match instr {
+                Instruction::Alloca { target } => {
+                    return Some(target);
+                }
+                Instruction::StoreImmediate { target, value } => {}
+                Instruction::TakeAddress { .. } => {}
+                Instruction::GetFieldPtr { .. } => {}
+                Instruction::Load { .. } => {}
+                Instruction::Store { .. } => {}
+                Instruction::Binary { .. } => {}
+                Instruction::Unary { .. } => {}
+                Instruction::Call { .. } => {}
+            };
+            return None;
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct Function {
     pub name: Ustr,
@@ -226,12 +247,18 @@ pub struct Function {
     pub return_type: &'static TypeInfo,
     pub blocks: IndexMap<i64, BasicBlock>,
     pub entry_block: i64,
+    pub follow_C_ABI: bool,
     current_block: i64,
     next_reg_id: i64,
     next_label_id: i64,
 }
 
 impl Function {
+    
+    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
+        self.blocks.values().flat_map(|block| block.calculate_var_decls())
+    }
+    
     pub fn new(name: Ustr, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
             name,
@@ -239,6 +266,7 @@ impl Function {
             return_type,
             blocks: IndexMap::new(),
             entry_block: 0,
+            follow_C_ABI: true,
             current_block: 0,
             next_reg_id: 0,
             next_label_id: 0,
@@ -396,11 +424,7 @@ impl Function {
         current_block.instructions.push(instr);
 
         // If we have a return value, wrap it in pointer context
-        if let Some(result_var) = target {
-            Some(self.make_take_address("call_result_ptr".intern(), result_var))
-        } else {
-            None
-        }
+        target.map(|result_var| self.make_take_address("call_result_ptr".intern(), result_var))
     } // Builder method for TakeAddress
     pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
         // Case c) - NO loading! We expect a value here, not a pointer context

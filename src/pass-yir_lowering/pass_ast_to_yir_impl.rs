@@ -11,7 +11,7 @@ use crate::{
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
-    scheduling::scheduler::Pass,
+    utils::scheduler::Pass,
 };
 use indexmap::IndexMap;
 
@@ -506,7 +506,7 @@ impl PassAstToYir {
 }
 
 impl Pass for PassAstToYir {
-    fn run(&self, context: &mut crate::scheduling::context::Context) -> anyhow::Result<()> {
+    fn run(&self, context: &mut crate::utils::context::Context) -> anyhow::Result<()> {
         let ast = context.get_resource::<AST>(self);
         let reg = context.get_resource::<TypeRegistry>(self);
         let reg = reg.lock().unwrap();
@@ -519,7 +519,7 @@ impl Pass for PassAstToYir {
         Ok(())
     }
 
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
     where
         Self: Sized,
     {

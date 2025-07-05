@@ -15,7 +15,7 @@ use crate::{
         },
     },
     pass_yir_lowering::block::{BindingTable, Block},
-    scheduling::scheduler::ResourceId,
+    utils::scheduler::ResourceId,
 };
 
 #[derive(Clone)]

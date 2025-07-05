@@ -9,7 +9,7 @@ use petgraph::{
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::scheduling::context::Context;
+use crate::utils::context::Context;
 
 pub trait Pass: Send + Sync {
     fn run(&self, context: &mut Context) -> anyhow::Result<()>;

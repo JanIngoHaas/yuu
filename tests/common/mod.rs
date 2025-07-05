@@ -10,8 +10,8 @@ use yuu::pass_print_yir::pass_print_yir_impl::{
 };
 use yuu::pass_type_inference::PassTypeInference;
 use yuu::pass_yir_lowering::PassAstToYir;
-use yuu::scheduling::context::Context;
-use yuu::scheduling::scheduler::{Schedule, Scheduler};
+use yuu::utils::context::Context;
+use yuu::utils::scheduler::{Schedule, Scheduler};
 
 /// Helper function to create a basic context with source code
 pub fn create_context_with_source(source: &str, filename: &str) -> Context {

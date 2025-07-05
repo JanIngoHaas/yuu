@@ -3,7 +3,7 @@ use crate::pass_parse::pass_parse_impl::SyntaxErrors;
 use anyhow::bail;
 use colored::*;
 
-use crate::{scheduling::context::Context, scheduling::scheduler::Pass};
+use crate::{utils::context::Context, utils::scheduler::Pass};
 
 use crate::pass_type_inference::TypeInferenceErrors;
 pub struct PassDiagnostics;
@@ -129,7 +129,7 @@ impl Pass for PassDiagnostics {
             Ok(())
         }
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
+    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
     where
         Self: Sized,
     {

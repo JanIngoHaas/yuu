@@ -2,7 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::{pass_parse::token::Token, scheduling::scheduler::ResourceId};
+use crate::{pass_parse::token::Token, utils::scheduler::ResourceId};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,

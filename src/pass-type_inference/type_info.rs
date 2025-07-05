@@ -5,7 +5,7 @@ use std::hash::Hash;
 use crate::pass_diagnostics::error::YuuError;
 use crate::{
     pass_parse::ast::*,
-    scheduling::scheduler::{ResourceId, ResourceName},
+    utils::scheduler::{ResourceId, ResourceName},
 };
 use indexmap::IndexMap;
 use scc::HashMap;
