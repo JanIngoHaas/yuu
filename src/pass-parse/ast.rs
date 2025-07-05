@@ -2,7 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::{pass_parse::token::Token, utils::scheduler::ResourceId};
+use crate::pass_parse::token::Token;
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -15,11 +15,6 @@ pub struct SourceInfo {
     pub file_name: Arc<str>,
 }
 
-impl ResourceId for SourceInfo {
-    fn resource_name() -> &'static str {
-        "SourceInfo"
-    }
-}
 
 /// Binary operators for arithmetic expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -382,11 +377,6 @@ pub struct AST {
     pub structurals: Vec<Box<StructuralNode>>,
 }
 
-impl ResourceId for AST {
-    fn resource_name() -> &'static str {
-        "AST"
-    }
-}
 
 // impl Display for Node {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

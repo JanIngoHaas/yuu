@@ -13,6 +13,3 @@ pub mod pass_print_yir;
 pub mod pass_type_inference;
 #[path = "pass-yir_lowering/mod.rs"]
 pub mod pass_yir_lowering;
-
-// Re-export commonly used types from scheduling
-pub use utils::{Context, Pass, ResourceId, ResourceName, Schedule, Scheduler};

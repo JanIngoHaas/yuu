@@ -1,5 +1,5 @@
 use crate::pass_type_inference::{PrimitiveType, TypeInfo, StructInfo};
-use crate::pass_yir_lowering::{Function, Variable};
+use crate::pass_yir_lowering::Function;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;

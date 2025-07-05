@@ -5,7 +5,6 @@ use std::ops::{Deref, DerefMut};
 use crate::pass_diagnostics::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::pass_parse::ast::SourceInfo;
 use crate::pass_type_inference::VariableBinding;
-use crate::utils::scheduler::{ResourceId, ResourceName};
 use crate::{
     pass_parse::ast::NodeId,
     pass_type_inference::BindingInfo,
@@ -26,11 +25,6 @@ pub struct Block {
 
 unsafe impl Send for RootBlock {}
 
-impl ResourceId for Box<RootBlock> {
-    fn resource_name() -> &'static str {
-        "RootBlock"
-    }
-}
 
 // TODO: Wrap this in a box; we have pointers to it. When the root block is moved, the pointers are invalidated and point to garbage / other data.
 pub struct RootBlock {
@@ -41,11 +35,6 @@ pub struct RootBlock {
 #[derive(Clone, Debug)]
 pub struct BindingTable(IndexMap<NodeId, NodeId>);
 
-impl ResourceId for BindingTable {
-    fn resource_name() -> ResourceName {
-        "BindingTable"
-    }
-}
 
 impl Default for BindingTable {
     fn default() -> Self {

@@ -5,7 +5,6 @@ use crate::pass_yir_lowering::{
     Operand, UnaryOp, Variable,
 };
 use std::fmt::Write;
-use indexmap::IndexSet;
 use ustr::Ustr;
 
 const PREFIX_VAR: &str = "reg_";

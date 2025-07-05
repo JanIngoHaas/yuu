@@ -15,7 +15,6 @@ use crate::{
         },
     },
     pass_yir_lowering::block::{BindingTable, Block},
-    utils::scheduler::ResourceId,
 };
 
 #[derive(Clone)]
@@ -50,11 +49,6 @@ pub struct TypeRegistry {
     pub bindings: BindingTable,
 }
 
-impl ResourceId for TypeRegistry {
-    fn resource_name() -> &'static str {
-        "TypeRegistry"
-    }
-}
 
 impl Default for TypeRegistry {
     fn default() -> Self {

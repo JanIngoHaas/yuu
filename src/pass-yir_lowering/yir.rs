@@ -4,8 +4,7 @@ use crate::pass_type_inference::StructFieldInfo;
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
-use crate::utils::scheduler::{ResourceId, ResourceName};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -668,13 +667,6 @@ pub struct Module {
     pub functions: UstrMap<FunctionDeclarationState>,
     pub structs: Vec<Ustr>, // Just the names... NOthing else is really needed for
 }
-
-impl ResourceId for Module {
-    fn resource_name() -> ResourceName {
-        "Module"
-    }
-}
-
 impl Default for Module {
     fn default() -> Self {
         Self::new()

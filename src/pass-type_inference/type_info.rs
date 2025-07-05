@@ -3,10 +3,7 @@ use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 use std::hash::Hash;
 
 use crate::pass_diagnostics::error::YuuError;
-use crate::{
-    pass_parse::ast::*,
-    utils::scheduler::{ResourceId, ResourceName},
-};
+use crate::pass_parse::ast::*;
 use indexmap::IndexMap;
 use scc::HashMap;
 use ustr::Ustr;
@@ -239,11 +236,6 @@ pub struct TypeInfoTable {
     pub types: IndexMap<NodeId, &'static TypeInfo>,
 }
 
-impl ResourceId for TypeInfoTable {
-    fn resource_name() -> ResourceName {
-        "TypeInfoTable"
-    }
-}
 
 impl Default for TypeInfoTable {
     fn default() -> Self {

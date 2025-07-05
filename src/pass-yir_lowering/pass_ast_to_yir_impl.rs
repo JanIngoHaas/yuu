@@ -1,6 +1,6 @@
 use crate::{
     pass_parse::{
-        BuiltInType, GetId,
+        GetId,
         ast::{
             AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
             StructuralNode, UnaryOp,
