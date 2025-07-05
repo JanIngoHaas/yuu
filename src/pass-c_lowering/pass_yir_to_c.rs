@@ -4,11 +4,8 @@ use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Module,
     Operand, UnaryOp, Variable,
 };
-use crate::utils::{
-    context::Context,
-    scheduler::{Pass, ResourceId, ResourceName},
-};
 use std::fmt::Write;
+use indexmap::IndexSet;
 use ustr::Ustr;
 
 const PREFIX_VAR: &str = "reg_";
@@ -21,23 +18,23 @@ struct TransientData<'a> {
     output: String,
 }
 
-pub struct PassYirToC;
+pub struct CLowering;
 
-impl Default for PassYirToC {
+impl Default for CLowering {
     fn default() -> Self {
+        Self
+    }
+}
+
+impl CLowering {
+    pub fn new() -> Self {
         Self
     }
 }
 
 pub struct CSourceCode(pub String);
 
-impl ResourceId for CSourceCode {
-    fn resource_name() -> ResourceName {
-        "CSourceCode"
-    }
-}
-
-impl PassYirToC {
+impl CLowering {
     fn write_var_name(var: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
         write!(f, "{}{}_{}", PREFIX_VAR, var.name(), var.id())
     }
@@ -286,128 +283,118 @@ impl PassYirToC {
     fn gen_function(&self, func: &Function, data: &mut TransientData) -> anyhow::Result<()> {
         // Generate variable declarations for all variables in the function
         // We need to collect all variables used in the function
-        let mut variables = std::collections::HashSet::new();
-        for block in func.blocks.values() {
-            for instruction in &block.instructions {
-                self.collect_variables_from_instruction(instruction, &mut variables);
-            }
-            self.collect_variables_from_terminator(&block.terminator, &mut variables);
-        }
-
-        // Add parameter variables
-        for param in &func.params {
-            variables.insert(*param);
-        }
 
         // Declare all variables at the top of the function
-        for var in &variables {
+        for var in func.calculate_var_decls().chain(func.params.iter()) {
             write!(data.output, "    ")?;
             self.gen_variable_decl(data, var)?;
             writeln!(data.output, ";")?;
         }
         writeln!(data.output)?;
 
-        // Generate blocks in order
-        let mut blocks: Vec<&BasicBlock> = func.blocks.values().collect();
-        blocks.sort_by_key(|block| block.label.id());
-
-        for block in blocks {
-            self.gen_block(block, data)?;
+        // Sort:
+        // TODO: THIS NEEDS TO BE FASTER!
+        let mut cloned = func.blocks.clone();
+        cloned.sort_unstable_keys();
+        
+        for block in cloned {
+            self.gen_block(&block.1, data)?;
         }
+
         Ok(())
     }
 
-    fn collect_variables_from_instruction(
-        &self,
-        instruction: &Instruction,
-        variables: &mut std::collections::HashSet<Variable>,
-    ) {
-        match instruction {
-            Instruction::Alloca { target } => {
-                variables.insert(*target);
-            }
-            Instruction::StoreImmediate { target, value } => {
-                variables.insert(*target);
-                if let Operand::Variable(var) = value {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::TakeAddress { target, source } => {
-                variables.insert(*target);
-                variables.insert(*source);
-            }
-            Instruction::GetFieldPtr { target, base, .. } => {
-                variables.insert(*target);
-                if let Operand::Variable(var) = base {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::Load { target, source } => {
-                variables.insert(*target);
-                if let Operand::Variable(var) = source {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::Store { dest, value } => {
-                if let Operand::Variable(var) = dest {
-                    variables.insert(*var);
-                }
-                if let Operand::Variable(var) = value {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::Binary {
-                target, lhs, rhs, ..
-            } => {
-                variables.insert(*target);
-                if let Operand::Variable(var) = lhs {
-                    variables.insert(*var);
-                }
-                if let Operand::Variable(var) = rhs {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::Unary {
-                target, operand, ..
-            } => {
-                variables.insert(*target);
-                if let Operand::Variable(var) = operand {
-                    variables.insert(*var);
-                }
-            }
-            Instruction::Call { target, args, .. } => {
-                if let Some(target) = target {
-                    variables.insert(*target);
-                }
-                for arg in args {
-                    if let Operand::Variable(var) = arg {
-                        variables.insert(*var);
-                    }
-                }
-            }
-        }
-    }
-
-    fn collect_variables_from_terminator(
-        &self,
-        terminator: &ControlFlow,
-        variables: &mut std::collections::HashSet<Variable>,
-    ) {
-        match terminator {
-            ControlFlow::Jump { .. } => {}
-            ControlFlow::Branch { condition, .. } => {
-                if let Operand::Variable(var) = condition {
-                    variables.insert(*var);
-                }
-            }
-            ControlFlow::Return(value) => {
-                if let Some(Operand::Variable(var)) = value {
-                    variables.insert(*var);
-                }
-            }
-            ControlFlow::Unterminated => {}
-        }
-    }
+    // fn collect_variables_from_instruction(
+    //     &self,
+    //     instruction: &Instruction,
+    //     variables: &mut std::collections::HashSet<Variable>,
+    // ) {
+    //     match instruction {
+    //         Instruction::Alloca { target } => {
+    //             variables.insert(*target);
+    //         }
+    //         Instruction::StoreImmediate { target, value } => {
+    //             variables.insert(*target);
+    //             if let Operand::Variable(var) = value {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::TakeAddress { target, source } => {
+    //             variables.insert(*target);
+    //             variables.insert(*source);
+    //         }
+    //         Instruction::GetFieldPtr { target, base, .. } => {
+    //             variables.insert(*target);
+    //             if let Operand::Variable(var) = base {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::Load { target, source } => {
+    //             variables.insert(*target);
+    //             if let Operand::Variable(var) = source {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::Store { dest, value } => {
+    //             if let Operand::Variable(var) = dest {
+    //                 variables.insert(*var);
+    //             }
+    //             if let Operand::Variable(var) = value {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::Binary {
+    //             target, lhs, rhs, ..
+    //         } => {
+    //             variables.insert(*target);
+    //             if let Operand::Variable(var) = lhs {
+    //                 variables.insert(*var);
+    //             }
+    //             if let Operand::Variable(var) = rhs {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::Unary {
+    //             target, operand, ..
+    //         } => {
+    //             variables.insert(*target);
+    //             if let Operand::Variable(var) = operand {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         Instruction::Call { target, args, .. } => {
+    //             if let Some(target) = target {
+    //                 variables.insert(*target);
+    //             }
+    //             for arg in args {
+    //                 if let Operand::Variable(var) = arg {
+    //                     variables.insert(*var);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // fn collect_variables_from_terminator(
+    //     &self,
+    //     terminator: &ControlFlow,
+    //     variables: &mut std::collections::HashSet<Variable>,
+    // ) {
+    //     match terminator {
+    //         ControlFlow::Jump { .. } => {}
+    //         ControlFlow::Branch { condition, .. } => {
+    //             if let Operand::Variable(var) = condition {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         ControlFlow::Return(value) => {
+    //             if let Some(Operand::Variable(var)) = value {
+    //                 variables.insert(*var);
+    //             }
+    //         }
+    //         ControlFlow::Unterminated => {}
+    //     }
+    // }
 
     fn gen_func_decl(
         &self,
@@ -494,40 +481,18 @@ impl PassYirToC {
     }
 }
 
-impl Pass for PassYirToC {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.get_resource::<Module>(self);
-        let module = module.lock().unwrap();
-
-        let tr = context.get_resource::<TypeRegistry>(self);
-        let tr = tr.lock().unwrap();
-
+impl CLowering {
+    pub fn run(&self, module: &Module, type_registry: &TypeRegistry) -> anyhow::Result<CSourceCode> {
         let mut data = TransientData {
-            module: &module,
+            module,
             output: String::new(),
-            tr: &tr,
+            tr: type_registry,
         };
 
         // Generate C code
         self.gen_module(&mut data)?;
 
-        // Add the generated code to the context
-        context.add_pass_data(CSourceCode(data.output));
-        Ok(())
-    }
-
-    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.requires_resource_read::<Module>(&self);
-        schedule.requires_resource_read::<TypeRegistry>(&self);
-        schedule.produces_resource::<CSourceCode>(&self);
-        schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
-        "YIRToC"
+        Ok(CSourceCode(data.output))
     }
 }
 

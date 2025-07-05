@@ -21,11 +21,8 @@ fn test_while_loop_yir() {
         return result;
     }"#;
 
-    let context = create_context_with_source(source, "test_while.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output =
-        run_schedule_and_get_yir(context, schedule).expect("Failed to generate YIR for while loop");
+    let yir_output = run_to_yir(source, "test_while.yuu")
+        .expect("Failed to generate YIR for while loop");
 
     println!("Generated YIR for while loop:\n{}", yir_output);
 
@@ -51,11 +48,8 @@ fn test_struct_yir() {
         break Point { x:x, y:y, z:z };
     }"#;
 
-    let context = create_context_with_source(source, "test_struct.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output =
-        run_schedule_and_get_yir(context, schedule).expect("Failed to generate YIR for struct");
+    let yir_output = run_to_yir(source, "test_struct.yuu")
+        .expect("Failed to generate YIR for struct");
 
     println!("Generated YIR for struct:\n{}", yir_output);
 
@@ -77,11 +71,8 @@ fn test_factorial_yir() {
         };
     }"#;
 
-    let context = create_context_with_source(source, "test_factorial.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output =
-        run_schedule_and_get_yir(context, schedule).expect("Failed to generate YIR for factorial");
+    let yir_output = run_to_yir(source, "test_factorial.yuu")
+        .expect("Failed to generate YIR for factorial");
 
     println!("Generated YIR for factorial:\n{}", yir_output);
 
@@ -106,13 +97,12 @@ fn test_member_access_yir() {
         return x_val + y_val;
     }"#;
 
-    let context = create_context_with_source(source, "test_member_access.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_member_access.yuu")
         .expect("Failed to generate YIR for member access");
 
-    println!("Generated YIR for member access:\n{}", yir_output); // Basic verification that YIR was generated correctly
+    println!("Generated YIR for member access:\n{}", yir_output); 
+    
+    // Basic verification that YIR was generated correctly
     assert!(yir_output.contains("test_member_access"));
     assert!(yir_output.contains("Point"));
     assert!(yir_output.contains("field_ptr")); // Should contain field pointer operations

@@ -3,18 +3,16 @@ use crate::pass_parse::pass_parse_impl::SyntaxErrors;
 use anyhow::bail;
 use colored::*;
 
-use crate::{utils::context::Context, utils::scheduler::Pass};
-
 use crate::pass_type_inference::TypeInferenceErrors;
-pub struct PassDiagnostics;
+pub struct Diagnostics;
 
-impl Default for PassDiagnostics {
+impl Default for Diagnostics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassDiagnostics {
+impl Diagnostics {
     pub fn new() -> Self {
         Self {}
     }
@@ -79,18 +77,13 @@ impl PassDiagnostics {
     }
 }
 
-impl Pass for PassDiagnostics {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+impl Diagnostics {
+    pub fn run(&self, syntax_errors: &SyntaxErrors, type_inference_errors: &TypeInferenceErrors) -> anyhow::Result<()> {
         // Set up proper error formatting with syntax highlighting
         setup_error_formatter(Some("WarmEmber"), true).unwrap();
 
-        // Gather errors from different passes
-        let syntax_errors = context.get_resource::<SyntaxErrors>(self);
-        let type_inference_errors = context.get_resource::<TypeInferenceErrors>(self);
-
-        let syntax_errors = &mut syntax_errors.lock().unwrap().0;
-
-        let type_inference_errors = &mut type_inference_errors.lock().unwrap().0;
+        let syntax_errors = &syntax_errors.0;
+        let type_inference_errors = &type_inference_errors.0;
 
         let total_errors = syntax_errors.len() + type_inference_errors.len();
 
@@ -128,15 +121,5 @@ impl Pass for PassDiagnostics {
         } else {
             Ok(())
         }
-    }
-    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.requires_resource_write::<SyntaxErrors>(&self);
-        schedule.requires_resource_write::<TypeInferenceErrors>(&self);
-        schedule.add_pass(self);
-    }    fn get_name(&self) -> &'static str {
-        "PassPrintErrors"
     }
 }

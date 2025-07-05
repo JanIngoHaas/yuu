@@ -1,5 +1,4 @@
 use crate::{
-    Context,
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode},
     pass_type_inference::{
@@ -7,7 +6,6 @@ use crate::{
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
     pass_yir_lowering::block::{Block, RootBlock},
-    utils::scheduler::{Pass, ResourceId},
 };
 
 use super::{declare_function, infer_structural, infer_type};
@@ -21,12 +19,6 @@ pub struct TransientData<'a> {
 
 pub struct TypeInferenceErrors(pub Vec<YuuError>);
 
-impl ResourceId for TypeInferenceErrors {
-    fn resource_name() -> &'static str {
-        "TypeInferenceErrors"
-    }
-}
-
 impl<'a> TransientData<'a> {
     pub fn new(type_registry: &'a mut TypeRegistry, ast: &'a AST, src_code: SourceInfo) -> Self {
         Self {
@@ -38,15 +30,15 @@ impl<'a> TransientData<'a> {
     }
 }
 
-pub struct PassTypeInference;
+pub struct TypeInference;
 
-impl Default for PassTypeInference {
+impl Default for TypeInference {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassTypeInference {
+impl TypeInference {
     pub fn new() -> Self {
         Self {}
     }
@@ -109,46 +101,24 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
     };
 }
 
-impl Pass for PassTypeInference {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+impl TypeInference {
+    pub fn run(&self, ast: &AST, src_code: SourceInfo) -> anyhow::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
         let mut root_block = RootBlock::new();
-        let ast = context.get_resource::<AST>(self);
         let mut type_registry = TypeRegistry::new();
+        let errors = {
+            let mut data = TransientData::new(&mut type_registry, ast, src_code);
 
-        let ast = ast.lock().unwrap();
-        let ast = &*ast;
+            for node in &ast.structurals {
+                collect_structural(node, &mut data, root_block.root_mut());
+            }
 
-        let src_code = context.get_resource::<SourceInfo>(self);
-        let src_code = src_code.lock().unwrap();
+            for node in &ast.structurals {
+                infer_structural(node, root_block.root_mut(), &mut data);
+            }
 
-        let mut data = TransientData::new(&mut type_registry, ast, src_code.clone());
+            data.errors
+        };
 
-        for node in &ast.structurals {
-            collect_structural(node, &mut data, root_block.root_mut());
-        }
-
-        for node in &ast.structurals {
-            infer_structural(node, root_block.root_mut(), &mut data);
-        }
-
-        context.add_pass_data(TypeInferenceErrors(data.errors));
-        context.add_pass_data(type_registry);
-        context.add_pass_data(root_block);
-        Ok(())
-    }
-    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.produces_resource::<Box<RootBlock>>(&self);
-        schedule.produces_resource::<TypeInferenceErrors>(&self);
-        schedule.produces_resource::<TypeRegistry>(&self);
-        schedule.requires_resource_read::<AST>(&self);
-        schedule.requires_resource_read::<SourceInfo>(&self);
-        schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
-        "TypeInference"
+        Ok((type_registry, root_block, TypeInferenceErrors(errors)))
     }
 }

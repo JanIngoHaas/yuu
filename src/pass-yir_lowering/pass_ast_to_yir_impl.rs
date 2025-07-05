@@ -11,7 +11,6 @@ use crate::{
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
-    utils::scheduler::Pass,
 };
 use indexmap::IndexMap;
 
@@ -451,15 +450,15 @@ impl<'a> TransientData<'a> {
     }
 }
 
-pub struct PassAstToYir;
+pub struct YirLowering;
 
-impl Default for PassAstToYir {
+impl Default for YirLowering {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassAstToYir {
+impl YirLowering {
     pub fn new() -> Self {
         Self
     }
@@ -505,31 +504,9 @@ impl PassAstToYir {
     }
 }
 
-impl Pass for PassAstToYir {
-    fn run(&self, context: &mut crate::utils::context::Context) -> anyhow::Result<()> {
-        let ast = context.get_resource::<AST>(self);
-        let reg = context.get_resource::<TypeRegistry>(self);
-        let reg = reg.lock().unwrap();
-
-        let ast = ast.lock().unwrap();
-
-        let module = self.lower_ast(&ast, &reg);
-
-        context.add_pass_data(module);
-        Ok(())
-    }
-
-    fn install(self, schedule: &mut crate::utils::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.requires_resource_read::<AST>(&self);
-        schedule.requires_resource_read::<TypeRegistry>(&self);
-        schedule.produces_resource::<Module>(&self);
-        schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
-        "AstToYir"
+impl YirLowering {
+    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry) -> anyhow::Result<Module> {
+        let module = self.lower_ast(ast, type_registry);
+        Ok(module)
     }
 }

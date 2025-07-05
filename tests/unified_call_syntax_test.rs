@@ -29,10 +29,7 @@ fn test_unified_call_syntax_basic() {
         return dist;
     }"#;
 
-    let context = create_context_with_source(source, "test_unified_call_basic.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_unified_call_basic.yuu")
         .expect("Failed to generate YIR for basic unified call syntax");
 
     println!(
@@ -88,10 +85,7 @@ fn test_unified_call_syntax_chained() {
         return result;
     }"#;
 
-    let context = create_context_with_source(source, "test_unified_call_chained.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_unified_call_chained.yuu")
         .expect("Failed to generate YIR for chained unified call syntax");
 
     println!(
@@ -134,10 +128,7 @@ fn test_unified_call_syntax_with_multiple_args() {
         return result_area;
     }"#;
 
-    let context = create_context_with_source(source, "test_unified_call_multiple_args.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_unified_call_multiple_args.yuu")
         .expect("Failed to generate YIR for multiple args unified call syntax");
 
     println!(
@@ -174,10 +165,7 @@ fn test_mixed_member_access_and_unified_call() {
         return info;
     }"#;
 
-    let context = create_context_with_source(source, "test_mixed_access.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_mixed_access.yuu")
         .expect("Failed to generate YIR for mixed member access and unified call");
 
     println!(
@@ -223,10 +211,7 @@ fn test_unified_call_syntax_complex_expression() {
         return result;
     }"#;
 
-    let context = create_context_with_source(source, "test_complex_unified_call.yuu");
-    let schedule = create_yir_schedule();
-
-    let yir_output = run_schedule_and_get_yir(context, schedule)
+    let yir_output = run_to_yir(source, "test_complex_unified_call.yuu")
         .expect("Failed to generate YIR for complex expression unified call");
 
     println!(
