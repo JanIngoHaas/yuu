@@ -478,17 +478,16 @@ impl YirLowering {
                     let mut data =
                         TransientData::new(Function::new(func.decl.name, return_type), tr);
 
-                    // Add parameters
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name);
-                        let param = data.function.add_param(name, ty);
-                        // variable the parameter
-                        data.var_map.insert(arg.id, param);
+                        let param = data.function.add_param("stack_param_mem".intern(), ty);
+                        let param_ptr = data.function.make_take_address(name, param);
+                        data.var_map.insert(arg.id, param_ptr);
                     }
 
-                    // Process the function body block
                     let final_out = data.lower_block_expr(&func.body);
                     data.function.make_return(Some(final_out));
+                    data.function.sort_blocks_by_id();
                     module.define_function(data.function);
                 }
 
@@ -505,7 +504,7 @@ impl YirLowering {
 }
 
 impl YirLowering {
-    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry) -> anyhow::Result<Module> {
+    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry) -> miette::Result<Module> {
         let module = self.lower_ast(ast, type_registry);
         Ok(module)
     }

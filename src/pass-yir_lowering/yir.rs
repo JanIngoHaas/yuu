@@ -248,7 +248,7 @@ pub struct Function {
     pub entry_block: i64,
     pub follow_C_ABI: bool,
     current_block: i64,
-    next_reg_id: i64,
+    next_reg_id: UstrMap<i64>,
     next_label_id: i64,
 }
 
@@ -267,7 +267,7 @@ impl Function {
             entry_block: 0,
             follow_C_ABI: true,
             current_block: 0,
-            next_reg_id: 0,
+            next_reg_id: UstrMap::default(),
             next_label_id: 0,
         };
         f.add_block("entry".intern());
@@ -275,15 +275,16 @@ impl Function {
     }
 
     pub fn add_param(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let param = self.fresh_variable(name, ty.ptr_to());
+        let param = self.fresh_variable(name, ty);
         self.params.push(param);
         param
     }
 
     fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let id = self.next_reg_id;
-        self.next_reg_id += 1;
-        Variable::new(name, id, ty)
+        let id = self.next_reg_id.entry(name).or_insert(0);
+        let var = Variable::new(name, *id, ty);
+        *id += 1;
+        var
     }
 
     pub fn get_block_mut(&mut self, id: i64) -> Option<&mut BasicBlock> {
@@ -628,6 +629,10 @@ impl Function {
 
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
         yir_printer::format_yir(self, do_color, f)
+    }
+    
+    pub fn sort_blocks_by_id(&mut self) {
+        self.blocks.sort_unstable_by(|a, _, b, _| a.cmp(b));
     }
 
     // Helper function to load a value from pointer context if needed

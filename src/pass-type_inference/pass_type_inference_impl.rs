@@ -102,7 +102,7 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
 }
 
 impl TypeInference {
-    pub fn run(&self, ast: &AST, src_code: SourceInfo) -> anyhow::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
+    pub fn run(&self, ast: &AST, src_code: SourceInfo) -> miette::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
         let mut root_block = RootBlock::new();
         let mut type_registry = TypeRegistry::new();
         let errors = {

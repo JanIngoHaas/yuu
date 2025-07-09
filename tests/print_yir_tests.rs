@@ -7,19 +7,16 @@ use common::*;
 #[test]
 fn test_while_loop_yir() {
     // Test a while loop with a labeled break
-    let source = r#"fn test_while() -> i64 {
+    let source = r#"fn test_while() -> i64 =>
         let mut i = 0;
-        let result = :outer_block {
-            while i < 10 {
-                if i == 5 {
-                    break :outer_block 100;
-                }
-                i = i + 1;
-            }
-            break 999;
-        };
-        return result;
-    }"#;
+        let result = :outer_block =>
+            while i < 10 =>
+                if i == 5 =>
+                    break :outer_block 100;.
+                i = i + 1;.
+            break 999;.
+        ;
+        return result;."#;
 
     let yir_output = run_to_yir(source, "test_while.yuu")
         .expect("Failed to generate YIR for while loop");
@@ -39,14 +36,13 @@ fn test_struct_yir() {
         y: i64,
         z: f32,
     }
-    fn test() -> Point
-    {
+    fn test() -> Point =>
         let p = create_point(1.0, 2, 3.0);
         return p;
-    }                
-    fn create_point(x: f32, y: i64, z: f32) -> Point {
+    ;                
+    fn create_point(x: f32, y: i64, z: f32) -> Point =>
         break Point { x:x, y:y, z:z };
-    }"#;
+    ;"#;
 
     let yir_output = run_to_yir(source, "test_struct.yuu")
         .expect("Failed to generate YIR for struct");
@@ -61,15 +57,15 @@ fn test_struct_yir() {
 #[test]
 fn test_factorial_yir() {
     // Create the factorial function code
-    let source = r#"fn fac(n: i64) -> i64 {
-        break if n == 0 {
+    let source = r#"fn fac(n: i64) -> i64 =>
+        break if n == 0 =>
             break 1;
-        }
-        else {
+        ;
+        else =>
             let n_out = n * fac(n - 1);
             return n_out;
-        };
-    }"#;
+        ;
+    ;"#;
 
     let yir_output = run_to_yir(source, "test_factorial.yuu")
         .expect("Failed to generate YIR for factorial");
@@ -91,11 +87,11 @@ fn test_member_access_yir() {
         z: f32,
     }
     
-    fn test_member_access(p: Point) -> f32 {
+    fn test_member_access(p: Point) -> f32 =>
         let x_val = p.x;
         let y_val = p.y;
         return x_val + y_val;
-    }"#;
+    ;"#;
 
     let yir_output = run_to_yir(source, "test_member_access.yuu")
         .expect("Failed to generate YIR for member access");

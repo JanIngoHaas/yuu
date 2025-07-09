@@ -110,7 +110,10 @@ impl Lexer {
         }
     }
 
-    pub fn expect_semicolon(&mut self, errors: &mut Vec<ParseError>) -> ParseResult<Token> {
+    pub fn expect_semicolon(
+        &mut self,
+        errors: &mut Vec<ParseError>,
+    ) -> ParseResult<Token> {
         let next = self.next_token();
         if next.kind == TokenKind::Semicolon {
             Ok(next)

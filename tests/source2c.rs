@@ -7,9 +7,9 @@ use common::*;
 #[test]
 fn test_simple_function_to_c() {
     // Create a simple function that adds two numbers
-    let source = r#"fn add(a: i64, b: i64) -> i64 {
+    let source = r#"fn add(a: i64, b: i64) -> i64 =>
         return a + b;
-    }"#;
+    ."#;
 
     let c_code = run_to_c(source, "test.yuu")
         .expect("Failed to generate C code");
@@ -25,9 +25,9 @@ fn test_simple_function_to_c() {
 
 #[test]
 fn test_boolean_constants() {
-    let source = r#"fn test_bool() -> bool {
+    let source = r#"fn test_bool() -> bool =>
         return true;
-    }"#;
+    ."#;
 
     let c_code = run_to_c(source, "test_bool.yuu")
         .expect("Failed to generate C code for boolean test");
@@ -48,9 +48,9 @@ fn test_struct_to_c() {
         z: f32,
     }
     
-    fn create_point(x: f32, y: i64, z: f32) -> Point {
+    fn create_point(x: f32, y: i64, z: f32) -> Point =>
         break Point { x:x, y:y, z:z };
-    }"#;
+    ."#;
 
     let c_code = run_to_c(source, "test_struct.yuu")
         .expect("Failed to generate C code for struct");
@@ -67,14 +67,14 @@ fn test_struct_to_c() {
 
 #[test]
 fn test_arithmetic_operations() {
-    let source = r#"fn math_ops(a: i64, b: i64) -> i64 {
+    let source = r#"fn math_ops(a: i64, b: i64) -> i64 =>
         let sum = a + b;
         let diff = a - b;
         let prod = sum * diff;
         return prod;
-    }"#;
+    ."#;
 
-    let c_code = run_to_yir(source, "test_math.yuu")
+    let c_code = run_to_c(source, "test_math.yuu")
         .expect("Failed to generate C code for arithmetic");
 
     println!("Generated C code for arithmetic:\n{}", c_code);

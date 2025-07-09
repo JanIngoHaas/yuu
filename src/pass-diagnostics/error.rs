@@ -389,7 +389,7 @@ pub fn setup_error_formatter(
     // Create a custom SyntectHighlighter
     let highlighter = SyntectHighlighter::new(syntax_set, theme, use_bg_color);
 
-    Ok(miette::set_hook(Box::new(move |_| {
+    let _ = miette::set_hook(Box::new(move |_| {
         Box::new(
             MietteHandlerOpts::default()
                 .terminal_links(true)
@@ -407,7 +407,9 @@ pub fn setup_error_formatter(
                 .color(true)
                 .build(),
         )
-    }))?)
+    }));
+
+    Ok(())
 }
 
 // /// Apply a theme from YIR color palettes

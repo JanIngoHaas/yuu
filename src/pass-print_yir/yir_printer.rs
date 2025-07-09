@@ -26,8 +26,6 @@ impl ColorPalette {
         ColorChoice::Auto
     }
 
-    // No need for fallback color method, as termcolor handles this automatically
-
     #[allow(dead_code)]
     fn deep_ocean() -> Self {
         let mut colors = IndexMap::new();
@@ -505,8 +503,8 @@ pub fn format_yir(
             .map(|p| format!(
                 "{} := {}{}",
                 format_variable(p, do_color),
-                format_keyword("alloca", do_color),
-                format_type(p.ty().deref_ptr(), do_color)
+                format_keyword("param", do_color),
+                format_type(p.ty(), do_color)
             ))
             .collect::<Vec<_>>()
             .join(", "),

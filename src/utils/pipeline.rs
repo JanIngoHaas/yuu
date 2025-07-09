@@ -1,4 +1,4 @@
-use anyhow::Result;
+use miette::Result;
 use crate::pass_c_lowering::pass_yir_to_c::{CSourceCode, CLowering};
 use crate::pass_parse::{SourceInfo, AST};
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
@@ -49,16 +49,17 @@ impl Pipeline {
             return Ok(self);
         }
         
-        let ast = self.ast.as_ref().ok_or_else(|| anyhow::anyhow!("AST not available"))?;
-        let source_info = self.source_info.as_ref().ok_or_else(|| anyhow::anyhow!("SourceInfo not available"))?;
+        let ast = self.ast.as_ref().ok_or_else(|| miette::miette!("AST not available"))?;
+        let source_info = self.source_info.as_ref().ok_or_else(|| miette::miette!("SourceInfo not available"))?;
         
         let (type_registry, root_block, type_errors) = TypeInference::new().run(ast, source_info.clone())?;
         
         self.type_registry = Some(type_registry);
         self.root_block = Some(root_block);
         self.type_errors = Some(type_errors);
-        
-        Ok(self)
+
+        // Run diagnostics
+        self.diagnostics()
     }
     
     pub fn yir_lowering(mut self) -> Result<Self> {
@@ -72,8 +73,8 @@ impl Pipeline {
             self = self.type_inference()?;
         }
         
-        let ast = self.ast.as_ref().ok_or_else(|| anyhow::anyhow!("AST not available"))?;
-        let type_registry = self.type_registry.as_ref().ok_or_else(|| anyhow::anyhow!("TypeRegistry not available"))?;
+        let ast = self.ast.as_ref().ok_or_else(|| miette::miette!("AST not available"))?;
+        let type_registry = self.type_registry.as_ref().ok_or_else(|| miette::miette!("TypeRegistry not available"))?;
         
         let module = YirLowering::new().run(ast, type_registry)?;
         self.module = Some(module);
@@ -92,8 +93,8 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
         
-        let module = self.module.as_ref().ok_or_else(|| anyhow::anyhow!("Module not available"))?;
-        let type_registry = self.type_registry.as_ref().ok_or_else(|| anyhow::anyhow!("TypeRegistry not available"))?;
+        let module = self.module.as_ref().ok_or_else(|| miette::miette!("Module not available"))?;
+        let type_registry = self.type_registry.as_ref().ok_or_else(|| miette::miette!("TypeRegistry not available"))?;
         
         let c_code = CLowering::new().run(module, type_registry)?;
         self.c_code = Some(c_code);
@@ -107,8 +108,8 @@ impl Pipeline {
             self = self.type_inference()?;
         }
         
-        let syntax_errors = self.syntax_errors.as_ref().ok_or_else(|| anyhow::anyhow!("SyntaxErrors not available"))?;
-        let type_errors = self.type_errors.as_ref().ok_or_else(|| anyhow::anyhow!("TypeInferenceErrors not available"))?;
+        let syntax_errors = self.syntax_errors.as_ref().ok_or_else(|| miette::miette!("SyntaxErrors not available"))?;
+        let type_errors = self.type_errors.as_ref().ok_or_else(|| miette::miette!("TypeInferenceErrors not available"))?;
         
         Diagnostics::new().run(syntax_errors, type_errors)?;
         Ok(self)
@@ -120,7 +121,7 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
         
-        let module = self.module.as_ref().ok_or_else(|| anyhow::anyhow!("Module not available"))?;
+        let module = self.module.as_ref().ok_or_else(|| miette::miette!("Module not available"))?;
         YirToString::new().run(module)
     }
     
@@ -130,7 +131,7 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
         
-        let module = self.module.as_ref().ok_or_else(|| anyhow::anyhow!("Module not available"))?;
+        let module = self.module.as_ref().ok_or_else(|| miette::miette!("Module not available"))?;
         YirToColoredString::new().run(module)
     }
     
@@ -140,7 +141,7 @@ impl Pipeline {
             *self = std::mem::take(self).c_lowering()?;
         }
         
-        self.c_code.as_ref().ok_or_else(|| anyhow::anyhow!("C code not available"))
+        self.c_code.as_ref().ok_or_else(|| miette::miette!("C code not available"))
     }
     
     pub fn get_module(&mut self) -> Result<&Module> {
@@ -149,7 +150,7 @@ impl Pipeline {
             *self = std::mem::take(self).yir_lowering()?;
         }
         
-        self.module.as_ref().ok_or_else(|| anyhow::anyhow!("Module not available"))
+        self.module.as_ref().ok_or_else(|| miette::miette!("Module not available"))
     }
 }
 

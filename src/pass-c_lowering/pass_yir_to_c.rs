@@ -5,9 +5,9 @@ use crate::pass_yir_lowering::{
     Operand, UnaryOp, Variable,
 };
 use std::fmt::Write;
+use miette::IntoDiagnostic;
 use ustr::Ustr;
 
-const PREFIX_VAR: &str = "reg_";
 const PREFIX_LABEL: &str = "lbl_";
 const PREFIX_FUNCTION: &str = "fn_";
 
@@ -35,7 +35,7 @@ pub struct CSourceCode(pub String);
 
 impl CLowering {
     fn write_var_name(var: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
-        write!(f, "{}{}_{}", PREFIX_VAR, var.name(), var.id())
+        write!(f, "{}_{}", var.name(), var.id())
     }
 
     fn write_label_name(label: &str, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
@@ -46,7 +46,11 @@ impl CLowering {
         name: &str,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
-        write!(f, "{}{}", PREFIX_FUNCTION, name)
+        if name == "main" {
+            write!(f, "main")
+        } else {
+            write!(f, "{}{}", PREFIX_FUNCTION, name)
+        }
     }
 
     fn gen_type(
@@ -63,7 +67,6 @@ impl CLowering {
                 PrimitiveType::Nil => write!(data.output, "void"),
             },
             TypeInfo::Function(_function_type) => {
-                // Function pointers not implemented yet
                 write!(data.output, "void*")
             }
             TypeInfo::Pointer(type_info) => {
@@ -95,8 +98,20 @@ impl CLowering {
                     write!(data.output, "INT64_C(({}))", c)
                 }
             },
-            Operand::F32Const(c) => write!(data.output, "{}f", c),
-            Operand::F64Const(c) => write!(data.output, "{}", c),
+            Operand::F32Const(c) => {
+                if c.fract() == 0.0 {
+                    write!(data.output, "{:.1}f", c)
+                } else {
+                    write!(data.output, "{}f", c)
+                }
+            },
+            Operand::F64Const(c) => {
+                if c.fract() == 0.0 {
+                    write!(data.output, "{:.1}", c)
+                } else {
+                    write!(data.output, "{}", c)
+                }
+            },
             Operand::BoolConst(c) => write!(data.output, "{}", if *c { "1" } else { "0" }),
             Operand::Variable(variable) => Self::write_var_name(variable, &mut data.output),
             Operand::NoOp => write!(data.output, "((void)0)"),
@@ -104,6 +119,21 @@ impl CLowering {
     }
 
     fn gen_variable_decl(
+        &self,
+        data: &mut TransientData,
+        var: &Variable,
+    ) -> Result<(), std::fmt::Error> {
+
+        let ty = var.ty();
+        self.gen_type(data, ty.deref_ptr())?;
+        write!(data.output, " mem_{}_{}; ", var.name(), var.id())?;
+        self.gen_type(data, ty)?;
+        write!(data.output, " ")?;
+        Self::write_var_name(var, &mut data.output)?;
+        write!(data.output, " = &mem_{}_{}; ", var.name(), var.id())
+    }
+
+    fn gen_simple_var_decl(
         &self,
         data: &mut TransientData,
         var: &Variable,
@@ -117,17 +147,15 @@ impl CLowering {
         &self,
         instruction: &Instruction,
         data: &mut TransientData,
-    ) -> anyhow::Result<()> {
-        write!(data.output, "    ")?; // Indentation
+    ) -> Result<(), std::fmt::Error> {
+        write!(data.output, "    ")?;
 
         match instruction {
             Instruction::Alloca { target } => {
-                // Declare the variable on the stack
                 self.gen_variable_decl(data, target)?;
                 writeln!(data.output, ";")?;
             }
             Instruction::StoreImmediate { target, value } => {
-                // Store immediate value directly to variable
                 write!(data.output, "*")?;
                 Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = ")?;
@@ -135,8 +163,9 @@ impl CLowering {
                 writeln!(data.output, ";")?;
             }
             Instruction::TakeAddress { target, source } => {
-                // Get address of a variable
-                self.gen_variable_decl(data, target)?;
+                self.gen_type(data, target.ty())?;
+                write!(data.output, " ")?;
+                Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = &")?;
                 Self::write_var_name(source, &mut data.output)?;
                 writeln!(data.output, ";")?;
@@ -146,25 +175,25 @@ impl CLowering {
                 base,
                 field,
             } => {
-                // Get pointer to a field in a struct
                 self.gen_variable_decl(data, target)?;
+                writeln!(data.output, ";")?;
+                write!(data.output, "    ")?;
+                Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = &(")?;
                 self.gen_operand(data, base)?;
                 write!(data.output, "->{}", field)?;
                 writeln!(data.output, ");")?;
             }
             Instruction::Load { target, source } => {
-                // Load value through a pointer
-                self.gen_variable_decl(data, target)?;
+                self.gen_simple_var_decl(data, target)?;
                 write!(data.output, " = *")?;
                 self.gen_operand(data, source)?;
                 writeln!(data.output, ";")?;
             }
             Instruction::Store { dest, value } => {
-                // Store value through a pointer
                 write!(data.output, "*")?;
                 self.gen_operand(data, dest)?;
-                write!(data.output, " = ")?;
+                write!(data.output, " = *")?;
                 self.gen_operand(data, value)?;
                 writeln!(data.output, ";")?;
             }
@@ -174,8 +203,7 @@ impl CLowering {
                 lhs,
                 rhs,
             } => {
-                // Binary operation
-                self.gen_variable_decl(data, target)?;
+                self.gen_simple_var_decl(data, target)?;
                 write!(data.output, " = ")?;
                 self.gen_operand(data, lhs)?;
                 match op {
@@ -198,8 +226,7 @@ impl CLowering {
                 op,
                 operand,
             } => {
-                // Unary operation
-                self.gen_variable_decl(data, target)?;
+                self.gen_simple_var_decl(data, target)?;
                 write!(data.output, " = ")?;
                 match op {
                     UnaryOp::Neg => write!(data.output, "-"),
@@ -208,9 +235,8 @@ impl CLowering {
                 writeln!(data.output, ";")?;
             }
             Instruction::Call { target, name, args } => {
-                // Function call
                 if let Some(target) = target {
-                    self.gen_variable_decl(data, target)?;
+                    self.gen_simple_var_decl(data, target)?;
                     write!(data.output, " = ")?;
                 }
                 Self::write_function_name(name, &mut data.output)?;
@@ -228,17 +254,15 @@ impl CLowering {
         Ok(())
     }
 
-    fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> anyhow::Result<()> {
-        // Label
+    fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         Self::write_label_name(block.label.name(), &mut data.output)?;
         writeln!(data.output, ":;")?;
 
-        // Generate instructions
         for instruction in &block.instructions {
             self.gen_instruction(instruction, data)?;
         }
 
-        // Generate terminator
+
         match &block.terminator {
             ControlFlow::Jump { target } => {
                 write!(data.output, "    goto ")?;
@@ -271,129 +295,21 @@ impl CLowering {
                 writeln!(data.output, ";")?;
             }
             ControlFlow::Unterminated => {
-                // Should not happen in final IR
                 writeln!(data.output, "    // UNTERMINATED BLOCK")?;
             }
         }
-        writeln!(data.output)?; // Extra newline between blocks
-        Ok(())
-    }
-
-    fn gen_function(&self, func: &Function, data: &mut TransientData) -> anyhow::Result<()> {
-        // Generate variable declarations for all variables in the function
-        // We need to collect all variables used in the function
-
-        // Declare all variables at the top of the function
-        for var in func.calculate_var_decls().chain(func.params.iter()) {
-            write!(data.output, "    ")?;
-            self.gen_variable_decl(data, var)?;
-            writeln!(data.output, ";")?;
-        }
         writeln!(data.output)?;
+        Ok(())
+    }
 
-        // Sort:
-        // TODO: THIS NEEDS TO BE FASTER!
-        let mut cloned = func.blocks.clone();
-        cloned.sort_unstable_keys();
-        
-        for block in cloned {
-            self.gen_block(&block.1, data)?;
+    fn gen_function(&self, func: &Function, data: &mut TransientData) -> Result<(), std::fmt::Error> {
+        for block in func.blocks.values() {
+            self.gen_block(block, data)?;
         }
 
         Ok(())
     }
 
-    // fn collect_variables_from_instruction(
-    //     &self,
-    //     instruction: &Instruction,
-    //     variables: &mut std::collections::HashSet<Variable>,
-    // ) {
-    //     match instruction {
-    //         Instruction::Alloca { target } => {
-    //             variables.insert(*target);
-    //         }
-    //         Instruction::StoreImmediate { target, value } => {
-    //             variables.insert(*target);
-    //             if let Operand::Variable(var) = value {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::TakeAddress { target, source } => {
-    //             variables.insert(*target);
-    //             variables.insert(*source);
-    //         }
-    //         Instruction::GetFieldPtr { target, base, .. } => {
-    //             variables.insert(*target);
-    //             if let Operand::Variable(var) = base {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::Load { target, source } => {
-    //             variables.insert(*target);
-    //             if let Operand::Variable(var) = source {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::Store { dest, value } => {
-    //             if let Operand::Variable(var) = dest {
-    //                 variables.insert(*var);
-    //             }
-    //             if let Operand::Variable(var) = value {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::Binary {
-    //             target, lhs, rhs, ..
-    //         } => {
-    //             variables.insert(*target);
-    //             if let Operand::Variable(var) = lhs {
-    //                 variables.insert(*var);
-    //             }
-    //             if let Operand::Variable(var) = rhs {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::Unary {
-    //             target, operand, ..
-    //         } => {
-    //             variables.insert(*target);
-    //             if let Operand::Variable(var) = operand {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         Instruction::Call { target, args, .. } => {
-    //             if let Some(target) = target {
-    //                 variables.insert(*target);
-    //             }
-    //             for arg in args {
-    //                 if let Operand::Variable(var) = arg {
-    //                     variables.insert(*var);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    //
-    // fn collect_variables_from_terminator(
-    //     &self,
-    //     terminator: &ControlFlow,
-    //     variables: &mut std::collections::HashSet<Variable>,
-    // ) {
-    //     match terminator {
-    //         ControlFlow::Jump { .. } => {}
-    //         ControlFlow::Branch { condition, .. } => {
-    //             if let Operand::Variable(var) = condition {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         ControlFlow::Return(value) => {
-    //             if let Some(Operand::Variable(var)) = value {
-    //                 variables.insert(*var);
-    //             }
-    //         }
-    //         ControlFlow::Unterminated => {}
-    //     }
-    // }
 
     fn gen_func_decl(
         &self,
@@ -435,13 +351,10 @@ impl CLowering {
         Ok(())
     }
 
-    fn gen_module(&self, data: &mut TransientData) -> anyhow::Result<()> {
-        // Add standard includes
+    fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         writeln!(data.output, "#include <stdint.h>")?;
         writeln!(data.output, "#include <stdbool.h>")?;
         writeln!(data.output)?;
-
-        // Generate struct definitions
         for sname in &data.module.structs {
             self.def_struct(data, *sname)?;
         }
@@ -449,7 +362,6 @@ impl CLowering {
             writeln!(data.output)?;
         }
 
-        // Forward declare all functions
         for function_state in data.module.functions.values() {
             match function_state {
                 FunctionDeclarationState::Declared(func)
@@ -461,7 +373,6 @@ impl CLowering {
         }
         writeln!(data.output)?;
 
-        // Generate function definitions
         for function_state in data.module.functions.values() {
             match function_state {
                 FunctionDeclarationState::Defined(func) => {
@@ -471,9 +382,7 @@ impl CLowering {
                     writeln!(data.output, "}}")?;
                     writeln!(data.output)?;
                 }
-                FunctionDeclarationState::Declared(_) => {
-                    // Just declared, no definition
-                }
+                FunctionDeclarationState::Declared(_) => {}
             }
         }
         Ok(())
@@ -481,15 +390,14 @@ impl CLowering {
 }
 
 impl CLowering {
-    pub fn run(&self, module: &Module, type_registry: &TypeRegistry) -> anyhow::Result<CSourceCode> {
+    pub fn run(&self, module: &Module, type_registry: &TypeRegistry) -> miette::Result<CSourceCode> {
         let mut data = TransientData {
             module,
             output: String::new(),
             tr: type_registry,
         };
 
-        // Generate C code
-        self.gen_module(&mut data)?;
+        self.gen_module(&mut data).into_diagnostic()?;
 
         Ok(CSourceCode(data.output))
     }

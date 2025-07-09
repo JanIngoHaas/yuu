@@ -1,3 +1,4 @@
+use miette::IntoDiagnostic;
 use crate::{
     pass_yir_lowering::yir::Module,
 };
@@ -31,9 +32,9 @@ impl YirToColoredString {
 }
 
 impl YirToColoredString {
-    pub fn run(&self, module: &Module) -> anyhow::Result<YirTextualRepresentation> {
+    pub fn run(&self, module: &Module) -> miette::Result<YirTextualRepresentation> {
         let mut f = String::new();
-        module.format_yir(true, &mut f)?;
+        module.format_yir(true, &mut f).into_diagnostic()?;
         Ok(YirTextualRepresentation(f))
     }
 }
@@ -41,7 +42,7 @@ impl YirToColoredString {
 pub struct YirTextualRepresentation(pub String);
 
 impl YirToString {
-    pub fn run(&self, module: &Module) -> anyhow::Result<YirTextualRepresentation> {
+    pub fn run(&self, module: &Module) -> miette::Result<YirTextualRepresentation> {
         let ir_string = format!("{}", module);
         Ok(YirTextualRepresentation(ir_string))
     }

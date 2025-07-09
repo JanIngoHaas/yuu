@@ -494,20 +494,25 @@ impl Parser {
         Ok(out.1)
     }
 
+    fn expect_semicolon_or_block_terminator(&mut self, start_span: Span, end_span: Span) -> ParseResult<Span> {
+        let dot_maybe = self.lexer.peek();
+        if dot_maybe.kind == TokenKind::BlockTerminator {
+            Ok(start_span.start..end_span.end)
+        } else {
+            let semicolon = self.lexer.expect_semicolon(&mut self.errors)?;
+            Ok(start_span.start..semicolon.span.end)
+        }
+    }
+
     pub fn parse_atomic_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (span, expr) = self.parse_expr()?;
 
-        // Only expect semicolon if the expression is not a block
-        let span = if matches!(expr, ExprNode::If(_))
-            || matches!(expr, ExprNode::While(_))
-            || matches!(expr, ExprNode::Block(_))
-        {
+        let final_span = if matches!(expr, ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)) {
             span
         } else {
-            let semicolon = self.lexer.expect_semicolon(&mut self.errors)?;
-            span.start..semicolon.span.end
+            self.expect_semicolon_or_block_terminator(span.clone(), span.clone())?
         };
-        Ok((span, StmtNode::Atomic(expr)))
+        Ok((final_span, StmtNode::Atomic(expr)))
     }
 
     pub fn parse_binding(&mut self) -> ParseResult<BindingNode> {
@@ -556,10 +561,9 @@ impl Parser {
             None
         };
         let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
-        let (_expr_span, expr) = self.parse_expr()?;
-        // Parse semicolon
-        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
-        let span = let_tkn.span.start..sem.span.end;
+        let (expr_span, expr) = self.parse_expr()?;
+
+        let span = self.expect_semicolon_or_block_terminator(let_tkn.span.clone(), expr_span)?;
 
         Ok((
             span.clone(),
@@ -874,7 +878,7 @@ impl Parser {
                         label_token.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
-                    ).with_help("The preceding colon indicates a block label, so an identifier is expected".to_string())); // Removed related info
+                    ).with_help("The preceding colon indicates a block label, so an identifier is expected".to_string()));
                     return Err(self.lexer.synchronize());
                 }
             }
@@ -882,15 +886,15 @@ impl Parser {
             None
         };
 
-        let lbrace = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
+        let fat_arrow = self.lexer.expect(&[TokenKind::FatArrow], &mut self.errors)?;
         let mut stmts = Vec::new();
 
         loop {
             // Check for empty block or end of block
             let next = self.lexer.peek();
-            if next.kind == TokenKind::RBrace {
-                let rbrace = self.lexer.next_token();
-                let span = lbrace.span.start..rbrace.span.end;
+            if next.kind == TokenKind::BlockTerminator {
+                let dot = self.lexer.next_token();
+                let span = fat_arrow.span.start..dot.span.end;
                 return Ok(self.make_block_expr(stmts, span, label));
             }
 
@@ -908,51 +912,6 @@ impl Parser {
 
             stmts.push(node);
 
-            // // Check if the statement requires a semicolon
-            // let requires_semicolon = match &node {
-            //     // Control flow and block expressions used as statements don't need semicolons
-            //     StmtNode::Atomic(expr)
-            //         if !matches!(
-            //             expr,
-            //             ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)
-            //         ) =>
-            //     {
-            //         false
-            //     }
-            //     StmtNode::Let(_) | StmtNode::Break(_) | StmtNode::Atomic(_) => true,
-            //     StmtNode::Error(_) => false,
-            // };
-
-            // if requires_semicolon {
-            //     // Look for terminator (semicolon)
-            //     let terminator = self.lexer.peek();
-            //     match terminator.kind {
-            //         TokenKind::Semicolon => {
-            //             self.lexer.next_token(); // Consume the semicolon
-            //             stmts.push(node);
-            //         }
-            //         _ => {
-            //             // Error: Expected semicolon
-            //             let terminator_token = self.lexer.next_token();
-            //             self.errors.push(
-            //                 YuuError::unexpected_token(
-            //                     terminator_token.span.clone(),
-            //                     "';'".to_string(),
-            //                     terminator_token.kind,
-            //                     self.lexer.code_info.source.clone(),
-            //                     self.lexer.code_info.file_name.clone(),
-            //                 )
-            //                 .with_help("Expected ';' after this statement.".to_string()),
-            //             );
-            //             // Attempt synchronization
-            //             return Err(self.lexer.synchronize());
-            //         }
-            //     }
-            // } else {
-            //     // Statement doesn't require a semicolon (if, while, block expr, ...)
-            //     println!("No semicolon needed for this statement");
-            //     stmts.push(node);
-            // }
         }
     }
 
@@ -983,11 +942,9 @@ impl Parser {
             None
         };
 
-        // Parse the value expression
-        let (_expr_span, expr) = self.parse_expr()?;
+        let (expr_span, expr) = self.parse_expr()?;
 
-        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
-        let span = break_token.span.start..sem.span.end;
+        let span = self.expect_semicolon_or_block_terminator(break_token.span.clone(), expr_span)?;
 
         Ok((
             span.clone(),
@@ -1184,10 +1141,9 @@ impl Parser {
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let ret_token = self.lexer.expect(&[TokenKind::Return], &mut self.errors)?;
 
-        let (_expr_span, expr) = self.parse_expr()?;
+        let (expr_span, expr) = self.parse_expr()?;
 
-        let sem = self.lexer.expect_semicolon(&mut self.errors)?;
-        let span = ret_token.span.start..sem.span.end;
+        let span = self.expect_semicolon_or_block_terminator(ret_token.span.clone(), expr_span)?;
 
         Ok((
             span.clone(),

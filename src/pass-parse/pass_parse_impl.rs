@@ -13,7 +13,7 @@ impl Parse {
         Self
     }
     
-    pub fn run(&self, source_info: &SourceInfo) -> anyhow::Result<(AST, SyntaxErrors)> {
+    pub fn run(&self, source_info: &SourceInfo) -> miette::Result<(AST, SyntaxErrors)> {
         let mut parser = Parser::new(source_info);
         let ast = parser.parse_and_add_ids();
         let (syntax_errors, _) = parser.dismantle();

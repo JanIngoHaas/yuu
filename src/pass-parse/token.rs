@@ -37,6 +37,10 @@ pub enum Integer {
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
 pub enum TokenKind {
+
+    #[regex(r"\s+[.]")]
+    BlockTerminator,
+
     #[token("break")]
     Break,
 
@@ -88,6 +92,9 @@ pub enum TokenKind {
 
     #[token("->")]
     Arrow,
+
+    #[token("=>")]
+    FatArrow,
 
     #[token("return")]
     Return,
@@ -190,6 +197,7 @@ impl Display for TokenKind {
             TokenKind::MutKw => "'mut'".fmt(f),
             TokenKind::FnKw => "'fn'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
+            TokenKind::FatArrow => "'=>'".fmt(f),
             TokenKind::Return => "'return'".fmt(f),
             TokenKind::Colon => "':'".fmt(f),
             TokenKind::DoubleColon => "'::'".fmt(f),
@@ -218,6 +226,7 @@ impl Display for TokenKind {
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
+            TokenKind::BlockTerminator => ".".fmt(f),
         }
     }
 }
