@@ -225,7 +225,7 @@ impl BasicBlock {
                 Instruction::Alloca { target } => {
                     return Some(target);
                 }
-                Instruction::StoreImmediate { target, value } => {}
+                Instruction::StoreImmediate { .. } => {}
                 Instruction::TakeAddress { .. } => {}
                 Instruction::GetFieldPtr { .. } => {}
                 Instruction::Load { .. } => {}
@@ -246,7 +246,7 @@ pub struct Function {
     pub return_type: &'static TypeInfo,
     pub blocks: IndexMap<i64, BasicBlock>,
     pub entry_block: i64,
-    pub follow_C_ABI: bool,
+    pub follow_c_abi: bool,
     current_block: i64,
     next_reg_id: UstrMap<i64>,
     next_label_id: i64,
@@ -265,7 +265,7 @@ impl Function {
             return_type,
             blocks: IndexMap::new(),
             entry_block: 0,
-            follow_C_ABI: true,
+            follow_c_abi: true,
             current_block: 0,
             next_reg_id: UstrMap::default(),
             next_label_id: 0,

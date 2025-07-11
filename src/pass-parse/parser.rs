@@ -865,27 +865,6 @@ impl Parser {
     }
 
     pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {
-        // Handle block label
-        let label = if self.lexer.peek().kind == TokenKind::Colon {
-            let _ = self.lexer.next_token(); // consume colon
-            let label_token = self.lexer.next_token();
-            match label_token.kind {
-                TokenKind::Ident(label) => Some(label),
-                _ => {
-                    self.errors.push(YuuError::unexpected_token(
-                        label_token.span.clone(),
-                        "a label identifier".to_string(),
-                        label_token.kind,
-                        self.lexer.code_info.source.clone(),
-                        self.lexer.code_info.file_name.clone(),
-                    ).with_help("The preceding colon indicates a block label, so an identifier is expected".to_string()));
-                    return Err(self.lexer.synchronize());
-                }
-            }
-        } else {
-            None
-        };
-
         let fat_arrow = self.lexer.expect(&[TokenKind::FatArrow], &mut self.errors)?;
         let mut stmts = Vec::new();
 
@@ -894,7 +873,35 @@ impl Parser {
             let next = self.lexer.peek();
             if next.kind == TokenKind::BlockTerminator {
                 let dot = self.lexer.next_token();
-                let span = fat_arrow.span.start..dot.span.end;
+                
+                // Check if there's a label after the block terminator
+                let (label, label_end_span) = if self.lexer.peek().kind == TokenKind::At {
+                    let _ = self.lexer.next_token(); // consume @
+                    let label_token = self.lexer.next_token();
+                    match label_token.kind {
+                        TokenKind::Ident(label) => (Some(label), Some(label_token.span.clone())),
+                        _ => {
+                            self.errors.push(YuuError::unexpected_token(
+                                label_token.span.clone(),
+                                "a label identifier".to_string(),
+                                label_token.kind,
+                                self.lexer.code_info.source.clone(),
+                                self.lexer.code_info.file_name.clone(),
+                            ).with_help("The preceding @ indicates a block label, so an identifier is expected".to_string()));
+                            return Err(self.lexer.synchronize());
+                        }
+                    }
+                } else {
+                    (None, None)
+                };
+
+                let span = if let Some(label_span) = label_end_span {
+                    // If there's a label, extend span to include it
+                    fat_arrow.span.start..label_span.end
+                } else {
+                    fat_arrow.span.start..dot.span.end
+                };
+                
                 return Ok(self.make_block_expr(stmts, span, label));
             }
 
@@ -919,8 +926,8 @@ impl Parser {
         let break_token = self.lexer.expect(&[TokenKind::Break], &mut self.errors)?;
 
         // Check for optional label
-        let target = if self.lexer.peek().kind == TokenKind::Colon {
-            let _ = self.lexer.next_token(); // consume colon
+        let target = if self.lexer.peek().kind == TokenKind::At {
+            let _ = self.lexer.next_token(); // consume @
             let label_token = self.lexer.next_token();
             match label_token.kind {
                 TokenKind::Ident(label) => Some(label),
@@ -933,7 +940,7 @@ impl Parser {
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
-                        .with_help("Expected a label identifier after colon".to_string()),
+                        .with_help("Expected a label identifier after @".to_string()),
                     );
                     return Err(self.lexer.synchronize());
                 }

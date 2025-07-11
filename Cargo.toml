@@ -19,3 +19,7 @@ syntect = "5.2.0"
 ustr = { version = "1.1.0", features = ["serde"] }
 termcolor = "1.4.1"
 colored = "3.0.0"
+tempfile = "3.10.1"
+
+[dev-dependencies]
+assert_cmd = "2.0.14"

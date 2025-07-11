@@ -36,6 +36,7 @@ pub enum Integer {
 #[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
+#[logos(skip r"<--[-]+.*")]
 pub enum TokenKind {
 
     #[regex(r"\s+[.]")]
@@ -164,6 +165,9 @@ pub enum TokenKind {
     #[token(".")]
     Dot,
 
+    #[token("@")]
+    At,
+
     #[token("#")]
     Hash,
 
@@ -226,6 +230,7 @@ impl Display for TokenKind {
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
+            TokenKind::At => "'@'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
         }
     }

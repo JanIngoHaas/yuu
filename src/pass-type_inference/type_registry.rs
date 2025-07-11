@@ -257,6 +257,48 @@ impl TypeRegistry {
             primitive_bool(),
         );
 
+        // Unary operations for i64
+        reg.register_unary_op(
+            "neg".intern(),
+            next(),
+            primitive_i64(),
+            primitive_i64(),
+        );
+        reg.register_unary_op(
+            "pos".intern(),
+            next(),
+            primitive_i64(),
+            primitive_i64(),
+        );
+
+        // Unary operations for f32
+        reg.register_unary_op(
+            "neg".intern(),
+            next(),
+            primitive_f32(),
+            primitive_f32(),
+        );
+        reg.register_unary_op(
+            "pos".intern(),
+            next(),
+            primitive_f32(),
+            primitive_f32(),
+        );
+
+        // Unary operations for f64
+        reg.register_unary_op(
+            "neg".intern(),
+            next(),
+            primitive_f64(),
+            primitive_f64(),
+        );
+        reg.register_unary_op(
+            "pos".intern(),
+            next(),
+            primitive_f64(),
+            primitive_f64(),
+        );
+
         reg
     }
 
@@ -288,6 +330,22 @@ impl TypeRegistry {
         };
 
         let out = self.add_function(operand_type, ret_type, name, binding_info);
+        debug_assert!(out);
+    }
+
+    fn register_unary_op(
+        &mut self,
+        name: Ustr,
+        id: NodeId,
+        operand_type: &'static TypeInfo,
+        ret_type: &'static TypeInfo,
+    ) {
+        let binding_info = BindingInfo {
+            id,
+            src_location: None,
+        };
+
+        let out = self.add_function(&[operand_type], ret_type, name, binding_info);
         debug_assert!(out);
     }
 

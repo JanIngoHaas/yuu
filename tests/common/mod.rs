@@ -1,6 +1,7 @@
 // Common utilities for integration tests
 
 use yuu::utils::pipeline::*;
+use yuu::pass_c_compilation::pass_c_compilation_impl::CExecutable;
 
 /// Helper function to run the full YIR pipeline and return YIR output
 pub fn run_to_yir(source: &str, filename: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -15,9 +16,21 @@ pub fn run_to_c(source: &str, filename: &str) -> Result<String, Box<dyn std::err
     Ok(pipeline.get_c_code()?.0.clone())
 }
 
+/// Helper function to run the full compilation pipeline to executable
+pub fn run_to_executable(source: &str, filename: &str) -> Result<CExecutable, Box<dyn std::error::Error>> {
+    let mut pipeline = Pipeline::parse(source.to_string(), filename.to_string())?;
+    Ok(pipeline.compile_executable()?)
+}
+
 /// Helper function to run just parsing and diagnostics
 pub fn run_parse_only(source: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
     Pipeline::parse(source.to_string(), filename.to_string())?
         .diagnostics()?;
     Ok(())
+}
+
+/// Helper function to run executable and capture output
+pub fn run_executable_with_output(executable: &CExecutable, args: &[&str]) -> miette::Result<i32> {
+    let output = executable.execute(args)?;
+    Ok(output.status.code().unwrap())
 }

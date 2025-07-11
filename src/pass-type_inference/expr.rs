@@ -1,5 +1,6 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
+use crate::pass_type_inference::ExitKind;
 use crate::{
     pass_parse::ast::{
         AssignmentExpr, BinaryExpr, BlockExpr, ExprNode, FuncCallExpr, IdentExpr, IfExpr,
@@ -12,7 +13,6 @@ use crate::{
     },
     pass_yir_lowering::block::Block,
 };
-
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
@@ -172,9 +172,16 @@ pub fn infer_block_no_child_creation(
     for stmt in &block_expr.body {
         let out = super::infer_stmt(stmt, root_func_block, data);
         // This is for when we break OUT of the current block!
-        if let super::ExitKind::Break = out {
-            // Store break type but keep processing
-            span_break_ty = Some((stmt.span(), inactive_type()));
+        match out {
+            ExitKind::ImmediateReturn => {
+                span_break_ty = Some((stmt.span(), inactive_type()));
+                break;
+            }
+            ExitKind::Break => {
+                // Store break type but keep processing
+                span_break_ty = Some((stmt.span(), inactive_type()));
+            }
+            ExitKind::Proceed => {}
         }
     }
 

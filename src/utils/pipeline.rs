@@ -1,5 +1,6 @@
 use miette::Result;
 use crate::pass_c_lowering::pass_yir_to_c::{CSourceCode, CLowering};
+use crate::pass_c_compilation::pass_c_compilation_impl::{CCompilation, CExecutable};
 use crate::pass_parse::{SourceInfo, AST};
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
 use crate::pass_print_yir::pass_print_yir_impl::{YirTextualRepresentation, YirToString, YirToColoredString};
@@ -151,6 +152,16 @@ impl Pipeline {
         }
         
         self.module.as_ref().ok_or_else(|| miette::miette!("Module not available"))
+    }
+    
+    pub fn compile_executable(&mut self) -> Result<CExecutable> {
+        // Auto-compute C code if not available
+        if self.c_code.is_none() {
+            *self = std::mem::take(self).c_lowering()?;
+        }
+        
+        let c_code = self.c_code.as_ref().ok_or_else(|| miette::miette!("C code not available"))?;
+        CCompilation::new().compile_c_code(c_code)
     }
 }
 

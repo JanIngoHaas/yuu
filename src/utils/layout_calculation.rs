@@ -100,7 +100,7 @@ pub fn calc_type_layout(ty: &TypeInfo, platform: TargetPlatform) -> LayoutInfo {
             size: calc_pointer_size(platform), // Function pointers are just pointers
             alignment: calc_pointer_alignment(platform),
         },
-        TypeInfo::Struct(struct_type) => {
+        TypeInfo::Struct(_struct_type) => {
             // This requires the struct to be fully resolved
             // For now, return a placeholder - will be implemented with calc_struct_layout
             LayoutInfo {

@@ -401,9 +401,7 @@ impl<'a> TransientData<'a> {
 
         // Get the result type for the if expression
         let result_type = self.get_type(if_expr.id);
-
-        println!("result_type: {:#?}", result_type);
-
+        
         // Declare a variable to hold the result of the if-expression, if it has a result type
 
         let if_result_var = if !matches!(

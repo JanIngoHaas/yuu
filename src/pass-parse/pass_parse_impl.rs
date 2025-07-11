@@ -21,8 +21,8 @@ impl Parse {
     }
 }
 
-pub(crate) struct PassParseData {
-    pub(crate) ast: AST,
-    pub(crate) syntax_errors: SyntaxErrors,
-    pub(crate) source_info: SourceInfo
+impl Default for Parse {
+    fn default() -> Self {
+        Self::new()
+    }   
 }
