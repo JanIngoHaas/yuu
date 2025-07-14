@@ -158,7 +158,10 @@ fn test_comparison_operator_types() {
         let b = 5;
         let greater = a > b;
         let equal = a == b;
-        let result = if greater => 1 else => 0;
+        let result = 
+            if greater => break 1 . 
+            else => break 0 .
+        ;
         return result .
     "#;
     
