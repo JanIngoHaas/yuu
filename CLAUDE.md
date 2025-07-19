@@ -96,3 +96,32 @@ The project uses Miette for rich error reporting with:
 ## Testing
 
 Integration tests in `tests/` exercise the full compilation pipeline. Use `tests/common/mod.rs` utilities for setting up test contexts and schedules.
+
+## TODO: Syntax Improvements
+
+### Replace `=>` with whitespace-only syntax
+
+**Priority: High** - Language design improvement to reduce symbol overloading
+
+Currently `=>` is overused in the language syntax:
+- Function bodies: `fn name() -> Type =>`
+- If conditions: `if condition =>`
+- Else clauses: `else =>`
+- While loops: `while condition =>`
+
+**Proposed change:**
+- Replace all `=>` with whitespace-only separation
+- Rely on existing `.` statement terminators for parsing boundaries
+- Reserve `=>` exclusively for future match statements
+
+**Implementation steps:**
+1. Update lexer to remove `=>` token expectation after function signatures, if/else, while
+2. Update parser to expect whitespace instead of `=>` in these contexts
+3. Update all test files in `tests/` to use new syntax
+4. Update any example code in documentation
+
+**Benefits:**
+- Eliminates symbol overloading
+- Cleaner, more minimal syntax
+- Preserves `=>` for match statements (standard convention)
+- Maintains unambiguous parsing with `.` terminators

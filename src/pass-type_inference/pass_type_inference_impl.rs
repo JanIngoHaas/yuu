@@ -98,6 +98,14 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 },
             );
         }
+        StructuralNode::EnumDecl(_) => {
+            // TODO: Implement enum declaration processing
+            todo!("Enum declaration processing not yet implemented")
+        }
+        StructuralNode::EnumDef(_) => {
+            // TODO: Implement enum definition processing
+            todo!("Enum definition processing not yet implemented")
+        }
     };
 }
 

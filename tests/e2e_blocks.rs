@@ -6,8 +6,8 @@ use common::*;
 
 #[test]
 fn test_simple_block_expression() {
-    let source = r#"fn main() -> i64 =>
-        let result = =>
+    let source = r#"fn main() -> i64:
+        let result = :
             let x = 10;
             let y = 20;
             break x + y .
@@ -25,8 +25,8 @@ fn test_simple_block_expression() {
 
 #[test]
 fn test_labeled_block() {
-    let source = r#"fn main() -> i64 =>
-        let result = :outer =>
+    let source = r#"fn main() -> i64:
+        let result = :outer:
             let x = 5;
             break :outer x * 2 .
         return result .
@@ -43,10 +43,10 @@ fn test_labeled_block() {
 
 #[test]
 fn test_nested_blocks() {
-    let source = r#"fn main() -> i64 =>
-        let result = :outer =>
+    let source = r#"fn main() -> i64:
+        let result = :outer:
             let x = 10;
-            let inner_result = :inner =>
+            let inner_result = :inner:
                 let y = 5;
                 break :inner y * 2 .
             break :outer x + inner_result .
@@ -65,11 +65,11 @@ fn test_nested_blocks() {
 
 #[test]
 fn test_break_with_value() {
-    let source = r#"fn main() -> i64 =>
-        let result = =>
+    let source = r#"fn main() -> i64:
+        let result = :
             let mut counter = 0;
-            while counter < 10 =>
-                if counter == 5 => break counter * 2 .
+            while counter < 10:
+                if counter == 5: break counter * 2 .
                 counter = counter + 1 .
             break counter .
         return result .
@@ -87,13 +87,13 @@ fn test_break_with_value() {
 
 #[test]
 fn test_break_from_nested_loop() {
-    let source = r#"fn main() -> i64 =>
-        let result = :outer =>
+    let source = r#"fn main() -> i64:
+        let result = :outer:
             let mut i = 0;
-            while i < 5 =>
+            while i < 5:
                 let mut j = 0;
-                while j < 5 =>
-                    if i == 2 && j == 3 => break :outer i + j .
+                while j < 5:
+                    if i == 2 && j == 3: break :outer i + j .
                     j = j + 1 .
                 i = i + 1 .
             break :outer 0 .
@@ -112,9 +112,9 @@ fn test_break_from_nested_loop() {
 
 #[test]
 fn test_block_with_local_scope() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 10;
-        let result = =>
+        let result = :
             let x = 20;  // shadows outer x
             break x .
         return result + x . // uses outer x
@@ -133,12 +133,12 @@ fn test_block_with_local_scope() {
 #[test]
 fn test_block_as_function_body() {
     let source = r#"
-        fn compute(x: i64) -> i64 => :calc =>
+        fn compute(x: i64) -> i64: :calc:
             let doubled = x * 2;
-            if doubled > 10 => break :calc doubled .
-            else => break :calc x . .
+            if doubled > 10: break :calc doubled .
+            else: break :calc x . .
         
-        fn main() -> i64 => return compute(8) .
+        fn main() -> i64: return compute(8) .
     "#;
     
     let executable = run_to_executable(source, "test_block_func.yuu")
@@ -153,11 +153,11 @@ fn test_block_as_function_body() {
 
 #[test]
 fn test_multiple_labeled_blocks() {
-    let source = r#"fn main() -> i64 =>
-        let result1 = :first =>
+    let source = r#"fn main() -> i64:
+        let result1 = :first:
             break :first 10 .
         
-        let result2 = :second =>
+        let result2 = :second:
             break :second 20 .
         
         return result1 + result2 .
@@ -175,10 +175,10 @@ fn test_multiple_labeled_blocks() {
 
 #[test]
 fn test_block_with_early_return() {
-    let source = r#"fn main() -> i64 =>
-        let result = =>
+    let source = r#"fn main() -> i64:
+        let result = :
             let x = 5;
-            if x > 3 => break 100 .
+            if x > 3: break 100 .
             break 0 .
         return result .
     "#;

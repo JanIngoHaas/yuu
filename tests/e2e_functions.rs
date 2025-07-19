@@ -7,9 +7,9 @@ use common::*;
 #[test]
 fn test_simple_function_call() {
     let source = r#"
-        fn add(a: i64, b: i64) -> i64 => return a + b .
+        fn add(a: i64, b: i64) -> i64: return a + b .
         
-        fn main() -> i64 => return add(5, 3) .
+        fn main() -> i64: return add(5, 3) .
     "#;
     
     let executable = run_to_executable(source, "test_func_call.yuu")
@@ -24,9 +24,9 @@ fn test_simple_function_call() {
 #[test]
 fn test_function_with_no_params() {
     let source = r#"
-        fn get_answer() -> i64 => return 42 .
+        fn get_answer() -> i64: return 42 .
         
-        fn main() -> i64 => return get_answer() .
+        fn main() -> i64: return get_answer() .
     "#;
     
     let executable = run_to_executable(source, "test_no_params.yuu")
@@ -41,9 +41,9 @@ fn test_function_with_no_params() {
 #[test]
 fn test_function_with_multiple_params() {
     let source = r#"
-        fn calc(a: i64, b: i64, c: i64) -> i64 => return a + b * c .
+        fn calc(a: i64, b: i64, c: i64) -> i64: return a + b * c .
         
-        fn main() -> i64 => return calc(1, 2, 3) .
+        fn main() -> i64: return calc(1, 2, 3) .
     "#;
     
     let executable = run_to_executable(source, "test_multi_params.yuu")
@@ -59,11 +59,11 @@ fn test_function_with_multiple_params() {
 #[test]
 fn test_recursive_function() {
     let source = r#"
-        fn factorial(n: i64) -> i64 =>
-            if n <= 1 => return 1 .
-            else => return n * factorial(n - 1) . .
+        fn factorial(n: i64) -> i64:
+            if n <= 1: return 1 .
+            else: return n * factorial(n - 1) . .
         
-        fn main() -> i64 => return factorial(5) .
+        fn main() -> i64: return factorial(5) .
     "#;
     
     let executable = run_to_executable(source, "test_recursive.yuu")
@@ -79,12 +79,12 @@ fn test_recursive_function() {
 #[test]
 fn test_function_with_local_variables() {
     let source = r#"
-        fn compute(x: i64) -> i64 =>
+        fn compute(x: i64) -> i64:
             let doubled = x * 2;
             let plus_ten = doubled + 10;
             return plus_ten .
         
-        fn main() -> i64 => return compute(5) .
+        fn main() -> i64: return compute(5) .
     "#;
     
     let executable = run_to_executable(source, "test_local_vars.yuu")
@@ -100,10 +100,10 @@ fn test_function_with_local_variables() {
 #[test]
 fn test_nested_function_calls() {
     let source = r#"
-        fn add(a: i64, b: i64) -> i64 => return a + b .
-        fn multiply(a: i64, b: i64) -> i64 => return a * b .
+        fn add(a: i64, b: i64) -> i64: return a + b .
+        fn multiply(a: i64, b: i64) -> i64: return a * b .
         
-        fn main() -> i64 => return add(multiply(2, 3), multiply(4, 5)) .
+        fn main() -> i64: return add(multiply(2, 3), multiply(4, 5)) .
     "#;
     
     let executable = run_to_executable(source, "test_nested_calls.yuu")
@@ -119,9 +119,9 @@ fn test_nested_function_calls() {
 #[test]
 fn test_function_with_float_params() {
     let source = r#"
-        fn area_circle(radius: f32) -> f32 => return 3.14 * radius * radius .
+        fn area_circle(radius: f32) -> f32: return 3.14 * radius * radius .
         
-        fn main() -> i64 => 
+        fn main() -> i64: 
             let area = area_circle(2.0);
             return 0 .
     "#;
@@ -138,11 +138,11 @@ fn test_function_with_float_params() {
 #[test]
 fn test_function_with_mutable_params() {
     let source = r#"
-        fn modify_value(mut x: i64) -> i64 =>
+        fn modify_value(mut x: i64) -> i64:
             x = x + 10;
             return x .
         
-        fn main() -> i64 => return modify_value(5) .
+        fn main() -> i64: return modify_value(5) .
     "#;
     
     let executable = run_to_executable(source, "test_mut_params.yuu")
@@ -158,11 +158,11 @@ fn test_function_with_mutable_params() {
 #[test]
 fn test_fibonacci_recursive() {
     let source = r#"
-        fn fibonacci(n: i64) -> i64 =>
-            if n <= 1 => return n .
-            else => return fibonacci(n - 1) + fibonacci(n - 2) . .
+        fn fibonacci(n: i64) -> i64:
+            if n <= 1: return n .
+            else: return fibonacci(n - 1) + fibonacci(n - 2) . .
         
-        fn main() -> i64 => return fibonacci(8) .
+        fn main() -> i64: return fibonacci(8) .
     "#;
     
     let executable = run_to_executable(source, "test_fibonacci.yuu")

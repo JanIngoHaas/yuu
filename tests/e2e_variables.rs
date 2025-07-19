@@ -6,7 +6,7 @@ use common::*;
 
 #[test]
 fn test_let_binding_with_type_inference() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 42;
         return x .
     "#;
@@ -22,7 +22,7 @@ fn test_let_binding_with_type_inference() {
 
 #[test]
 fn test_let_binding_with_explicit_type() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x: i64 = 42;
         return x .
     "#;
@@ -38,7 +38,7 @@ fn test_let_binding_with_explicit_type() {
 
 #[test]
 fn test_mut_variable_assignment() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut x = 10;
         x = 20;
         return x .
@@ -55,7 +55,7 @@ fn test_mut_variable_assignment() {
 
 #[test]
 fn test_multiple_variable_declarations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 5;
         let b = 10;
         let c = a + b;
@@ -73,7 +73,7 @@ fn test_multiple_variable_declarations() {
 
 #[test]
 fn test_variable_shadowing() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 10;
         let x = x + 5;
         return x .
@@ -90,7 +90,7 @@ fn test_variable_shadowing() {
 
 #[test]
 fn test_mut_variable_operations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut counter = 0;
         counter = counter + 1;
         counter = counter * 2;
@@ -109,7 +109,7 @@ fn test_mut_variable_operations() {
 
 #[test]
 fn test_float_variables() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 3.14;
         let y = 2.5;
         let z = x + y;
@@ -127,7 +127,7 @@ fn test_float_variables() {
 
 #[test]
 fn test_mixed_type_variables() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let int_var = 42;
         let float_var = 3.14;
         return int_var .

@@ -96,6 +96,29 @@ impl AddId for ExprNode {
                 member_access_expr.lhs.add_id(generator);
                 // Field doesn't need an ID as it's just a name + span
             }
+            ExprNode::EnumInstantiation(enum_instantiation_expr) => {
+                enum_instantiation_expr.id = generator.next();
+                if let Some(data) = &mut enum_instantiation_expr.data {
+                    data.add_id(generator);
+                }
+            }
+            ExprNode::Match(match_expr) => {
+                match_expr.id = generator.next();
+                match_expr.scrutinee.add_id(generator);
+                for arm in &mut match_expr.arms {
+                    arm.id = generator.next();
+                    match &mut *arm.pattern {
+                        RefutablePatternNode::Enum(enum_pattern) => match enum_pattern {
+                            EnumPattern::Unit(unit_pattern) => unit_pattern.id = generator.next(),
+                            EnumPattern::WithData(data_pattern) => {
+                                data_pattern.id = generator.next();
+                                data_pattern.binding.add_id(generator);
+                            }
+                        },
+                    }
+                    arm.body.add_id(generator);
+                }
+            }
         }
     }
 }
@@ -144,6 +167,20 @@ impl AddId for BindingNode {
     }
 }
 
+impl AddId for RefutablePatternNode {
+    fn add_id(&mut self, generator: &mut IdGenerator) {
+        match self {
+            RefutablePatternNode::Enum(enum_pattern) => match enum_pattern {
+                EnumPattern::Unit(unit_pattern) => unit_pattern.id = generator.next(),
+                EnumPattern::WithData(data_pattern) => {
+                    data_pattern.id = generator.next();
+                    data_pattern.binding.add_id(generator);
+                }
+            },
+        }
+    }
+}
+
 impl AddId for Arg {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         self.ty.add_id(generator);
@@ -169,6 +206,12 @@ impl AddId for StructDeclStructural {
     }
 }
 
+impl AddId for EnumDeclStructural {
+    fn add_id(&mut self, generator: &mut IdGenerator) {
+        self.id = generator.next();
+    }
+}
+
 impl AddId for StructuralNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
@@ -189,6 +232,16 @@ impl AddId for StructuralNode {
                 struct_def_structural.id = generator.next();
                 for field in &mut struct_def_structural.fields {
                     field.add_id(generator);
+                }
+            }
+            StructuralNode::EnumDecl(enum_decl_structural) => {
+                enum_decl_structural.id = generator.next();
+            }
+            StructuralNode::EnumDef(enum_def_structural) => {
+                enum_def_structural.decl.add_id(generator);
+                enum_def_structural.id = generator.next();
+                for variant in &mut enum_def_structural.variants {
+                    variant.id = generator.next();
                 }
             }
         }
@@ -244,6 +297,8 @@ impl GetId for ExprNode {
             }
             ExprNode::While(while_expr) => while_expr.id,
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
+            ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
+            ExprNode::Match(match_expr) => match_expr.id,
         }
     }
 }
@@ -284,6 +339,8 @@ impl GetId for StructuralNode {
             StructuralNode::Error(x) => *x,
             StructuralNode::StructDecl(struct_decl_structural) => struct_decl_structural.id,
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.id,
+            StructuralNode::EnumDecl(enum_decl_structural) => enum_decl_structural.id,
+            StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.id,
         }
     }
 }

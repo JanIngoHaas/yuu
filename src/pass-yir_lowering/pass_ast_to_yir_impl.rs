@@ -274,6 +274,14 @@ impl<'a> TransientData<'a> {
 
                 Operand::Variable(field_ptr)
             }
+            ExprNode::EnumInstantiation(_) => {
+                // TODO: Implement enum instantiation in YIR lowering
+                todo!("Enum instantiation YIR lowering not yet implemented")
+            }
+            ExprNode::Match(_) => {
+                // TODO: Implement match expression in YIR lowering
+                todo!("Match expression YIR lowering not yet implemented")
+            }
         }
     }
 

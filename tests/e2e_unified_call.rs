@@ -12,10 +12,10 @@ fn test_method_style_call() {
             y: i64,
         }
         
-        fn distance(p: Point) -> i64 =>
+        fn distance(p: Point) -> i64:
             return p.x * p.x + p.y * p.y .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 3, y: 4 };
             return p.distance() .
     "#;
@@ -38,10 +38,10 @@ fn test_method_with_additional_params() {
             y: i64,
         }
         
-        fn translate(p: Point, dx: i64, dy: i64) -> Point =>
+        fn translate(p: Point, dx: i64, dy: i64) -> Point:
             return Point { x: p.x + dx, y: p.y + dy } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 5, y: 10 };
             let translated = p.translate(2, 3);
             return translated.x + translated.y .
@@ -64,13 +64,13 @@ fn test_chained_method_calls() {
             value: i64,
         }
         
-        fn double(n: Number) -> Number =>
+        fn double(n: Number) -> Number:
             return Number { value: n.value * 2 } .
         
-        fn add_ten(n: Number) -> Number =>
+        fn add_ten(n: Number) -> Number:
             return Number { value: n.value + 10 } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let n = Number { value: 5 };
             let result = n.double().add_ten();
             return result.value .
@@ -94,13 +94,13 @@ fn test_mixed_call_styles() {
             y: i64,
         }
         
-        fn scale(v: Vector, factor: i64) -> Vector =>
+        fn scale(v: Vector, factor: i64) -> Vector:
             return Vector { x: v.x * factor, y: v.y * factor } .
         
-        fn dot_product(v1: Vector, v2: Vector) -> i64 =>
+        fn dot_product(v1: Vector, v2: Vector) -> i64:
             return v1.x * v2.x + v1.y * v2.y .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let v1 = Vector { x: 2, y: 3 };
             let v2 = Vector { x: 4, y: 5 };
             let scaled_v1 = v1.scale(2);
@@ -124,16 +124,16 @@ fn test_long_method_chain() {
             value: i64,
         }
         
-        fn add(c: Calculator, n: i64) -> Calculator =>
+        fn add(c: Calculator, n: i64) -> Calculator:
             return Calculator { value: c.value + n } .
         
-        fn multiply(c: Calculator, n: i64) -> Calculator =>
+        fn multiply(c: Calculator, n: i64) -> Calculator:
             return Calculator { value: c.value * n } .
         
-        fn subtract(c: Calculator, n: i64) -> Calculator =>
+        fn subtract(c: Calculator, n: i64) -> Calculator:
             return Calculator { value: c.value - n } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let calc = Calculator { value: 10 };
             let result = calc.add(5).multiply(2).subtract(3);
             return result.value .
@@ -157,12 +157,12 @@ fn test_method_call_with_complex_expression() {
             y: i64,
         }
         
-        fn distance_to(p1: Point, p2: Point) -> i64 =>
+        fn distance_to(p1: Point, p2: Point) -> i64:
             let dx = p1.x - p2.x;
             let dy = p1.y - p2.y;
             return dx * dx + dy * dy .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p1 = Point { x: 0, y: 0 };
             let p2 = Point { x: 3, y: 4 };
             return p1.distance_to(p2) .
@@ -185,13 +185,13 @@ fn test_nested_method_calls() {
             scale: i64,
         }
         
-        fn apply_to_point(t: Transform, x: i64, y: i64) -> i64 =>
+        fn apply_to_point(t: Transform, x: i64, y: i64) -> i64:
             return (x + y) * t.scale .
         
-        fn create_transform(scale: i64) -> Transform =>
+        fn create_transform(scale: i64) -> Transform:
             return Transform { scale: scale } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let result = create_transform(3).apply_to_point(4, 5);
             return result .
     "#;
@@ -213,10 +213,10 @@ fn test_method_call_in_expression() {
             value: i64,
         }
         
-        fn get_value(n: Number) -> i64 =>
+        fn get_value(n: Number) -> i64:
             return n.value .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let n1 = Number { value: 10 };
             let n2 = Number { value: 20 };
             let result = n1.get_value() + n2.get_value();

@@ -7,12 +7,12 @@ use common::*;
 #[test]
 fn test_fibonacci_recursive() {
     let source = r#"
-        fn fibonacci(n: i64) -> i64 =>
-            if n <= 1 => return n .
-            else => return fibonacci(n - 1) + fibonacci(n - 2) .
+        fn fibonacci(n: i64) -> i64:
+            if n <= 1: return n .
+            else: return fibonacci(n - 1) + fibonacci(n - 2) .
         .
 
-        fn main() -> i64 => return fibonacci(10) .
+        fn main() -> i64: return fibonacci(10) .
     "#;
     
     let executable = run_to_executable(source, "test_fibonacci.yuu")
@@ -28,11 +28,11 @@ fn test_fibonacci_recursive() {
 #[test]
 fn test_factorial_recursive() {
     let source = r#"
-        fn factorial(n: i64) -> i64 =>
-            if n <= 1 => return 1 .
-            else => return n * factorial(n - 1) . .
+        fn factorial(n: i64) -> i64:
+            if n <= 1: return 1 .
+            else: return n * factorial(n - 1) . .
         
-        fn main() -> i64 => return factorial(6) .
+        fn main() -> i64: return factorial(6) .
     "#;
     
     let executable = run_to_executable(source, "test_factorial.yuu")
@@ -48,15 +48,15 @@ fn test_factorial_recursive() {
 #[test]
 fn test_factorial_iterative() {
     let source = r#"
-        fn factorial_iter(n: i64) -> i64 =>
+        fn factorial_iter(n: i64) -> i64:
             let mut result = 1;
             let mut i = 1;
-            while i <= n =>
+            while i <= n:
                 result = result * i;
                 i = i + 1 .
             return result .
         
-        fn main() -> i64 => return factorial_iter(5) .
+        fn main() -> i64: return factorial_iter(5) .
     "#;
     
     let executable = run_to_executable(source, "test_factorial_iter.yuu")
@@ -72,12 +72,12 @@ fn test_factorial_iterative() {
 #[test]
 fn test_gcd_algorithm() {
     let source = r#"
-        fn gcd(a: i64, b: i64) -> i64 =>
-            if b == 0 => return a .
-            else => return gcd(b, a % b) .
+        fn gcd(a: i64, b: i64) -> i64:
+            if b == 0: return a .
+            else: return gcd(b, a % b) .
         .
         
-        fn main() -> i64 => return gcd(48, 18) .
+        fn main() -> i64: return gcd(48, 18) .
     "#;
     
     let executable = run_to_executable(source, "test_gcd.yuu")
@@ -93,13 +93,13 @@ fn test_gcd_algorithm() {
 #[test]
 fn test_power_function() {
     let source = r#"
-        fn power(base: i64, exp: i64) -> i64 =>
-            if exp == 0 => return 1 .
-            else if exp == 1 => return base .
-            else => return base * power(base, exp - 1) .
+        fn power(base: i64, exp: i64) -> i64:
+            if exp == 0: return 1 .
+            else if exp == 1: return base .
+            else: return base * power(base, exp - 1) .
         .
         
-        fn main() -> i64 => return power(2, 8) .
+        fn main() -> i64: return power(2, 8) .
     "#;
     
     let executable = run_to_executable(source, "test_power.yuu")
@@ -115,15 +115,15 @@ fn test_power_function() {
 #[test]
 fn test_sum_of_squares() {
     let source = r#"
-        fn sum_of_squares(n: i64) -> i64 =>
+        fn sum_of_squares(n: i64) -> i64:
             let mut sum = 0;
             let mut i = 1;
-            while i <= n =>
+            while i <= n:
                 sum = sum + i * i;
                 i = i + 1 .
             return sum .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             return sum_of_squares(5) .
     "#;
     
@@ -140,18 +140,18 @@ fn test_sum_of_squares() {
 #[test]
 fn test_is_prime() {
     let source = r#"
-        fn is_prime(n: i64) -> i64 =>
-            if n <= 1 => return 0 .
-            else if n == 2 => return 1 .
-            else if n % 2 == 0 => return 0 .
-            else =>
+        fn is_prime(n: i64) -> i64:
+            if n <= 1: return 0 .
+            else if n == 2: return 1 .
+            else if n % 2 == 0: return 0 .
+            else:
                 let mut i = 3;
-                while i * i <= n =>
-                    if n % i == 0 => return 0 .
+                while i * i <= n:
+                    if n % i == 0: return 0 .
                     i = i + 2 .
                 return 1 . .
         
-        fn main() -> i64 => return is_prime(17) .
+        fn main() -> i64: return is_prime(17) .
     "#;
     
     let executable = run_to_executable(source, "test_is_prime.yuu")
@@ -167,28 +167,28 @@ fn test_is_prime() {
 #[test]
 fn test_nth_prime() {
     let source = r#"
-        fn is_prime(n: i64) -> i64 =>
-            if n <= 1 => return 0;
-            else if n == 2 => return 1;
-            else if n % 2 == 0 => return 0;
-            else =>
+        fn is_prime(n: i64) -> i64:
+            if n <= 1: return 0;
+            else if n == 2: return 1;
+            else if n % 2 == 0: return 0;
+            else:
                 let mut i = 3;
-                while i * i <= n =>
-                    if n % i == 0 => return 0;
+                while i * i <= n:
+                    if n % i == 0: return 0;
                     i = i + 2;
                 return 1;
         
-        fn nth_prime(n: i64) -> i64 =>
+        fn nth_prime(n: i64) -> i64:
             let mut count = 0;
             let mut candidate = 2;
-            while count < n =>
-                if is_prime(candidate) == 1 =>
+            while count < n:
+                if is_prime(candidate) == 1:
                     count = count + 1;
-                    if count == n => return candidate;
+                    if count == n: return candidate;
                 candidate = candidate + 1;
             return 0;
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             return nth_prime(5);
     "#;
     
@@ -205,18 +205,16 @@ fn test_nth_prime() {
 #[test]
 fn test_collatz_sequence() {
     let source = r#"
-        fn collatz_length(n: i64) -> i64 =>
+        fn collatz_length(n: i64) -> i64:
             let mut count = 0;
             let mut current = n;
-            while current != 1 =>
-                if current % 2 == 0 =>
-                    current = current / 2;
-                else =>
-                    current = current * 3 + 1;
+            while current != 1:
+                if current % 2 == 0: current = current / 2 .
+                else: current = current * 3 + 1 .
                 count = count + 1;
             return count;
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             return collatz_length(7);
     "#;
     
@@ -234,17 +232,17 @@ fn test_collatz_sequence() {
 #[test]
 fn test_digital_root() {
     let source = r#"
-        fn digital_root(n: i64) -> i64 =>
-            while n >= 10 =>
+        fn digital_root(n: i64) -> i64:
+            while n >= 10:
                 let mut sum = 0;
                 let mut temp = n;
-                while temp > 0 =>
+                while temp > 0:
                     sum = sum + temp % 10;
                     temp = temp / 10 .
                 n = sum .
             return n .
         
-        fn main() -> i64 => return digital_root(9875) .
+        fn main() -> i64: return digital_root(9875) .
     "#;
     
     let executable = run_to_executable(source, "test_digital_root.yuu")

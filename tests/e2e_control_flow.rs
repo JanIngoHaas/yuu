@@ -6,9 +6,9 @@ use common::*;
 
 #[test]
 fn test_simple_if_expression() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 10;
-        let result = if x > 5 => 1 else => 0;
+        let result = if x > 5: 1 else: 0;
         return result .
     "#;
     
@@ -23,11 +23,11 @@ fn test_simple_if_expression() {
 
 #[test]
 fn test_if_else_if_chain() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 7;
-        let result = if x < 5 => 1 
-                     else if x < 10 => 2
-                     else => 3;
+        let result = if x < 5: 1 
+                     else if x < 10: 2
+                     else: 3;
         return result .
     "#;
     
@@ -42,12 +42,12 @@ fn test_if_else_if_chain() {
 
 #[test]
 fn test_nested_if_expressions() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 8;
         let y = 3;
-        let result = if x > 5 => 
-                        if y > 2 => 10 else => 5
-                     else => 0;
+        let result = if x > 5: 
+                        if y > 2: 10 else: 5
+                     else: 0;
         return result .
     "#;
     
@@ -62,10 +62,10 @@ fn test_nested_if_expressions() {
 
 #[test]
 fn test_while_loop() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut counter = 0;
         let mut sum = 0;
-        while counter < 5 =>
+        while counter < 5:
             sum = sum + counter;
             counter = counter + 1 .
         return sum .
@@ -83,10 +83,10 @@ fn test_while_loop() {
 
 #[test]
 fn test_while_with_break() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut counter = 0;
-        while counter < 10 =>
-            if counter == 5 => break counter .
+        while counter < 10:
+            if counter == 5: break counter .
             counter = counter + 1 .
         return counter .
     "#;
@@ -102,12 +102,12 @@ fn test_while_with_break() {
 
 #[test]
 fn test_nested_while_loops() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut i = 0;
         let mut sum = 0;
-        while i < 3 =>
+        while i < 3:
             let mut j = 0;
-            while j < 3 =>
+            while j < 3:
                 sum = sum + 1;
                 j = j + 1 .
             i = i + 1 .
@@ -126,10 +126,10 @@ fn test_nested_while_loops() {
 
 #[test]
 fn test_if_with_complex_condition() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 10;
         let y = 5;
-        let result = if x > y && x < 15 => 1 else => 0;
+        let result = if x > y && x < 15: 1 else: 0;
         return result .
     "#;
     
@@ -144,10 +144,10 @@ fn test_if_with_complex_condition() {
 
 #[test]
 fn test_while_with_complex_condition() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut x = 0;
         let mut y = 10;
-        while x < 5 && y > 5 =>
+        while x < 5 && y > 5:
             x = x + 1;
             y = y - 1 .
         return x + y .
@@ -165,9 +165,9 @@ fn test_while_with_complex_condition() {
 
 #[test]
 fn test_return_in_if() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 10;
-        if x > 5 => return 42 .
+        if x > 5: return 42 .
         return 0 .
     "#;
     

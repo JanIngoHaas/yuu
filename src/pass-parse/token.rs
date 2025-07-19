@@ -43,10 +43,19 @@ pub enum TokenKind {
     BlockTerminator,
 
     #[token("break")]
-    Break,
+    BreakKw,
+
+    #[token("case")]
+    CaseKw,
 
     #[token("while")]
     WhileKw,
+
+    #[token("enum")]
+    EnumKw,
+
+    #[token("match")]
+    MatchKw,
 
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
@@ -178,7 +187,7 @@ impl TokenKind {
     pub fn from_keyword(keyword: &str) -> Option<TokenKind> {
         match keyword {
             "return" => Some(TokenKind::Return),
-            "break" => Some(TokenKind::Break),
+            "break" => Some(TokenKind::BreakKw),
             _ => None,
         }
     }
@@ -187,7 +196,7 @@ impl TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenKind::Break => "'break'".fmt(f),
+            TokenKind::BreakKw => "'break'".fmt(f),
             TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
             TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
@@ -229,9 +238,12 @@ impl Display for TokenKind {
             TokenKind::Hash => "'#'".fmt(f),
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
+            TokenKind::EnumKw => "'enum'".fmt(f),
+            TokenKind::MatchKw => "'match'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
             TokenKind::At => "'@'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
+            TokenKind::CaseKw => "'case'".fmt(f),
         }
     }
 }

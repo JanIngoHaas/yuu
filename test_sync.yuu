@@ -1,0 +1,19 @@
+fn broken_function() =>
+    let x: i64 = 
+    let y: i64 = 42;
+    // Missing assignment and semicolon above
+.
+
+fn good_function() =>
+    let z: i64 = 1;
+.
+
+struct broken_struct =>
+    field1: i64,
+    field2 // Missing type annotation
+.
+
+struct good_struct =>
+    field3: i64,
+    field4: f32
+.

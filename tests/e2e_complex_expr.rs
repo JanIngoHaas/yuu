@@ -6,7 +6,7 @@ use common::*;
 
 #[test]
 fn test_complex_arithmetic_expression() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let result = 2 + 3 * 4 - 5 / 2 + 1;
         return result .
     "#;
@@ -23,7 +23,7 @@ fn test_complex_arithmetic_expression() {
 
 #[test]
 fn test_nested_parentheses() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let result = ((2 + 3) * (4 - 1)) / ((5 + 1) / 2);
         return result .
     "#;
@@ -40,11 +40,11 @@ fn test_nested_parentheses() {
 
 #[test]
 fn test_comparison_chain() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5;
         let y = 10;
         let z = 15;
-        let result = if x < y && y < z => 1 else => 0;
+        let result = if x < y && y < z: 1 else: 0;
         return result .
     "#;
     
@@ -59,7 +59,7 @@ fn test_comparison_chain() {
 
 #[test]
 fn test_mixed_unary_binary_operators() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5;
         let result = -x + 3 * (-2 + 4);
         return result .
@@ -78,10 +78,10 @@ fn test_mixed_unary_binary_operators() {
 #[test]
 fn test_function_call_in_expression() {
     let source = r#"
-        fn double(x: i64) -> i64 => return x * 2 .
-        fn add(a: i64, b: i64) -> i64 => return a + b .
+        fn double(x: i64) -> i64: return x * 2 .
+        fn add(a: i64, b: i64) -> i64: return a + b .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let result = double(5) + add(3, 4) * 2;
             return result .
     "#;
@@ -98,7 +98,7 @@ fn test_function_call_in_expression() {
 
 #[test]
 fn test_deep_expression_nesting() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 2;
         let b = 3;
         let c = 4;
@@ -121,11 +121,11 @@ fn test_deep_expression_nesting() {
 
 #[test]
 fn test_complex_boolean_expression() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 5;
         let b = 10;
         let c = 15;
-        let result = if (a < b) && (b < c) && (a + b > c - 5) => 1 else => 0;
+        let result = if (a < b) && (b < c) && (a + b > c - 5): 1 else: 0;
         return result .
     "#;
     
@@ -142,7 +142,7 @@ fn test_complex_boolean_expression() {
 
 #[test]
 fn test_assignment_in_expression() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut x = 5;
         let result = (x = x + 3) + x;
         return result .
@@ -160,9 +160,9 @@ fn test_assignment_in_expression() {
 
 #[test]
 fn test_precedence_with_all_operators() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let result = 1 + 2 * 3 == 7 && 4 > 2;
-        return if result => 1 else => 0 .
+        return if result: 1 else: 0 .
     "#;
     
     let executable = run_to_executable(source, "test_all_operators.yuu")
@@ -186,7 +186,7 @@ fn test_expression_with_struct_access() {
             y: i64,
         }
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p1 = Point { x: 3, y: 4 };
             let p2 = Point { x: 1, y: 2 };
             let result = (p1.x + p2.x) * (p1.y - p2.y);

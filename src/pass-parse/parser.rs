@@ -615,7 +615,7 @@ impl Parser {
             }
         };
 
-        let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+        let _ = self.lexer.expect_colon(&mut self.errors)?;
         let ty = self.parse_type()?;
         let span = start_span.start..ty.span().end;
         Ok(Arg {
@@ -631,7 +631,7 @@ impl Parser {
         let mut fields = Vec::new();
         loop {
             let la = self.lexer.peek();
-            if la.kind == TokenKind::RBrace {
+            if la.kind == TokenKind::BlockTerminator {
                 return Ok(fields);
             }
             let arg = self.parse_func_arg()?;
@@ -639,14 +639,14 @@ impl Parser {
             let la = self.lexer.peek();
             if la.kind == TokenKind::Comma {
                 let _ = self.lexer.next_token();
-            } else if la.kind != TokenKind::RBrace {
+            } else if la.kind != TokenKind::BlockTerminator {
                 self.errors.push(YuuError::unexpected_token(
                     la.span.clone(),
-                    "a comma ',' or a closing brace '}'".to_string(),
+                    "a comma ',' or a block terminator '.'".to_string(),
                     la.kind.clone(),
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
-                ).with_help("Struct fields should be separated by commas, with finalized by a closing brace".to_string()));
+                ).with_help("Struct fields should be separated by commas, with finalized by a block terminator '.'".to_string()));
                 return Err(self.lexer.synchronize());
             }
         }
@@ -787,7 +787,7 @@ impl Parser {
                     match field_ident.kind {
                         TokenKind::Ident(field_name) => {
                             // Expect colon between field name and value
-                            let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+                            let _ = self.lexer.expect_colon(&mut self.errors)?;
 
                             // Parse the field value expression
                             let (expr_span, expr) = self.parse_expr()?;
@@ -865,7 +865,7 @@ impl Parser {
     }
 
     pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {
-        let fat_arrow = self.lexer.expect(&[TokenKind::FatArrow], &mut self.errors)?;
+        let colon = self.lexer.expect_colon(&mut self.errors)?;
         let mut stmts = Vec::new();
 
         loop {
@@ -897,9 +897,9 @@ impl Parser {
 
                 let span = if let Some(label_span) = label_end_span {
                     // If there's a label, extend span to include it
-                    fat_arrow.span.start..label_span.end
+                    colon.span.start..label_span.end
                 } else {
-                    fat_arrow.span.start..dot.span.end
+                    colon.span.start..dot.span.end
                 };
                 
                 return Ok(self.make_block_expr(stmts, span, label));
@@ -914,6 +914,12 @@ impl Parser {
                     self.lexer.eat();
                     StmtNode::Error(0)
                 }
+                Err(CatchIn::BlockEnd) => {
+                    // Hit a block terminator while parsing statements
+                    // This means we've recovered to a block boundary, continue to the next iteration
+                    // which will detect the BlockTerminator and handle it properly
+                    continue;
+                }
                 Err(x) => return Err(x),
             };
 
@@ -922,8 +928,129 @@ impl Parser {
         }
     }
 
+    pub fn parse_refutable_pattern(&mut self) -> ParseResult<(Span, RefutablePatternNode)> {
+        let peek = self.lexer.peek();
+
+        match peek.kind {
+            TokenKind::Ident(name_discriminator) => {
+                let token = self.lexer.next_token(); // consume identifier
+                let span = token.span.clone();
+                let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+                let discriminee = self.lexer.next_token();
+                let name_discriminee = match discriminee.kind {
+                    TokenKind::Ident(name_discriminee) => name_discriminee,
+                    _ => {
+                        self.errors.push(
+                            YuuError::unexpected_token(
+                                discriminee.span.clone(),
+                                "an identifier".to_string(),
+                                discriminee.kind,
+                                self.lexer.code_info.source.clone(),
+                                self.lexer.code_info.file_name.clone(),
+                            )
+                            .with_help("Expected a variant name identifier after ':'".to_string())
+                        );
+                        return Err(self.lexer.synchronize());
+                    }
+                };
+
+                let peeked = self.lexer.peek();
+                match peeked.kind {
+                    TokenKind::LParen => {
+                        // We have data associated with the binding
+                        let _ = self.lexer.next_token();
+                        let binding = self.parse_binding()?;
+                        let last_tkn = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
+                        let span = span.start..last_tkn.span.end;
+                        let enum_data = EnumDataPattern {
+                            enum_name: name_discriminator,
+                            variant_name: name_discriminee,
+                            binding: Box::new(binding),
+                            span: span.clone(),
+                            id: 0
+                        };
+                        let node = RefutablePatternNode::Enum(EnumPattern::WithData(enum_data));
+                        Ok((span, node))
+                    }
+                    _ => {
+                        // We only have a unit variant
+                        let final_span = span.start..discriminee.span.end;
+                        let enum_unit = EnumUnitPattern {
+                            enum_name: name_discriminator,
+                            variant_name: name_discriminee,
+                            span: final_span.clone(),
+                            id: 0
+                        };
+                        let node = RefutablePatternNode::Enum(EnumPattern::Unit(enum_unit));
+                        Ok((final_span, node))
+                    }
+                }
+            }
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        peek.span.clone(),
+                        "a pattern".to_string(),
+                        peek.kind.clone(),
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected a refutable pattern (currently only enum patterns are supported)".to_string())
+                );
+                Err(self.lexer.synchronize())
+            }
+        }
+    }
+
+
+    pub fn parse_match_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        let match_start = self.lexer.expect(&[TokenKind::MatchKw], &mut self.errors)?;
+        let scrutinee = self.parse_expr()?;
+        let _ = self.lexer.expect_colon(&mut self.errors)?;
+
+        // Here, we loop over the body, picking up case for case.
+        let mut arms = Vec::new();
+        loop {
+            // Check if we should stop parsing cases
+            let peek = self.lexer.peek();
+            if peek.kind != TokenKind::CaseKw {
+                break;
+            }
+            
+            let _ = self.lexer.next_token(); // consume "case"
+            // Pattern parsing
+            let pattern = self.parse_refutable_pattern()?;
+            let _ = self.lexer.expect_colon(&mut self.errors)?;
+
+            let expr = self.parse_expr()?;
+            let match_arm = MatchArm {
+                body: Box::new(expr.1),
+                id: 0,
+                pattern: Box::new(pattern.1),
+                span: pattern.0.start..expr.0.end,
+            };
+
+            arms.push(match_arm);
+        }
+
+        let end_span = if let Some(last_arm) = arms.last() {
+            last_arm.span.end
+        } else {
+            scrutinee.0.end
+        };
+
+        let match_expr = MatchExpr {
+            id: 0,
+            span: (match_start.span.start..end_span).into(),
+            scrutinee: Box::new(scrutinee.1),
+            arms,
+        };
+
+        Ok(((match_start.span.start..end_span).into(), ExprNode::Match(match_expr)))
+    }
+
     pub fn parse_break_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let break_token = self.lexer.expect(&[TokenKind::Break], &mut self.errors)?;
+        let break_token = self.lexer.expect(&[TokenKind::BreakKw], &mut self.errors)?;
 
         // Check for optional label
         let target = if self.lexer.peek().kind == TokenKind::At {
@@ -1030,13 +1157,13 @@ impl Parser {
     pub fn parse_struct_def(&mut self) -> ParseResult<(Span, StructDefStructural)> {
         let (span, decl) = self.parse_struct_decl()?;
 
-        let _ = self.lexer.expect(&[TokenKind::LBrace], &mut self.errors)?;
+        let _ = self.lexer.expect_colon(&mut self.errors)?;
 
         let fields = self.parse_struct_fields()?;
 
-        let l = self.lexer.expect(&[TokenKind::RBrace], &mut self.errors)?;
+        let terminator = self.lexer.expect(&[TokenKind::BlockTerminator], &mut self.errors)?;
 
-        let span = span.start..l.span.end;
+        let span = span.start..terminator.span.end;
         let out = StructDefStructural {
             id: 0,
             span: span.clone(),
@@ -1095,7 +1222,7 @@ impl Parser {
         match peek.kind {
             TokenKind::LetKw => self.parse_let_stmt(),
             //TokenKind::OutKw => self.parse_out_stmt(),
-            TokenKind::Break => self.parse_break_stmt(),
+            TokenKind::BreakKw => self.parse_break_stmt(),
             TokenKind::Return => self.parse_return_stmt(),
             _ => self.parse_atomic_stmt(),
         }
@@ -1211,8 +1338,18 @@ impl Parser {
                     structural_nodes.push(Box::new(StructuralNode::Error(0)));
                     continue;
                 }
+                Err(CatchIn::BlockEnd) => {
+                    // Recover from malformed structural element by syncing to block end
+                    // The synchronizer positioned us AT the BlockTerminator but didn't consume it
+                    // We need to consume it to avoid infinite loop, then continue parsing
+                    self.lexer.eat(); // Consume the BlockTerminator
+                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    continue;
+                }
                 Err(_) => {
-                    self.lexer.sync_to(&[TokenKind::FnKw]);
+                    // Unknown error during structural parsing - emergency recovery - just skip until we find a token that has a unique semantic definition
+                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    self.lexer.unstuck_parser();
                     continue;
                 }
             }

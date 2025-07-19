@@ -179,6 +179,64 @@ pub struct MemberAccessExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumUnitPattern {
+    pub enum_name: Ustr,
+    pub variant_name: Ustr,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumDataPattern {
+    pub enum_name: Ustr,
+    pub variant_name: Ustr,
+    pub binding: Box<BindingNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+// Enum-specific pattern for variant matching
+#[derive(Serialize, Deserialize, Clone)]
+pub enum EnumPattern {
+    Unit(EnumUnitPattern),                    // enum name, variant name
+    WithData(EnumDataPattern), // Blue(pattern) - enum name, variant name, inner pattern
+}
+
+/// Refutable patterns...
+#[derive(Serialize, Deserialize, Clone)]
+pub enum RefutablePatternNode {
+    Enum(EnumPattern),
+}
+
+/// Match arm in a match expression
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MatchArm {
+    pub pattern: Box<RefutablePatternNode>,
+    pub body: Box<ExprNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+/// Match expression
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MatchExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub scrutinee: Box<ExprNode>, // The expression being matched
+    pub arms: Vec<MatchArm>,
+}
+
+/// Enum variant instantiation (Color::Red or Color::Blue(value))
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumInstantiationExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub enum_name: Ustr,
+    pub variant_name: Ustr,
+    pub data: Option<Box<ExprNode>>, // None for unit variants
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
 pub enum ExprNode {
@@ -192,7 +250,9 @@ pub enum ExprNode {
     While(WhileExpr),
     Assignment(AssignmentExpr),
     StructInstantiation(StructInstantiationExpr),
+    EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
+    Match(MatchExpr),
     //Error,
 }
 
@@ -338,11 +398,36 @@ pub struct StructDefStructural {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct EnumVariant {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ustr,
+    pub data_type: Option<TypeNode>, // None for unit variants, Some(T) for data variants
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumDeclStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ustr,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumDefStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub decl: EnumDeclStructural,
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StructuralNode {
     FuncDecl(FuncDeclStructural),
     FuncDef(FuncDefStructural),
     StructDecl(StructDeclStructural),
     StructDef(StructDefStructural),
+    EnumDecl(EnumDeclStructural),
+    EnumDef(EnumDefStructural),
     Error(NodeId),
 }
 
@@ -416,8 +501,12 @@ impl Spanned for ExprNode {
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.span.clone()
             }
+            ExprNode::EnumInstantiation(enum_instantiation_expr) => {
+                enum_instantiation_expr.span.clone()
+            }
             ExprNode::While(while_expr) => while_expr.span.clone(),
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
+            ExprNode::Match(match_expr) => match_expr.span.clone(),
         }
     }
 }
@@ -453,6 +542,10 @@ impl Spanned for StructuralNode {
                 struct_decl_structural.span.clone()
             }
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.span.clone(),
+            StructuralNode::EnumDecl(enum_decl_structural) => {
+                enum_decl_structural.span.clone()
+            }
+            StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.span.clone(),
         }
     }
 }

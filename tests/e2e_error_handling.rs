@@ -6,7 +6,7 @@ use common::*;
 
 #[test]
 fn test_syntax_error_recovery() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5
         let y = 10;
         return x + y .
@@ -20,10 +20,10 @@ fn test_syntax_error_recovery() {
 #[test]
 fn test_type_error_detection() {
     let source = r#"
-        fn add_numbers(a: i64, b: i64) -> i64 =>
+        fn add_numbers(a: i64, b: i64) -> i64:
             return a + b .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let result = add_numbers(5, 3.14);
             return result .
     "#; // Passing float to function expecting int
@@ -35,7 +35,7 @@ fn test_type_error_detection() {
 
 #[test]
 fn test_undefined_variable_error() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5;
         return x + undefined_var .
     "#; // undefined_var is not defined
@@ -47,7 +47,7 @@ fn test_undefined_variable_error() {
 
 #[test]
 fn test_undefined_function_error() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         return undefined_function(5) .
     "#; // undefined_function is not defined
     
@@ -59,10 +59,10 @@ fn test_undefined_function_error() {
 #[test]
 fn test_wrong_number_of_arguments() {
     let source = r#"
-        fn add(a: i64, b: i64) -> i64 =>
+        fn add(a: i64, b: i64) -> i64:
             return a + b .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             return add(5) .
     "#; // add expects 2 arguments, got 1
     
@@ -73,7 +73,7 @@ fn test_wrong_number_of_arguments() {
 
 #[test]
 fn test_immutable_assignment_error() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5;
         x = 10;
         return x .
@@ -92,7 +92,7 @@ fn test_struct_field_error() {
             y: i64,
         }
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 5, y: 10 };
             return p.z .
     "#; // Point doesn't have field z
@@ -104,7 +104,7 @@ fn test_struct_field_error() {
 
 #[test]
 fn test_return_type_mismatch() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         return 3.14 .
     "#; // Function returns i64 but trying to return f64
     
@@ -116,7 +116,7 @@ fn test_return_type_mismatch() {
 #[test]
 fn test_successful_compilation_after_error_fix() {
     // First try with error
-    let source_with_error = r#"fn main() -> i64 =>
+    let source_with_error = r#"fn main() -> i64:
         let x = 5
         return x .
     "#; // Missing semicolon
@@ -125,7 +125,7 @@ fn test_successful_compilation_after_error_fix() {
     assert!(result.is_err(), "Expected compilation to fail");
     
     // Now try with fixed version
-    let source_fixed = r#"fn main() -> i64 =>
+    let source_fixed = r#"fn main() -> i64:
         let x = 5;
         return x .
     "#;
@@ -141,7 +141,7 @@ fn test_successful_compilation_after_error_fix() {
 
 #[test]
 fn test_multiple_errors_in_source() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5
         let y = undefined_var;
         x = 10;
@@ -156,11 +156,11 @@ fn test_multiple_errors_in_source() {
 #[test]
 fn test_recursive_function_type_checking() {
     let source = r#"
-        fn factorial(n: i64) -> i64 =>
-            if n <= 1 => return 1 .
-            else => return n * factorial(n - 1) . .
+        fn factorial(n: i64) -> i64:
+            if n <= 1: return 1 .
+            else: return n * factorial(n - 1) . .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             return factorial(5) .
     "#; // This should work - recursive function with correct types
     

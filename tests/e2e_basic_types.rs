@@ -6,7 +6,7 @@ use common::*;
 
 #[test]
 fn test_integer_literals() {
-    let source = r#"fn main() -> i64 => return 42 ."#;
+    let source = r#"fn main() -> i64: return 42 ."#;
     
     let executable = run_to_executable(source, "test_integer.yuu")
         .expect("Failed to compile integer literal test");
@@ -20,7 +20,7 @@ fn test_integer_literals() {
 
 #[test]
 fn test_float_literals() {
-    let source = r#"fn main() -> i64 => 
+    let source = r#"fn main() -> i64: 
         let x = 3.14;
         return 0 .
     "#;
@@ -36,7 +36,7 @@ fn test_float_literals() {
 
 #[test] 
 fn test_arithmetic_operations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 10;
         let b = 5;
         let sum = a + b;
@@ -58,12 +58,12 @@ fn test_arithmetic_operations() {
 
 #[test]
 fn test_comparison_operations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 10;
         let b = 5;
         let result = 
-            if a > b => break 1 . <--- need the dot here
-            else => break 0 .
+            if a > b: break 1 . <--- need the dot here
+            else: break 0 .
                             ^---- keep the dot here
         ;
         return result .
@@ -80,7 +80,7 @@ fn test_comparison_operations() {
 
 #[test]
 fn test_unary_operations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 5;
         let neg_x = -x;
         let pos_x = +x;
@@ -99,7 +99,7 @@ fn test_unary_operations() {
 
 #[test]
 fn test_mixed_type_expressions() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let int_val = 10;
         let float_val = 3.5;
         return int_val .
@@ -116,7 +116,7 @@ fn test_mixed_type_expressions() {
 
 #[test]
 fn test_operator_precedence() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let result = 2 + 3 * 4;
         return result .
     "#;
@@ -133,7 +133,7 @@ fn test_operator_precedence() {
 
 #[test]
 fn test_parenthesized_expressions() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let result = (2 + 3) * 4;
         return result .
     "#;

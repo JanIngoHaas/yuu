@@ -846,5 +846,13 @@ pub fn infer_expr(
                 }
             }
         }
+        ExprNode::EnumInstantiation(_) => {
+            // TODO: Implement enum instantiation type inference
+            todo!("Enum instantiation type inference not yet implemented")
+        }
+        ExprNode::Match(_) => {
+            // TODO: Implement match expression type inference
+            todo!("Match expression type inference not yet implemented")
+        }
     }
 }

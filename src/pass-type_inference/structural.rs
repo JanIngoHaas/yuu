@@ -85,5 +85,11 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
         // Already did that in collect_structural
         StructuralNode::StructDecl(_struct_decl) => {}
         StructuralNode::StructDef(_struct_def) => {}
+        StructuralNode::EnumDecl(_) => {
+            // TODO: Implement enum declaration type checking
+        }
+        StructuralNode::EnumDef(_) => {
+            // TODO: Implement enum definition type checking
+        }
     }
 }

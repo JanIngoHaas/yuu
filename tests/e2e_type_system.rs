@@ -6,7 +6,7 @@ use common::*;
 
 #[test]
 fn test_type_inference_basic() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x = 42;  // should infer i64
         let y = 3.14; // should infer f64
         return x .
@@ -23,7 +23,7 @@ fn test_type_inference_basic() {
 
 #[test]
 fn test_explicit_type_annotations() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let x: i64 = 42;
         let y: f32 = 3.14;
         return x .
@@ -41,13 +41,13 @@ fn test_explicit_type_annotations() {
 #[test]
 fn test_function_parameter_types() {
     let source = r#"
-        fn add_numbers(a: i64, b: i64) -> i64 =>
+        fn add_numbers(a: i64, b: i64) -> i64:
             return a + b .
         
-        fn add_floats(a: f32, b: f32) -> f32 =>
+        fn add_floats(a: f32, b: f32) -> f32:
             return a + b .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let int_result = add_numbers(5, 3);
             let float_result = add_floats(2.5, 1.5);
             return int_result .
@@ -65,13 +65,13 @@ fn test_function_parameter_types() {
 #[test]
 fn test_return_type_matching() {
     let source = r#"
-        fn get_integer() -> i64 =>
+        fn get_integer() -> i64:
             return 42 .
         
-        fn get_float() -> f32 =>
+        fn get_float() -> f32:
             return 3.14 .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let int_val = get_integer();
             let float_val = get_float();
             return int_val .
@@ -94,10 +94,10 @@ fn test_struct_type_checking() {
             y: i64,
         }
         
-        fn distance_squared(p: Point) -> i64 =>
+        fn distance_squared(p: Point) -> i64:
             return p.x * p.x + p.y * p.y .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 3, y: 4 };
             return distance_squared(p) .
     "#;
@@ -113,7 +113,7 @@ fn test_struct_type_checking() {
 
 #[test]
 fn test_mixed_arithmetic_types() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a: i64 = 10;
         let b: i64 = 3;
         let result = a + b * 2;
@@ -133,10 +133,10 @@ fn test_mixed_arithmetic_types() {
 #[test]
 fn test_type_inference_from_function_calls() {
     let source = r#"
-        fn return_int() -> i64 => return 42 .
-        fn return_float() -> f32 => return 3.14 .
+        fn return_int() -> i64: return 42 .
+        fn return_float() -> f32: return 3.14 .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let x = return_int();  // should infer i64
             let y = return_float(); // should infer f32
             return x .
@@ -153,14 +153,14 @@ fn test_type_inference_from_function_calls() {
 
 #[test]
 fn test_comparison_operator_types() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let a = 10;
         let b = 5;
         let greater = a > b;
         let equal = a == b;
         let result = 
-            if greater => break 1 . 
-            else => break 0 .
+            if greater: break 1 . 
+            else: break 0 .
         ;
         return result .
     "#;
@@ -181,10 +181,10 @@ fn test_nested_type_inference() {
             value: i64,
         }
         
-        fn create_container(val: i64) -> Container =>
+        fn create_container(val: i64) -> Container:
             return Container { value: val } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let container = create_container(42);
             return container.value .
     "#;
@@ -200,7 +200,7 @@ fn test_nested_type_inference() {
 
 #[test]
 fn test_mutability_type_checking() {
-    let source = r#"fn main() -> i64 =>
+    let source = r#"fn main() -> i64:
         let mut x = 10;
         let y = 20;
         x = x + y;

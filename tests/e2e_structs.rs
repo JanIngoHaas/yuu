@@ -7,12 +7,12 @@ use common::*;
 #[test]
 fn test_simple_struct_definition() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 10, y: 20 };
             return p.x + p.y .
     "#;
@@ -30,12 +30,12 @@ fn test_simple_struct_definition() {
 #[test]
 fn test_struct_with_different_types() {
     let source = r#"
-        struct Mixed {
+        struct Mixed:
             count: i64,
             value: f32,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let m = Mixed { count: 5, value: 3.14 };
             return m.count .
     "#;
@@ -52,12 +52,12 @@ fn test_struct_with_different_types() {
 #[test]
 fn test_struct_field_access() {
     let source = r#"
-        struct Rectangle {
+        struct Rectangle:
             width: i64,
             height: i64,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let rect = Rectangle { width: 10, height: 5 };
             let area = rect.width * rect.height;
             return area .
@@ -76,15 +76,15 @@ fn test_struct_field_access() {
 #[test]
 fn test_struct_as_function_parameter() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        .
         
-        fn distance_from_origin(p: Point) -> i64 =>
+        fn distance_from_origin(p: Point) -> i64:
             return p.x * p.x + p.y * p.y .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = Point { x: 3, y: 4 };
             return distance_from_origin(p) .
     "#;
@@ -102,15 +102,15 @@ fn test_struct_as_function_parameter() {
 #[test]
 fn test_struct_as_return_value() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        .
         
-        fn create_point(x: i64, y: i64) -> Point =>
+        fn create_point(x: i64, y: i64) -> Point:
             return Point { x: x, y: y } .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p = create_point(7, 8);
             return p.x + p.y .
     "#;
@@ -128,16 +128,16 @@ fn test_struct_as_return_value() {
 #[test]
 fn test_nested_struct_fields() {
     let source = r#"
-        struct Inner {
+        struct Inner:
             value: i64,
-        }
+        .
         
-        struct Outer {
+        struct Outer:
             inner: Inner,
             count: i64,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let inner = Inner { value: 10 };
             let outer = Outer { inner: inner, count: 5 };
             return outer.inner.value + outer.count .
@@ -156,12 +156,12 @@ fn test_nested_struct_fields() {
 #[test]
 fn test_struct_with_multiple_instances() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let p1 = Point { x: 1, y: 2 };
             let p2 = Point { x: 3, y: 4 };
             return (p1.x + p1.y) + (p2.x + p2.y) .
@@ -180,11 +180,11 @@ fn test_struct_with_multiple_instances() {
 #[test]
 fn test_struct_field_assignment() {
     let source = r#"
-        struct Counter {
+        struct Counter:
             value: i64,
-        }
+        .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let mut counter = Counter { value: 0 };
             counter.value = 42;
             return counter.value .
@@ -202,14 +202,14 @@ fn test_struct_field_assignment() {
 #[test]
 fn test_struct_with_computation() {
     let source = r#"
-        struct Circle {
+        struct Circle:
             radius: f32,
-        }
+        .
         
-        fn area(c: Circle) -> f32 =>
+        fn area(c: Circle) -> f32:
             return 3.14 * c.radius * c.radius .
         
-        fn main() -> i64 =>
+        fn main() -> i64:
             let circle = Circle { radius: 2.0 };
             let area_val = area(circle);
             return 0 .
