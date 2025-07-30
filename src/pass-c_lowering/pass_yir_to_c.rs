@@ -4,8 +4,8 @@ use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Module,
     Operand, UnaryOp, Variable,
 };
-use std::fmt::Write;
 use miette::IntoDiagnostic;
+use std::fmt::Write;
 use ustr::Ustr;
 
 const PREFIX_LABEL: &str = "lbl_";
@@ -82,6 +82,19 @@ impl CLowering {
             TypeInfo::Struct(struct_type) => {
                 write!(data.output, "struct {}", struct_type.name)
             }
+            TypeInfo::Enum(enum_type) => {
+                // TODO: Claude: How should we lower enums to C unions?
+                /*
+                Maybe like this?:
+                struct A {
+                    union{
+                        struct B <-- This is the "variant name" {int x;};
+                        struct C {int y;};
+                    }
+                }
+                 */
+                write!(data.output, "struct {}", enum_type.name)
+            }
         }
     }
 
@@ -97,21 +110,21 @@ impl CLowering {
                 } else {
                     write!(data.output, "INT64_C(({}))", c)
                 }
-            },
+            }
             Operand::F32Const(c) => {
                 if c.fract() == 0.0 {
                     write!(data.output, "{:.1}f", c)
                 } else {
                     write!(data.output, "{}f", c)
                 }
-            },
+            }
             Operand::F64Const(c) => {
                 if c.fract() == 0.0 {
                     write!(data.output, "{:.1}", c)
                 } else {
                     write!(data.output, "{}", c)
                 }
-            },
+            }
             Operand::BoolConst(c) => write!(data.output, "{}", if *c { "1" } else { "0" }),
             Operand::Variable(variable) => Self::write_var_name(variable, &mut data.output),
             Operand::NoOp => write!(data.output, "((void)0)"),
@@ -123,7 +136,6 @@ impl CLowering {
         data: &mut TransientData,
         var: &Variable,
     ) -> Result<(), std::fmt::Error> {
-
         let ty = var.ty();
         self.gen_type(data, ty.deref_ptr())?;
         write!(data.output, " mem_{}_{}; ", var.name(), var.id())?;
@@ -254,14 +266,17 @@ impl CLowering {
         Ok(())
     }
 
-    fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> Result<(), std::fmt::Error> {
+    fn gen_block(
+        &self,
+        block: &BasicBlock,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
         Self::write_label_name(block.label.name(), &mut data.output)?;
         writeln!(data.output, ":;")?;
 
         for instruction in &block.instructions {
             self.gen_instruction(instruction, data)?;
         }
-
 
         match &block.terminator {
             ControlFlow::Jump { target } => {
@@ -302,14 +317,17 @@ impl CLowering {
         Ok(())
     }
 
-    fn gen_function(&self, func: &Function, data: &mut TransientData) -> Result<(), std::fmt::Error> {
+    fn gen_function(
+        &self,
+        func: &Function,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
         for block in func.blocks.values() {
             self.gen_block(block, data)?;
         }
 
         Ok(())
     }
-
 
     fn gen_func_decl(
         &self,
@@ -390,7 +408,11 @@ impl CLowering {
 }
 
 impl CLowering {
-    pub fn run(&self, module: &Module, type_registry: &TypeRegistry) -> miette::Result<CSourceCode> {
+    pub fn run(
+        &self,
+        module: &Module,
+        type_registry: &TypeRegistry,
+    ) -> miette::Result<CSourceCode> {
         let mut data = TransientData {
             module,
             output: String::new(),
@@ -402,4 +424,3 @@ impl CLowering {
         Ok(CSourceCode(data.output))
     }
 }
-

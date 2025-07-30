@@ -333,6 +333,23 @@ fn infer_func_call(
             error_type()
         }
         TypeInfo::Error => error_type(),
+        TypeInfo::Enum(e) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Cannot call enum type '{}' as a function",
+                    e.name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), "enum type")
+                .help("Enums cannot be called as functions. Use enum variant syntax like 'EnumName::Variant' instead")
+                .build();
+            data.errors.push(err);
+            error_type()
+        }
     };
 
     data.type_registry
@@ -846,13 +863,139 @@ pub fn infer_expr(
                 }
             }
         }
-        ExprNode::EnumInstantiation(_) => {
-            // TODO: Implement enum instantiation type inference
-            todo!("Enum instantiation type inference not yet implemented")
+        ExprNode::EnumInstantiation(ei) => {
+            // Check the enum type
+            let enum_type = data.type_registry.resolve_enum(ei.enum_name);
+            let inferred_ty = match enum_type {
+                Some(enum_info) => {
+                    // Check the variant
+                    let variant_info_registered = enum_info.variants.get(&ei.variant_name); // Check if name is registered
+                    match variant_info_registered {
+                        Some(variant) => {
+                            // Variant is indeed registered - now type-check the expression
+                            let ty = enum_info.ty;
+                            match (&ei.data, variant.variant) {
+                                (Some(dexpr), Some(reg_ty)) => {
+                                    let ty = infer_expr(&dexpr, block, data, function_args);
+                                    // TODO: Claude: Answer me this: Do I have insert the type of the data expression into the type registry? I am not sure anymore how I designed it. Does the caller need to insert or the callee?
+                                    // Check if the data type matches the variant's data type
+                                    if let Err(err) = ty.unify(reg_ty) {
+                                        let err_msg = YuuError::builder()
+                                            .kind(ErrorKind::TypeMismatch)
+                                            .message(format!(
+                                                "Cannot assign '{}' to enum variant '{}::{}' which expects '{}'",
+                                                err.left, ei.enum_name, ei.variant_name, err.right
+                                            ))
+                                            .source(
+                                                data.src_code.source.clone(),
+                                                data.src_code.file_name.clone(),
+                                            )
+                                            .span(dexpr.span().clone(), format!("has type '{}'", err.left))
+                                            .label(ei.span.clone(), format!("expected type '{}'", err.right))
+                                            .help("The types must be compatible for enum variant instantiation")
+                                            .build();
+                                        data.errors.push(err_msg);
+                                    }
+                                }
+                                (None, None) => {
+                                    // Nothing to do here...
+                                }
+                                (Some(dexpr), None) => {
+                                    let err = YuuError::builder()
+                                        .kind(ErrorKind::InvalidExpression)
+                                        .message(format!(
+                                            "Enum variant '{}::{}' does not accept data, but data was provided",
+                                            ei.enum_name, ei.variant_name
+                                        ))
+                                        .source(
+                                            data.src_code.source.clone(),
+                                            data.src_code.file_name.clone(),
+                                        )
+                                        .span(dexpr.span().clone(), "unexpected data provided here")
+                                        .label(ei.span.clone(), "for this unit variant")
+                                        .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
+                                        .build();
+                                    data.errors.push(err);
+                                }
+                                (None, Some(expected_ty)) => {
+                                    let err = YuuError::builder()
+                                        .kind(ErrorKind::InvalidExpression)
+                                        .message(format!(
+                                            "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
+                                            ei.enum_name, ei.variant_name, expected_ty
+                                        ))
+                                        .source(
+                                            data.src_code.source.clone(),
+                                            data.src_code.file_name.clone(),
+                                        )
+                                        .span(ei.span.clone(), "missing required data")
+                                        .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
+                                        .build();
+                                    data.errors.push(err);
+                                }
+                            }
+                            ty
+                        }
+                        None => {
+                            // Error: Variant not found
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::ReferencedUndeclaredVariant)
+                                .message(format!(
+                                    "Enum '{}' has no variant named '{}'",
+                                    ei.enum_name, ei.variant_name
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(ei.span.clone(), "attempted to use undefined variant")
+                                .help(format!(
+                                    "Available variants for enum '{}': {}",
+                                    ei.enum_name,
+                                    if enum_info.variants.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        enum_info
+                                            .variants
+                                            .keys()
+                                            .map(|k| k.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    }
+                                ))
+                                .build();
+                            data.errors.push(err);
+                            error_type()
+                        }
+                    }
+                }
+                None => {
+                    // Error: Enum not found
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndefinedEnum)
+                        .message(format!(
+                            "Cannot instantiate enum '{}' because it has not been defined",
+                            ei.enum_name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(ei.span.clone(), "attempted to instantiate undefined enum")
+                        .help("Define this enum before using it")
+                        .build();
+                    data.errors.push(err);
+                    error_type()
+                }
+            };
+            data.type_registry
+                .type_info_table
+                .insert(ei.id, inferred_ty);
+            inferred_ty
         }
-        ExprNode::Match(_) => {
+        ExprNode::Match(me) => {
             // TODO: Implement match expression type inference
-            todo!("Match expression type inference not yet implemented")
+            todo!("Match expression type inference not yet implemented - similar to if expression");
         }
     }
 }

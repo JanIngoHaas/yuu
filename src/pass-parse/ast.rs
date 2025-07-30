@@ -15,7 +15,6 @@ pub struct SourceInfo {
     pub file_name: Arc<str>,
 }
 
-
 /// Binary operators for arithmetic expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum BinOp {
@@ -199,7 +198,7 @@ pub struct EnumDataPattern {
 // Enum-specific pattern for variant matching
 #[derive(Serialize, Deserialize, Clone)]
 pub enum EnumPattern {
-    Unit(EnumUnitPattern),                    // enum name, variant name
+    Unit(EnumUnitPattern),     // enum name, variant name
     WithData(EnumDataPattern), // Blue(pattern) - enum name, variant name, inner pattern
 }
 
@@ -426,7 +425,6 @@ pub enum StructuralNode {
     FuncDef(FuncDefStructural),
     StructDecl(StructDeclStructural),
     StructDef(StructDefStructural),
-    EnumDecl(EnumDeclStructural),
     EnumDef(EnumDefStructural),
     Error(NodeId),
 }
@@ -461,7 +459,6 @@ pub enum Node {
 pub struct AST {
     pub structurals: Vec<Box<StructuralNode>>,
 }
-
 
 // impl Display for Node {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -542,9 +539,6 @@ impl Spanned for StructuralNode {
                 struct_decl_structural.span.clone()
             }
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.span.clone(),
-            StructuralNode::EnumDecl(enum_decl_structural) => {
-                enum_decl_structural.span.clone()
-            }
             StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.span.clone(),
         }
     }

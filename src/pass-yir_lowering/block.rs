@@ -5,10 +5,7 @@ use std::ops::{Deref, DerefMut};
 use crate::pass_diagnostics::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::pass_parse::ast::SourceInfo;
 use crate::pass_type_inference::VariableBinding;
-use crate::{
-    pass_parse::ast::NodeId,
-    pass_type_inference::BindingInfo,
-};
+use crate::{pass_parse::ast::NodeId, pass_type_inference::BindingInfo};
 use indexmap::IndexMap;
 use logos::Span;
 use ustr::{Ustr, UstrMap};
@@ -25,7 +22,6 @@ pub struct Block {
 
 unsafe impl Send for RootBlock {}
 
-
 // TODO: Wrap this in a box; we have pointers to it. When the root block is moved, the pointers are invalidated and point to garbage / other data.
 pub struct RootBlock {
     arena: Vec<Box<Block>>,
@@ -34,7 +30,6 @@ pub struct RootBlock {
 
 #[derive(Clone, Debug)]
 pub struct BindingTable(IndexMap<NodeId, NodeId>);
-
 
 impl Default for BindingTable {
     fn default() -> Self {

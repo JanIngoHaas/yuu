@@ -30,13 +30,13 @@ fn test_vector_operations() {
             let dot = vector_dot(v1, v2);
             return 0 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_vector_ops.yuu")
         .expect("Failed to compile vector operations test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run vector operations test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run vector operations test");
+
     assert_eq!(output, 0);
 }
 
@@ -66,13 +66,13 @@ fn test_matrix_operations() {
             let det = matrix_determinant(m1);
             return 0 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_matrix_ops.yuu")
         .expect("Failed to compile matrix operations test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run matrix operations test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run matrix operations test");
+
     assert_eq!(output, 0);
 }
 
@@ -102,13 +102,13 @@ fn test_point_distance_calculations() {
             let mid = midpoint(p1, p2);
             return 0 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_point_ops.yuu")
         .expect("Failed to compile point operations test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run point operations test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run point operations test");
+
     assert_eq!(output, 0);
 }
 
@@ -141,13 +141,13 @@ fn test_rectangle_operations() {
             let contains = contains_point(rect, 25.0, 35.0);
             return contains .
     "#;
-    
+
     let executable = run_to_executable(source, "test_rectangle_ops.yuu")
         .expect("Failed to compile rectangle operations test");
-    
+
     let output = run_executable_with_output(&executable, &[])
         .expect("Failed to run rectangle operations test");
-    
+
     // Point (25, 35) is inside rectangle at (10, 20) with size 30x40
     assert_eq!(output, 1);
 }
@@ -182,13 +182,13 @@ fn test_circle_operations() {
             let inside = point_in_circle(circle, 3.0, 4.0);
             return inside .
     "#;
-    
+
     let executable = run_to_executable(source, "test_circle_ops.yuu")
         .expect("Failed to compile circle operations test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run circle operations test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run circle operations test");
+
     // Point (3, 4) is inside circle at (0, 0) with radius 5 (distance = 5)
     assert_eq!(output, 1);
 }
@@ -224,13 +224,13 @@ fn test_complex_number_operations() {
             let mag_sq = complex_magnitude_squared(c1);
             return 0 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_complex_ops.yuu")
         .expect("Failed to compile complex operations test");
-    
+
     let output = run_executable_with_output(&executable, &[])
         .expect("Failed to run complex operations test");
-    
+
     assert_eq!(output, 0);
 }
 
@@ -263,13 +263,13 @@ fn test_color_operations() {
             let brightness = color_brightness(purple);
             return 0 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_color_ops.yuu")
         .expect("Failed to compile color operations test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run color operations test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run color operations test");
+
     assert_eq!(output, 0);
 }
 
@@ -305,13 +305,13 @@ fn test_statistics_operations() {
             let avg = stats_average(stats);
             return stats.count .
     "#;
-    
+
     let executable = run_to_executable(source, "test_stats_ops.yuu")
         .expect("Failed to compile statistics operations test");
-    
+
     let output = run_executable_with_output(&executable, &[])
         .expect("Failed to run statistics operations test");
-    
+
     // Should return count = 3
     assert_eq!(output, 3);
 }

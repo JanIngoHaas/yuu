@@ -14,12 +14,12 @@ fn test_fibonacci_recursive() {
 
         fn main() -> i64: return fibonacci(10) .
     "#;
-    
-    let executable = run_to_executable(source, "test_fibonacci.yuu")
-        .expect("Failed to compile fibonacci test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run fibonacci test");
+
+    let executable =
+        run_to_executable(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run fibonacci test");
 
     // fib(10) = 55
     assert_eq!(output, 55);
@@ -34,13 +34,13 @@ fn test_factorial_recursive() {
         
         fn main() -> i64: return factorial(6) .
     "#;
-    
-    let executable = run_to_executable(source, "test_factorial.yuu")
-        .expect("Failed to compile factorial test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run factorial test");
-    
+
+    let executable =
+        run_to_executable(source, "test_factorial.yuu").expect("Failed to compile factorial test");
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run factorial test");
+
     // 6! = 720
     assert_eq!(output, 720);
 }
@@ -58,13 +58,13 @@ fn test_factorial_iterative() {
         
         fn main() -> i64: return factorial_iter(5) .
     "#;
-    
+
     let executable = run_to_executable(source, "test_factorial_iter.yuu")
         .expect("Failed to compile iterative factorial test");
-    
+
     let output = run_executable_with_output(&executable, &[])
         .expect("Failed to run iterative factorial test");
-    
+
     // 5! = 120
     assert_eq!(output, 120);
 }
@@ -79,13 +79,11 @@ fn test_gcd_algorithm() {
         
         fn main() -> i64: return gcd(48, 18) .
     "#;
-    
-    let executable = run_to_executable(source, "test_gcd.yuu")
-        .expect("Failed to compile GCD test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run GCD test");
-    
+
+    let executable = run_to_executable(source, "test_gcd.yuu").expect("Failed to compile GCD test");
+
+    let output = run_executable_with_output(&executable, &[]).expect("Failed to run GCD test");
+
     // gcd(48, 18) = 6
     assert_eq!(output, 6);
 }
@@ -101,13 +99,12 @@ fn test_power_function() {
         
         fn main() -> i64: return power(2, 8) .
     "#;
-    
-    let executable = run_to_executable(source, "test_power.yuu")
-        .expect("Failed to compile power test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run power test");
-    
+
+    let executable =
+        run_to_executable(source, "test_power.yuu").expect("Failed to compile power test");
+
+    let output = run_executable_with_output(&executable, &[]).expect("Failed to run power test");
+
     // 2^8 = 256
     assert_eq!(output, 256);
 }
@@ -126,13 +123,13 @@ fn test_sum_of_squares() {
         fn main() -> i64:
             return sum_of_squares(5) .
     "#;
-    
+
     let executable = run_to_executable(source, "test_sum_squares.yuu")
         .expect("Failed to compile sum of squares test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run sum of squares test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run sum of squares test");
+
     // 1^2 + 2^2 + 3^2 + 4^2 + 5^2 = 1 + 4 + 9 + 16 + 25 = 55
     assert_eq!(output, 55);
 }
@@ -153,13 +150,12 @@ fn test_is_prime() {
         
         fn main() -> i64: return is_prime(17) .
     "#;
-    
-    let executable = run_to_executable(source, "test_is_prime.yuu")
-        .expect("Failed to compile is_prime test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run is_prime test");
-    
+
+    let executable =
+        run_to_executable(source, "test_is_prime.yuu").expect("Failed to compile is_prime test");
+
+    let output = run_executable_with_output(&executable, &[]).expect("Failed to run is_prime test");
+
     // 17 is prime, so should return 1
     assert_eq!(output, 1);
 }
@@ -191,13 +187,13 @@ fn test_nth_prime() {
         fn main() -> i64:
             return nth_prime(5);
     "#;
-    
-    let executable = run_to_executable(source, "test_nth_prime.yuu")
-        .expect("Failed to compile nth prime test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run nth prime test");
-    
+
+    let executable =
+        run_to_executable(source, "test_nth_prime.yuu").expect("Failed to compile nth prime test");
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run nth prime test");
+
     // 5th prime is 11 (2, 3, 5, 7, 11)
     assert_eq!(output, 11);
 }
@@ -217,13 +213,12 @@ fn test_collatz_sequence() {
         fn main() -> i64:
             return collatz_length(7);
     "#;
-    
-    let executable = run_to_executable(source, "test_collatz.yuu")
-        .expect("Failed to compile collatz test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run collatz test");
-    
+
+    let executable =
+        run_to_executable(source, "test_collatz.yuu").expect("Failed to compile collatz test");
+
+    let output = run_executable_with_output(&executable, &[]).expect("Failed to run collatz test");
+
     // Collatz sequence for 7: 7 -> 22 -> 11 -> 34 -> 17 -> 52 -> 26 -> 13 -> 40 -> 20 -> 10 -> 5 -> 16 -> 8 -> 4 -> 2 -> 1
     // Length is 16 steps
     assert_eq!(output, 16);
@@ -244,13 +239,13 @@ fn test_digital_root() {
         
         fn main() -> i64: return digital_root(9875) .
     "#;
-    
+
     let executable = run_to_executable(source, "test_digital_root.yuu")
         .expect("Failed to compile digital root test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run digital root test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run digital root test");
+
     // 9875 -> 9+8+7+5 = 29 -> 2+9 = 11 -> 1+1 = 2
     assert_eq!(output, 2);
 }

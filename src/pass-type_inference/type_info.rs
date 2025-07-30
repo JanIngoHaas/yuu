@@ -42,6 +42,7 @@ pub enum TypeCombination {
     Pointer(GiveMePtrHashes<TypeInfo>),
     Function((Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>)),
     Struct(Ustr),
+    Enum(Ustr),
 }
 
 impl Hash for TypeCombination {
@@ -52,6 +53,9 @@ impl Hash for TypeCombination {
                 args.hash(state);
             }
             TypeCombination::Struct(ustr) => {
+                (*ustr).hash(state);
+            }
+            TypeCombination::Enum(ustr) => {
                 (*ustr).hash(state);
             }
         }
@@ -141,6 +145,10 @@ pub fn struct_type(name: Ustr) -> &'static TypeInfo {
     TYPE_CACHE.struct_type(name)
 }
 
+pub fn enum_type(name: Ustr) -> &'static TypeInfo {
+    TYPE_CACHE.enum_type(name)
+}
+
 impl From<PrimitiveType> for &'static TypeInfo {
     fn from(value: PrimitiveType) -> Self {
         match value {
@@ -177,6 +185,15 @@ impl TypeInterner {
         unsafe { &*(out.as_ref() as *const TypeInfo) }
     }
 
+    pub fn enum_type(&'static self, enum_: Ustr) -> &'static TypeInfo {
+        let key = TypeCombination::Struct(enum_);
+        let out = self
+            .combination_to_type
+            .entry(key)
+            .or_insert_with(|| Box::new(TypeInfo::Enum(EnumType { name: enum_ })));
+        unsafe { &*(out.as_ref() as *const TypeInfo) }
+    }
+
     pub fn ptr_to(&'static self, ty: &'static TypeInfo) -> &'static TypeInfo {
         let key = TypeCombination::Pointer(GiveMePtrHashes(ty));
         let out = self
@@ -197,6 +214,9 @@ impl TypeInterner {
             TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Struct(struct_type) => {
                 panic!("Cannot dereference non-pointer type: {}", struct_type.name)
+            }
+            TypeInfo::Enum(enum_type) => {
+                panic!("Cannot dereference non-pointer type: {}", enum_type.name)
             }
         }
     }
@@ -235,7 +255,6 @@ static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(TypeInterner::new);
 pub struct TypeInfoTable {
     pub types: IndexMap<NodeId, &'static TypeInfo>,
 }
-
 
 impl Default for TypeInfoTable {
     fn default() -> Self {
@@ -337,6 +356,11 @@ pub struct StructType {
     pub name: Ustr,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnumType {
+    pub name: Ustr,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeInfo {
     BuiltInPrimitive(PrimitiveType),
@@ -347,6 +371,7 @@ pub enum TypeInfo {
     // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
     Error,
     Struct(StructType),
+    Enum(EnumType),
 }
 
 impl TypeInfo {
@@ -378,6 +403,7 @@ impl TypeInfo {
             TypeInfo::Inactive => false,
             TypeInfo::Error => false,
             TypeInfo::Struct(_) => false,
+            TypeInfo::Enum(_) => false,
         }
     }
 
@@ -426,6 +452,7 @@ impl Display for TypeInfo {
             TypeInfo::Inactive => write!(f, "<no value>"),
             TypeInfo::Error => write!(f, "<error>"),
             TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
+            TypeInfo::Enum(enum_type) => write!(f, "{}", enum_type.name),
         }
     }
 }
@@ -437,11 +464,7 @@ pub struct UnificationError {
 }
 
 impl UnificationError {
-    pub fn into_yuu_error(
-        &self,
-        info: SourceInfo,
-        span: impl Into<miette::SourceSpan>,
-    ) -> YuuError {
+    pub fn to_yuu_error(&self, info: SourceInfo, span: impl Into<miette::SourceSpan>) -> YuuError {
         YuuError::builder().kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
             .message("Type mismatch: cannot unify types".to_string())
             .source(info.source, info.file_name)

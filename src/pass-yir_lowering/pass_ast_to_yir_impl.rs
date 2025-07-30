@@ -278,7 +278,7 @@ impl<'a> TransientData<'a> {
                 // TODO: Implement enum instantiation in YIR lowering
                 todo!("Enum instantiation YIR lowering not yet implemented")
             }
-            ExprNode::Match(_) => {
+            ExprNode::Match(m) => {
                 // TODO: Implement match expression in YIR lowering
                 todo!("Match expression YIR lowering not yet implemented")
             }
@@ -409,7 +409,7 @@ impl<'a> TransientData<'a> {
 
         // Get the result type for the if expression
         let result_type = self.get_type(if_expr.id);
-        
+
         // Declare a variable to hold the result of the if-expression, if it has a result type
 
         let if_result_var = if !matches!(

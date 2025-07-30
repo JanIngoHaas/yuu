@@ -1,10 +1,10 @@
 pub mod utils;
 
 // Pass modules
-#[path = "pass-c_lowering/mod.rs"]
-pub mod pass_c_lowering;
 #[path = "pass-c_compilation/mod.rs"]
 pub mod pass_c_compilation;
+#[path = "pass-c_lowering/mod.rs"]
+pub mod pass_c_lowering;
 #[path = "pass-diagnostics/mod.rs"]
 pub mod pass_diagnostics;
 #[path = "pass-parse/mod.rs"]

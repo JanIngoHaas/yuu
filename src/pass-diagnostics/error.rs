@@ -20,6 +20,8 @@ pub enum ErrorKind {
     TypeMismatch,
     ReferencedUndefinedStruct,
     ReferencedUndeclaredField,
+    ReferencedUndefinedEnum,
+    ReferencedUndeclaredVariant,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -35,6 +37,8 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::TypeMismatch => write!(f, "Types do not match"),
             ErrorKind::ReferencedUndefinedStruct => write!(f, "Referenced undeclared struct"),
             ErrorKind::ReferencedUndeclaredField => write!(f, "Referenced undeclared field"),
+            ErrorKind::ReferencedUndefinedEnum => write!(f, "Referenced undeclared enum"),
+            ErrorKind::ReferencedUndeclaredVariant => write!(f, "Referenced undeclared variant"),
         }
     }
 }

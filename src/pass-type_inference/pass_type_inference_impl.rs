@@ -98,10 +98,6 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 },
             );
         }
-        StructuralNode::EnumDecl(_) => {
-            // TODO: Implement enum declaration processing
-            todo!("Enum declaration processing not yet implemented")
-        }
         StructuralNode::EnumDef(_) => {
             // TODO: Implement enum definition processing
             todo!("Enum definition processing not yet implemented")
@@ -110,7 +106,11 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
 }
 
 impl TypeInference {
-    pub fn run(&self, ast: &AST, src_code: SourceInfo) -> miette::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
+    pub fn run(
+        &self,
+        ast: &AST,
+        src_code: SourceInfo,
+    ) -> miette::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
         let mut root_block = RootBlock::new();
         let mut type_registry = TypeRegistry::new();
         let errors = {

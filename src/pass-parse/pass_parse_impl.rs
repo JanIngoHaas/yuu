@@ -12,7 +12,7 @@ impl Parse {
     pub fn new() -> Self {
         Self
     }
-    
+
     pub fn run(&self, source_info: &SourceInfo) -> miette::Result<(AST, SyntaxErrors)> {
         let mut parser = Parser::new(source_info);
         let ast = parser.parse_and_add_ids();
@@ -24,5 +24,5 @@ impl Parse {
 impl Default for Parse {
     fn default() -> Self {
         Self::new()
-    }   
+    }
 }

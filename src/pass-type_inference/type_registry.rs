@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use logos::Span;
 use ustr::{IdentityHasher, Ustr};
 
+use crate::pass_type_inference::enum_type;
 use crate::{
     pass_diagnostics::levenshtein_distance,
     pass_parse::ast::{InternUstr, NodeId},
@@ -24,11 +25,25 @@ pub struct StructFieldInfo {
     pub binding_info: BindingInfo,
 }
 
+#[derive(Clone)]
+pub struct EnumVariantInfo {
+    pub variant_name: Ustr,
+    pub variant: Option<&'static TypeInfo>,
+}
+
 pub type FieldsMap<V> = IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
 
 #[derive(Clone)]
 pub struct StructInfo {
     pub fields: FieldsMap<StructFieldInfo>,
+    pub name: Ustr,
+    pub ty: &'static TypeInfo,
+    pub binding_info: BindingInfo,
+}
+
+#[derive(Clone)]
+pub struct EnumInfo {
+    pub variants: FieldsMap<EnumVariantInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -44,11 +59,11 @@ pub struct FunctionInfo {
 
 pub struct TypeRegistry {
     structs: FieldsMap<StructInfo>,
+    enums: FieldsMap<EnumInfo>,
     functions: FieldsMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
     pub type_info_table: TypeInfoTable,
     pub bindings: BindingTable,
 }
-
 
 impl Default for TypeRegistry {
     fn default() -> Self {
@@ -60,6 +75,7 @@ impl TypeRegistry {
     pub fn new() -> Self {
         let mut reg = Self {
             structs: FieldsMap::default(),
+            enums: FieldsMap::default(),
             functions: FieldsMap::default(),
             type_info_table: TypeInfoTable::new(),
             bindings: BindingTable::default(),
@@ -258,46 +274,16 @@ impl TypeRegistry {
         );
 
         // Unary operations for i64
-        reg.register_unary_op(
-            "neg".intern(),
-            next(),
-            primitive_i64(),
-            primitive_i64(),
-        );
-        reg.register_unary_op(
-            "pos".intern(),
-            next(),
-            primitive_i64(),
-            primitive_i64(),
-        );
+        reg.register_unary_op("neg".intern(), next(), primitive_i64(), primitive_i64());
+        reg.register_unary_op("pos".intern(), next(), primitive_i64(), primitive_i64());
 
         // Unary operations for f32
-        reg.register_unary_op(
-            "neg".intern(),
-            next(),
-            primitive_f32(),
-            primitive_f32(),
-        );
-        reg.register_unary_op(
-            "pos".intern(),
-            next(),
-            primitive_f32(),
-            primitive_f32(),
-        );
+        reg.register_unary_op("neg".intern(), next(), primitive_f32(), primitive_f32());
+        reg.register_unary_op("pos".intern(), next(), primitive_f32(), primitive_f32());
 
         // Unary operations for f64
-        reg.register_unary_op(
-            "neg".intern(),
-            next(),
-            primitive_f64(),
-            primitive_f64(),
-        );
-        reg.register_unary_op(
-            "pos".intern(),
-            next(),
-            primitive_f64(),
-            primitive_f64(),
-        );
+        reg.register_unary_op("neg".intern(), next(), primitive_f64(), primitive_f64());
+        reg.register_unary_op("pos".intern(), next(), primitive_f64(), primitive_f64());
 
         reg
     }
@@ -371,6 +357,24 @@ impl TypeRegistry {
         self.type_info_table.types.insert(id, ty).is_none() && succ
     }
 
+    pub fn add_enum(
+        &mut self,
+        name: Ustr,
+        variants: FieldsMap<EnumVariantInfo>,
+        definition_location: BindingInfo,
+    ) -> bool {
+        let ty = enum_type(name);
+        let id = definition_location.id;
+        let info = EnumInfo {
+            ty,
+            name,
+            variants,
+            binding_info: definition_location,
+        };
+        let succ = self.enums.insert(name, info).is_none();
+        self.type_info_table.types.insert(id, ty).is_none() && succ
+    }
+
     pub fn add_variable(
         &mut self,
         block: &mut Block,
@@ -416,6 +420,10 @@ impl TypeRegistry {
 
     pub fn resolve_struct(&self, name: Ustr) -> Option<&StructInfo> {
         self.structs.get(&name)
+    }
+
+    pub fn resolve_enum(&self, name: Ustr) -> Option<&EnumInfo> {
+        self.enums.get(&name)
     }
 
     pub fn get_similar_names_func(&self, name: Ustr, max_dst: usize) -> Vec<Ustr> {

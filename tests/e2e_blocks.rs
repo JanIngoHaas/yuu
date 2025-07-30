@@ -13,13 +13,12 @@ fn test_simple_block_expression() {
             break x + y .
         return result .
     "#;
-    
-    let executable = run_to_executable(source, "test_block.yuu")
-        .expect("Failed to compile block test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run block test");
-    
+
+    let executable =
+        run_to_executable(source, "test_block.yuu").expect("Failed to compile block test");
+
+    let output = run_executable_with_output(&executable, &[]).expect("Failed to run block test");
+
     assert_eq!(output, 30);
 }
 
@@ -31,13 +30,13 @@ fn test_labeled_block() {
             break :outer x * 2 .
         return result .
     "#;
-    
+
     let executable = run_to_executable(source, "test_labeled_block.yuu")
         .expect("Failed to compile labeled block test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run labeled block test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run labeled block test");
+
     assert_eq!(output, 10);
 }
 
@@ -52,13 +51,13 @@ fn test_nested_blocks() {
             break :outer x + inner_result .
         return result .
     "#;
-    
+
     let executable = run_to_executable(source, "test_nested_blocks.yuu")
         .expect("Failed to compile nested blocks test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run nested blocks test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run nested blocks test");
+
     // inner: 5 * 2 = 10, outer: 10 + 10 = 20
     assert_eq!(output, 20);
 }
@@ -74,13 +73,13 @@ fn test_break_with_value() {
             break counter .
         return result .
     "#;
-    
+
     let executable = run_to_executable(source, "test_break_value.yuu")
         .expect("Failed to compile break with value test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run break with value test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run break with value test");
+
     // breaks with 5 * 2 = 10
     assert_eq!(output, 10);
 }
@@ -99,13 +98,13 @@ fn test_break_from_nested_loop() {
             break :outer 0 .
         return result .
     "#;
-    
+
     let executable = run_to_executable(source, "test_break_nested.yuu")
         .expect("Failed to compile break from nested test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run break from nested test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run break from nested test");
+
     // i=2, j=3, so i+j=5
     assert_eq!(output, 5);
 }
@@ -119,13 +118,13 @@ fn test_block_with_local_scope() {
             break x .
         return result + x . // uses outer x
     "#;
-    
+
     let executable = run_to_executable(source, "test_block_scope.yuu")
         .expect("Failed to compile block scope test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run block scope test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run block scope test");
+
     // inner x=20, outer x=10, so 20+10=30
     assert_eq!(output, 30);
 }
@@ -140,13 +139,13 @@ fn test_block_as_function_body() {
         
         fn main() -> i64: return compute(8) .
     "#;
-    
+
     let executable = run_to_executable(source, "test_block_func.yuu")
         .expect("Failed to compile block as function body test");
-    
+
     let output = run_executable_with_output(&executable, &[])
         .expect("Failed to run block as function body test");
-    
+
     // 8 * 2 = 16 > 10, so returns 16
     assert_eq!(output, 16);
 }
@@ -162,13 +161,13 @@ fn test_multiple_labeled_blocks() {
         
         return result1 + result2 .
     "#;
-    
+
     let executable = run_to_executable(source, "test_multiple_labels.yuu")
         .expect("Failed to compile multiple labels test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run multiple labels test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run multiple labels test");
+
     // 10 + 20 = 30
     assert_eq!(output, 30);
 }
@@ -182,13 +181,13 @@ fn test_block_with_early_return() {
             break 0 .
         return result .
     "#;
-    
+
     let executable = run_to_executable(source, "test_early_return.yuu")
         .expect("Failed to compile early return test");
-    
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run early return test");
-    
+
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run early return test");
+
     // x=5 > 3, so breaks with 100
     assert_eq!(output, 100);
 }

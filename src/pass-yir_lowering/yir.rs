@@ -253,11 +253,12 @@ pub struct Function {
 }
 
 impl Function {
-    
     pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
-        self.blocks.values().flat_map(|block| block.calculate_var_decls())
+        self.blocks
+            .values()
+            .flat_map(|block| block.calculate_var_decls())
     }
-    
+
     pub fn new(name: Ustr, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
             name,
@@ -630,7 +631,7 @@ impl Function {
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
         yir_printer::format_yir(self, do_color, f)
     }
-    
+
     pub fn sort_blocks_by_id(&mut self) {
         self.blocks.sort_unstable_by(|a, _, b, _| a.cmp(b));
     }

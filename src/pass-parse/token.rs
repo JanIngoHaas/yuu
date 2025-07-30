@@ -38,7 +38,6 @@ pub enum Integer {
 #[logos(skip r"\^-[-]+.*")]
 #[logos(skip r"<--[-]+.*")]
 pub enum TokenKind {
-
     #[regex(r"\s+[.]")]
     BlockTerminator,
 

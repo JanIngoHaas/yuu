@@ -494,7 +494,11 @@ impl Parser {
         Ok(out.1)
     }
 
-    fn expect_semicolon_or_block_terminator(&mut self, start_span: Span, end_span: Span) -> ParseResult<Span> {
+    fn expect_semicolon_or_block_terminator(
+        &mut self,
+        start_span: Span,
+        end_span: Span,
+    ) -> ParseResult<Span> {
         let dot_maybe = self.lexer.peek();
         if dot_maybe.kind == TokenKind::BlockTerminator {
             Ok(start_span.start..end_span.end)
@@ -507,7 +511,10 @@ impl Parser {
     pub fn parse_atomic_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (span, expr) = self.parse_expr()?;
 
-        let final_span = if matches!(expr, ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)) {
+        let final_span = if matches!(
+            expr,
+            ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)
+        ) {
             span
         } else {
             self.expect_semicolon_or_block_terminator(span.clone(), span.clone())?
@@ -873,7 +880,7 @@ impl Parser {
             let next = self.lexer.peek();
             if next.kind == TokenKind::BlockTerminator {
                 let dot = self.lexer.next_token();
-                
+
                 // Check if there's a label after the block terminator
                 let (label, label_end_span) = if self.lexer.peek().kind == TokenKind::At {
                     let _ = self.lexer.next_token(); // consume @
@@ -901,7 +908,7 @@ impl Parser {
                 } else {
                     colon.span.start..dot.span.end
                 };
-                
+
                 return Ok(self.make_block_expr(stmts, span, label));
             }
 
@@ -924,7 +931,6 @@ impl Parser {
             };
 
             stmts.push(node);
-
         }
     }
 
@@ -948,7 +954,7 @@ impl Parser {
                                 self.lexer.code_info.source.clone(),
                                 self.lexer.code_info.file_name.clone(),
                             )
-                            .with_help("Expected a variant name identifier after ':'".to_string())
+                            .with_help("Expected a variant name identifier after ':'".to_string()),
                         );
                         return Err(self.lexer.synchronize());
                     }
@@ -967,7 +973,7 @@ impl Parser {
                             variant_name: name_discriminee,
                             binding: Box::new(binding),
                             span: span.clone(),
-                            id: 0
+                            id: 0,
                         };
                         let node = RefutablePatternNode::Enum(EnumPattern::WithData(enum_data));
                         Ok((span, node))
@@ -979,7 +985,7 @@ impl Parser {
                             enum_name: name_discriminator,
                             variant_name: name_discriminee,
                             span: final_span.clone(),
-                            id: 0
+                            id: 0,
                         };
                         let node = RefutablePatternNode::Enum(EnumPattern::Unit(enum_unit));
                         Ok((final_span, node))
@@ -995,13 +1001,15 @@ impl Parser {
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
-                    .with_help("Expected a refutable pattern (currently only enum patterns are supported)".to_string())
+                    .with_help(
+                        "Expected a refutable pattern (currently only enum patterns are supported)"
+                            .to_string(),
+                    ),
                 );
                 Err(self.lexer.synchronize())
             }
         }
     }
-
 
     pub fn parse_match_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
         let match_start = self.lexer.expect(&[TokenKind::MatchKw], &mut self.errors)?;
@@ -1016,7 +1024,7 @@ impl Parser {
             if peek.kind != TokenKind::CaseKw {
                 break;
             }
-            
+
             let _ = self.lexer.next_token(); // consume "case"
             // Pattern parsing
             let pattern = self.parse_refutable_pattern()?;
@@ -1046,7 +1054,10 @@ impl Parser {
             arms,
         };
 
-        Ok(((match_start.span.start..end_span).into(), ExprNode::Match(match_expr)))
+        Ok((
+            (match_start.span.start..end_span).into(),
+            ExprNode::Match(match_expr),
+        ))
     }
 
     pub fn parse_break_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
@@ -1078,7 +1089,8 @@ impl Parser {
 
         let (expr_span, expr) = self.parse_expr()?;
 
-        let span = self.expect_semicolon_or_block_terminator(break_token.span.clone(), expr_span)?;
+        let span =
+            self.expect_semicolon_or_block_terminator(break_token.span.clone(), expr_span)?;
 
         Ok((
             span.clone(),
@@ -1161,7 +1173,9 @@ impl Parser {
 
         let fields = self.parse_struct_fields()?;
 
-        let terminator = self.lexer.expect(&[TokenKind::BlockTerminator], &mut self.errors)?;
+        let terminator = self
+            .lexer
+            .expect(&[TokenKind::BlockTerminator], &mut self.errors)?;
 
         let span = span.start..terminator.span.end;
         let out = StructDefStructural {
@@ -1174,6 +1188,129 @@ impl Parser {
         Ok((span, out))
     }
 
+    pub fn parse_enum_decl(&mut self) -> ParseResult<(Span, EnumDeclStructural)> {
+        let enum_tkn = self.lexer.expect(&[TokenKind::EnumKw], &mut self.errors)?;
+        let ident = self.lexer.peek();
+        let out = match ident.kind {
+            TokenKind::Ident(name) => {
+                let ident = self.lexer.next_token(); // Consume ident
+                let span = enum_tkn.span.start..ident.span.end;
+                (
+                    span.clone(),
+                    EnumDeclStructural {
+                        id: 0,
+                        name,
+                        span: enum_tkn.span.start..ident.span.end,
+                    },
+                )
+            }
+            _ => {
+                self.errors.push(
+                    YuuError::builder()
+                        .kind(ErrorKind::MissingToken)
+                        .message("Expected identifier after 'enum' keyword".to_string())
+                        .source(
+                            self.lexer.code_info.source.clone(),
+                            self.lexer.code_info.file_name.clone(),
+                        )
+                        .span(ident.span.clone(), "expected enum name here")
+                        .help("Enum declarations must be followed by a valid identifier")
+                        .build(),
+                );
+                return Err(self.lexer.synchronize());
+            }
+        };
+        Ok(out)
+    }
+
+    pub fn parse_enum_variant(&mut self) -> ParseResult<EnumVariant> {
+        let ident_token = self.lexer.next_token();
+        match ident_token.kind {
+            TokenKind::Ident(name) => {
+                let start_span = ident_token.span.clone();
+
+                // Check if there's a colon for a data variant
+                let peek = self.lexer.peek();
+                if peek.kind == TokenKind::Colon {
+                    // Data variant: consume colon and parse type
+                    let _ = self.lexer.next_token(); // consume colon
+                    let data_type = self.parse_type()?;
+                    let end_span = data_type.span().end;
+
+                    Ok(EnumVariant {
+                        id: 0,
+                        span: start_span.start..end_span,
+                        name,
+                        data_type: Some(data_type),
+                    })
+                } else {
+                    // Unit variant: no type
+                    Ok(EnumVariant {
+                        id: 0,
+                        span: start_span.clone(),
+                        name,
+                        data_type: None,
+                    })
+                }
+            }
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        ident_token.span.clone(),
+                        "an identifier".to_string(),
+                        ident_token.kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected a variant name identifier".to_string()),
+                );
+                Err(self.lexer.synchronize())
+            }
+        }
+    }
+
+    pub fn parse_enum_variants(&mut self) -> ParseResult<Vec<EnumVariant>> {
+        let mut variants = Vec::new();
+        loop {
+            let la = self.lexer.peek();
+            if la.kind == TokenKind::BlockTerminator {
+                return Ok(variants);
+            }
+            let variant = self.parse_enum_variant()?;
+            variants.push(variant);
+            let la = self.lexer.peek();
+            if la.kind == TokenKind::Comma {
+                let _ = self.lexer.next_token();
+            } else if la.kind != TokenKind::BlockTerminator {
+                self.errors.push(YuuError::unexpected_token(
+                    la.span.clone(),
+                    "a comma ',' or a block terminator '.'".to_string(),
+                    la.kind.clone(),
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                ).with_help("Enum variants should be separated by commas, with the list ending with a block terminator ' .'".to_string()));
+                return Err(self.lexer.synchronize());
+            }
+        }
+    }
+
+    pub fn parse_enum_def(&mut self) -> ParseResult<(Span, EnumDefStructural)> {
+        let (span, decl) = self.parse_enum_decl()?;
+        let _ = self.lexer.expect_colon(&mut self.errors)?;
+        let variants = self.parse_enum_variants()?;
+        let terminator = self
+            .lexer
+            .expect(&[TokenKind::BlockTerminator], &mut self.errors)?;
+        let span = span.start..terminator.span.end;
+        let out = EnumDefStructural {
+            id: 0,
+            span: span.clone(),
+            decl,
+            variants,
+        };
+        Ok((span, out))
+    }
+
     pub fn parse_struct_decl(&mut self) -> ParseResult<(Span, StructDeclStructural)> {
         let struct_tkn = self
             .lexer
@@ -1181,7 +1318,7 @@ impl Parser {
         let ident = self.lexer.expect_tag(
             TokenKind::Ident("an identifier naming the struct".intern()),
             &mut self.errors,
-        )?; // TODO: Make this lazy evaluated
+        )?; // TODO: Really ugly - we are using the identifier token as error msg.
         let name = match ident.kind {
             TokenKind::Ident(ident) => ident,
             _ => unreachable!("We should have an identifier here"),
@@ -1300,6 +1437,10 @@ impl Parser {
             TokenKind::StructKw => {
                 let (range, struct_) = self.parse_struct_def()?;
                 (range, StructuralNode::StructDef(struct_))
+            }
+            TokenKind::EnumKw => {
+                let (range, enum_) = self.parse_enum_def()?;
+                (range, StructuralNode::EnumDef(enum_))
             }
             _ => {
                 self.errors.push(

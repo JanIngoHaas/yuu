@@ -234,9 +234,6 @@ impl AddId for StructuralNode {
                     field.add_id(generator);
                 }
             }
-            StructuralNode::EnumDecl(enum_decl_structural) => {
-                enum_decl_structural.id = generator.next();
-            }
             StructuralNode::EnumDef(enum_def_structural) => {
                 enum_def_structural.decl.add_id(generator);
                 enum_def_structural.id = generator.next();
@@ -339,7 +336,6 @@ impl GetId for StructuralNode {
             StructuralNode::Error(x) => *x,
             StructuralNode::StructDecl(struct_decl_structural) => struct_decl_structural.id,
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.id,
-            StructuralNode::EnumDecl(enum_decl_structural) => enum_decl_structural.id,
             StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.id,
         }
     }

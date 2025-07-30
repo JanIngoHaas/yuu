@@ -1,7 +1,5 @@
+use crate::pass_yir_lowering::yir::Module;
 use miette::IntoDiagnostic;
-use crate::{
-    pass_yir_lowering::yir::Module,
-};
 
 pub struct YirToString;
 
