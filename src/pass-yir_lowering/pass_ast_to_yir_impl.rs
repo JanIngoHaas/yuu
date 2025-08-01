@@ -1,13 +1,15 @@
+use std::intrinsics::offset;
+
 use crate::{
     pass_parse::{
-        GetId,
+        EnumPattern, GetId, RefutablePatternNode,
         ast::{
             AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
             StructuralNode, UnaryOp,
         },
         token::{Integer, Token, TokenKind},
     },
-    pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry},
+    pass_type_inference::{FieldsMap, PrimitiveType, TypeInfo, TypeRegistry},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
@@ -279,8 +281,68 @@ impl<'a> TransientData<'a> {
                 todo!("Enum instantiation YIR lowering not yet implemented")
             }
             ExprNode::Match(m) => {
-                // TODO: Implement match expression in YIR lowering
-                todo!("Match expression YIR lowering not yet implemented")
+                // Lower the scrutinee expression
+                let scrutinee = self.lower_expr(&m.scrutinee);
+
+                // Create a target variable for the match result
+                let target_var =
+                    self.function
+                        .make_alloca("match_result".intern(), self.get_type(m.id), None);
+
+                let merge_label = self.function.add_block("match_merge".intern());
+
+                let mut offset_labels = IndexMap::new();
+
+                for arm in m.arms.iter() {
+                    match &*arm.pattern {
+                        RefutablePatternNode::Enum(enum_pattern) => {
+                            // Create a label for this case
+                            let case_label = self.function.add_block("match_case".intern());
+
+                            // We are in the case block now
+                            self.function.set_current_block(&case_label);
+
+                            match enum_pattern {
+                                EnumPattern::Unit(enum_unit_pattern) => {
+                                    let enum_info = self
+                                        .tr
+                                        .resolve_enum(enum_unit_pattern.enum_name)
+                                        .expect("Compiler bug: enum not found in lowering to YIR");
+
+                                    let current_variant = enum_info.variants.get(&enum_unit_pattern.variant_name).expect("Compiler bug: enum variant not found in lowering to YIR");
+                                    let variant_idx = current_variant.variant_idx;
+                                    offset_labels.insert(variant_idx, case_label);
+                                }
+                                EnumPattern::WithData(enum_data_pattern) => {
+                                    // TODO: Claude: lower binding here -> refactor corresponding functions
+                                    // TODO: Claude: Here, we have some redundancy, i.e. enum_data_pattern and enum_unit_pattern could have a common struct and then just an Option<> for the inner refutable pattern... This would make things easier for us. Try to refactor this here and everywhere else.
+                                    let binding = "hi".intern();
+                                    let enum_info = self
+                                        .tr
+                                        .resolve_enum(enum_data_pattern.enum_name)
+                                        .expect("Compiler bug: enum not found in lowering to YIR");
+
+                                    let current_variant = enum_info.variants.get(&enum_data_pattern.variant_name).expect("Compiler bug: enum variant not found in lowering to YIR");
+                                    let variant_idx = current_variant.variant_idx;
+                                    offset_labels.insert(variant_idx, case_label);
+                                }
+                            }
+                            let arm_body_lowered = self.lower_expr(&arm.body);
+
+                            // Store the result of the arm body into the target variable
+                            self.function.make_store(target_var, arm_body_lowered);
+
+                            // Jump to the merge block after executing the arm
+                            self.function.make_jump_if_no_terminator(merge_label);
+                        }
+                    }
+                }
+
+                // Now we have all the case labels, we can create the jump table
+                self.function
+                    .make_jump_table(scrutinee, offset_labels, None); // TODO: For now: No default case, need to do this later though!
+
+                Operand::Variable(target_var)
             }
         }
     }

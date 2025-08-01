@@ -2,6 +2,7 @@ use crate::{
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode},
     pass_type_inference::{
+        EnumVariantInfo,
         binding_info::BindingInfo,
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
@@ -98,9 +99,25 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 },
             );
         }
-        StructuralNode::EnumDef(_) => {
-            // TODO: Implement enum definition processing
-            todo!("Enum definition processing not yet implemented")
+        StructuralNode::EnumDef(ed) => {
+            let mut enum_defs = FieldsMap::default();
+
+            for variant in &ed.variants {
+                let evi = EnumVariantInfo {
+                    variant_name: variant.name,
+                    variant: variant.data_type.as_ref().map(|x| infer_type(x, data)),
+                };
+                enum_defs.insert(variant.name, evi);
+            }
+
+            data.type_registry.add_enum(
+                ed.decl.name,
+                enum_defs,
+                BindingInfo {
+                    id: ed.id,
+                    src_location: Some(ed.span.clone()),
+                },
+            );
         }
     };
 }

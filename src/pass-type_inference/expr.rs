@@ -877,7 +877,6 @@ pub fn infer_expr(
                             match (&ei.data, variant.variant) {
                                 (Some(dexpr), Some(reg_ty)) => {
                                     let ty = infer_expr(&dexpr, block, data, function_args);
-                                    // TODO: Claude: Answer me this: Do I have insert the type of the data expression into the type registry? I am not sure anymore how I designed it. Does the caller need to insert or the callee?
                                     // Check if the data type matches the variant's data type
                                     if let Err(err) = ty.unify(reg_ty) {
                                         let err_msg = YuuError::builder()

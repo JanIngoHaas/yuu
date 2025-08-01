@@ -83,17 +83,27 @@ impl CLowering {
                 write!(data.output, "struct {}", struct_type.name)
             }
             TypeInfo::Enum(enum_type) => {
-                // TODO: Claude: How should we lower enums to C unions?
-                /*
-                Maybe like this?:
-                struct A {
-                    union{
-                        struct B <-- This is the "variant name" {int x;};
-                        struct C {int y;};
+                // Generate tagged union structure for enum
+                if let Some(enum_info) = data.tr.resolve_enum(enum_type.name) {
+                    write!(data.output, "struct {} {{\n", enum_type.name)?;
+                    write!(data.output, "    int tag;\n")?;
+                    write!(data.output, "    union {{\n")?;
+                    
+                    for (variant_name, variant_info) in &enum_info.variants {
+                        if let Some(variant_type) = variant_info.variant {
+                            write!(data.output, "        struct {{ ")?;
+                            self.gen_type(data, variant_type)?;
+                            write!(data.output, " data; }} {};\n", variant_name)?;
+                        }
+                        // Unit variants don't need any struct - just the tag discriminates them
                     }
+                    
+                    write!(data.output, "    }} data;\n")?;
+                    write!(data.output, "}}")
+                } else {
+                    // Fallback if enum not found in registry
+                    write!(data.output, "struct {}", enum_type.name)
                 }
-                 */
-                write!(data.output, "struct {}", enum_type.name)
             }
         }
     }

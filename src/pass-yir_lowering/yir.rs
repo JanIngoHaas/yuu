@@ -1,6 +1,6 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::StructFieldInfo;
+use crate::pass_type_inference::{FieldsMap, StructFieldInfo};
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
 };
@@ -203,6 +203,11 @@ pub enum ControlFlow {
         condition: Operand,
         if_true: Label,
         if_false: Label,
+    },
+    JumpTable {
+        offset: Operand,                    // The value that we offset the jump table by
+        jump_targets: IndexMap<u64, Label>, // List of jump targets - the index (key) is the value of the offset. Reason: You can have a jump table with non-sequential offsets.
+        default: Option<Label>,             // Default jump target if offset is out of bounds
     },
     // Return from function
     Return(Option<Operand>),
@@ -601,6 +606,31 @@ impl Function {
             if_false: else_label,
         });
     }
+
+    pub fn make_jump_table(
+        &mut self,
+        // TODO: Claude: Offset is the wrong name here - we are not actually bumping an instruction counter by this offset. Not sure, what to call it, though. Give me some inspiration here.
+        offset: Operand,
+        jump_targets: IndexMap<u64, Label>,
+        default: Option<Label>,
+    ) {
+        let loaded_offset = self.load_if_pointer(offset, "jump_table_offset".intern());
+
+        // TODO: Claude: WE NEEEEEEED to implement u64 support now, especially for jump table support...
+        debug_assert_eq!(
+            loaded_offset.ty(),
+            primitive_i64(),
+            "Jump table offset must be i64, got {}",
+            loaded_offset.ty()
+        );
+
+        self.set_terminator(ControlFlow::JumpTable {
+            offset: loaded_offset,
+            jump_targets,
+            default,
+        });
+    }
+
     pub fn make_branch(&mut self, condition: Operand) -> (Label, Label) {
         // Case j) - Yes, load the condition first
         let loaded_condition = self.load_if_pointer(condition, "branch_condition".intern());

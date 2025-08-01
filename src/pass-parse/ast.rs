@@ -2,7 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::pass_parse::token::Token;
+use crate::{pass_parse::token::Token, pass_type_inference::FieldsMap};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,

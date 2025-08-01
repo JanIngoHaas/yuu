@@ -28,6 +28,7 @@ pub struct StructFieldInfo {
 #[derive(Clone)]
 pub struct EnumVariantInfo {
     pub variant_name: Ustr,
+    pub variant_idx: u64,
     pub variant: Option<&'static TypeInfo>,
 }
 
