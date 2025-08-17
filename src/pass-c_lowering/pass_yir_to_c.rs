@@ -1,7 +1,7 @@
 // YIR to C lowering pass - transforms the YIR intermediate representation to C code
 use crate::pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry};
 use crate::pass_yir_lowering::{
-    BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Module,
+    BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
     Operand, UnaryOp, Variable,
 };
 use miette::IntoDiagnostic;
@@ -38,8 +38,8 @@ impl CLowering {
         write!(f, "{}_{}", var.name(), var.id())
     }
 
-    fn write_label_name(label: &str, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
-        write!(f, "{}{}", PREFIX_LABEL, label)
+    fn write_label(label: &Label, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}_{}", PREFIX_LABEL, label.name(), label.id())
     }
 
     fn write_function_name(
@@ -64,6 +64,7 @@ impl CLowering {
                 PrimitiveType::F64 => write!(data.output, "double"),
                 PrimitiveType::F32 => write!(data.output, "float"),
                 PrimitiveType::I64 => write!(data.output, "int64_t"),
+                PrimitiveType::U64 => write!(data.output, "uint64_t"),
                 PrimitiveType::Nil => write!(data.output, "void"),
             },
             TypeInfo::Function(_function_type) => {
@@ -83,27 +84,8 @@ impl CLowering {
                 write!(data.output, "struct {}", struct_type.name)
             }
             TypeInfo::Enum(enum_type) => {
-                // Generate tagged union structure for enum
-                if let Some(enum_info) = data.tr.resolve_enum(enum_type.name) {
-                    write!(data.output, "struct {} {{\n", enum_type.name)?;
-                    write!(data.output, "    int tag;\n")?;
-                    write!(data.output, "    union {{\n")?;
-                    
-                    for (variant_name, variant_info) in &enum_info.variants {
-                        if let Some(variant_type) = variant_info.variant {
-                            write!(data.output, "        struct {{ ")?;
-                            self.gen_type(data, variant_type)?;
-                            write!(data.output, " data; }} {};\n", variant_name)?;
-                        }
-                        // Unit variants don't need any struct - just the tag discriminates them
-                    }
-                    
-                    write!(data.output, "    }} data;\n")?;
-                    write!(data.output, "}}")
-                } else {
-                    // Fallback if enum not found in registry
-                    write!(data.output, "struct {}", enum_type.name)
-                }
+                // Reference the struct definition
+                write!(data.output, "struct {}", enum_type.name)
             }
         }
     }
@@ -121,6 +103,7 @@ impl CLowering {
                     write!(data.output, "INT64_C(({}))", c)
                 }
             }
+            Operand::U64Const(c) => write!(data.output, "UINT64_C({})", c),
             Operand::F32Const(c) => {
                 if c.fract() == 0.0 {
                     write!(data.output, "{:.1}f", c)
@@ -233,6 +216,7 @@ impl CLowering {
                     BinOp::Sub => write!(data.output, " - "),
                     BinOp::Mul => write!(data.output, " * "),
                     BinOp::Div => write!(data.output, " / "),
+                    BinOp::Mod => write!(data.output, " % "),
                     BinOp::Eq => write!(data.output, " == "),
                     BinOp::NotEq => write!(data.output, " != "),
                     BinOp::LessThan => write!(data.output, " < "),
@@ -272,6 +256,32 @@ impl CLowering {
                 write!(data.output, ")")?;
                 writeln!(data.output, ";")?;
             }
+            Instruction::MakeEnum {
+                target,
+                variant_name,
+                variant_index,
+                data: enum_data,
+            } => {
+                // Declare the enum variable
+                self.gen_variable_decl(data, target)?;
+                writeln!(data.output, ";")?;
+                write!(data.output, "    ")?;
+
+                // Initialize the enum with designated initializers
+                write!(data.output, "*")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, " = (")?;
+                self.gen_type(data, target.ty().deref_ptr())?;
+                write!(data.output, "){{.tag = {}", variant_index)?;
+
+                // Set data field if present
+                if let Some(data_operand) = enum_data {
+                    write!(data.output, ", .data.{}_data = ", variant_name)?;
+                    self.gen_operand(data, data_operand)?;
+                }
+
+                writeln!(data.output, "}};")?;
+            }
         }
         Ok(())
     }
@@ -281,7 +291,7 @@ impl CLowering {
         block: &BasicBlock,
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
-        Self::write_label_name(block.label.name(), &mut data.output)?;
+        Self::write_label(&block.label, &mut data.output)?;
         writeln!(data.output, ":;")?;
 
         for instruction in &block.instructions {
@@ -291,7 +301,7 @@ impl CLowering {
         match &block.terminator {
             ControlFlow::Jump { target } => {
                 write!(data.output, "    goto ")?;
-                Self::write_label_name(target.name(), &mut data.output)?;
+                Self::write_label(target, &mut data.output)?;
                 writeln!(data.output, ";")?;
             }
             ControlFlow::Branch {
@@ -303,11 +313,11 @@ impl CLowering {
                 self.gen_operand(data, condition)?;
                 writeln!(data.output, ") {{")?;
                 write!(data.output, "        goto ")?;
-                Self::write_label_name(if_true.name(), &mut data.output)?;
+                Self::write_label(&if_true, &mut data.output)?;
                 writeln!(data.output, ";")?;
                 writeln!(data.output, "    }} else {{")?;
                 write!(data.output, "        goto ")?;
-                Self::write_label_name(if_false.name(), &mut data.output)?;
+                Self::write_label(&if_false, &mut data.output)?;
                 writeln!(data.output, ";")?;
                 writeln!(data.output, "    }}")?;
             }
@@ -321,6 +331,30 @@ impl CLowering {
             }
             ControlFlow::Unterminated => {
                 writeln!(data.output, "    // UNTERMINATED BLOCK")?;
+            }
+            ControlFlow::JumpTable {
+                scrutinee,
+                enum_name: _,
+                jump_targets,
+                default,
+            } => {
+                writeln!(data.output, "    switch (")?;
+                self.gen_operand(data, scrutinee)?;
+                writeln!(data.output, ".tag) {{")?;
+
+                for (variant_name, label) in jump_targets {
+                    write!(data.output, "        case {}: goto ", variant_name)?;
+                    Self::write_label(&label, &mut data.output)?;
+                    writeln!(data.output, ";")?;
+                }
+
+                if let Some(default_label) = default {
+                    write!(data.output, "        default: goto ")?;
+                    Self::write_label(&default_label, &mut data.output)?;
+                    writeln!(data.output, ";")?;
+                }
+
+                writeln!(data.output, "    }}")?;
             }
         }
         writeln!(data.output)?;
@@ -379,6 +413,48 @@ impl CLowering {
         Ok(())
     }
 
+    fn def_enum(&self, data: &mut TransientData, enum_name: Ustr) -> Result<(), std::fmt::Error> {
+        let einfo = data
+            .tr
+            .resolve_enum(enum_name)
+            .expect("Compiler Bug: Enum not found when lowering to C");
+
+        writeln!(data.output, "struct {} {{", einfo.name)?;
+
+        // Anonymous enum for variant tags
+        write!(data.output, "    enum {{ ")?;
+        let mut first = true;
+        for (variant_name, variant_info) in &einfo.variants {
+            if !first {
+                write!(data.output, ", ")?;
+            }
+            write!(
+                data.output,
+                "{} = {}",
+                variant_name, variant_info.variant_idx
+            )?;
+            first = false;
+        }
+        writeln!(data.output, " }} tag;")?;
+
+        // Union for data fields (only if there are variants with data)
+        let has_data_variants = einfo.variants.values().any(|v| v.variant.is_some());
+        if has_data_variants {
+            writeln!(data.output, "    union {{")?;
+            for (variant_name, variant_info) in &einfo.variants {
+                if let Some(variant_type) = variant_info.variant {
+                    write!(data.output, "        ")?;
+                    self.gen_type(data, variant_type)?;
+                    writeln!(data.output, " {}_data;", variant_name)?;
+                }
+            }
+            writeln!(data.output, "    }} data;")?;
+        }
+
+        writeln!(data.output, "}};")?;
+        Ok(())
+    }
+
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         writeln!(data.output, "#include <stdint.h>")?;
         writeln!(data.output, "#include <stdbool.h>")?;
@@ -387,6 +463,12 @@ impl CLowering {
             self.def_struct(data, *sname)?;
         }
         if !data.module.structs.is_empty() {
+            writeln!(data.output)?;
+        }
+        for ename in &data.module.enums {
+            self.def_enum(data, *ename)?;
+        }
+        if !data.module.enums.is_empty() {
             writeln!(data.output)?;
         }
 

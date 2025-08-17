@@ -132,7 +132,9 @@ fn test_rectangle_operations() {
             if px >= rect.x && px <= rect.x + rect.width:
                 if py >= rect.y && py <= rect.y + rect.height:
                     return 1;
-            return 0;
+                end
+            end
+            return 0 .
         
         fn main() -> i64:
             let rect = Rectangle { x: 10.0, y: 20.0, width: 30.0, height: 40.0 };
@@ -294,8 +296,8 @@ fn test_statistics_operations() {
             };
         
         fn stats_average(stats: Statistics) -> f32:
-            if stats.count == 0: return 0.0;
-            else: return stats.sum / stats.count;
+            if stats.count == 0: return 0.0 .
+            else: return stats.sum / stats.count .
         
         fn main() -> i64:
             let mut stats = Statistics { sum: 0.0, count: 0, min: 0.0, max: 0.0 };

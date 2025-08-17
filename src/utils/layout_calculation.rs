@@ -90,6 +90,10 @@ pub fn calc_primitive_layout(primitive: PrimitiveType, platform: TargetPlatform)
             size: calc_i64_size(),
             alignment: calc_i64_alignment(platform),
         },
+        PrimitiveType::U64 => LayoutInfo {
+            size: calc_i64_size(),                   // Same size as i64
+            alignment: calc_i64_alignment(platform), // Same alignment as i64
+        },
         PrimitiveType::F64 => LayoutInfo {
             size: calc_f64_size(),
             alignment: calc_f64_alignment(platform),
@@ -128,7 +132,7 @@ pub fn calc_type_layout(ty: &TypeInfo, platform: TargetPlatform) -> LayoutInfo {
                 alignment: 1,
             }
         }
-        TypeInfo::Enum(e) => {
+        TypeInfo::Enum(_e) => {
             todo!("Later...")
         }
         TypeInfo::Inactive => panic!("Cannot calculate layout for inactive type"),

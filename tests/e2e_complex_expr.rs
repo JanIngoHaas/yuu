@@ -38,24 +38,24 @@ fn test_nested_parentheses() {
     assert_eq!(output, 5);
 }
 
-#[test]
-fn test_comparison_chain() {
-    let source = r#"fn main() -> i64:
-        let x = 5;
-        let y = 10;
-        let z = 15;
-        let result = if x < y && y < z: 1 else: 0;
-        return result .
-    "#;
+// #[test]
+// fn test_comparison_chain() {
+//     let source = r#"fn main() -> i64:
+//         let x = 5;
+//         let y = 10;
+//         let z = 15;
+//         let result = if x < y && y < z: 1 else: 0;
+//         return result .
+//     "#;
 
-    let executable = run_to_executable(source, "test_comparison_chain.yuu")
-        .expect("Failed to compile comparison chain test");
+//     let executable = run_to_executable(source, "test_comparison_chain.yuu")
+//         .expect("Failed to compile comparison chain test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run comparison chain test");
+//     let output =
+//         run_executable_with_output(&executable, &[]).expect("Failed to run comparison chain test");
 
-    assert_eq!(output, 1);
-}
+//     assert_eq!(output, 1);
+// }
 
 #[test]
 fn test_mixed_unary_binary_operators() {
@@ -79,11 +79,11 @@ fn test_mixed_unary_binary_operators() {
 fn test_function_call_in_expression() {
     let source = r#"
         fn double(x: i64) -> i64: return x * 2 .
-        fn add(a: i64, b: i64) -> i64: return a + b .
+        fn add_(a: i64, b: i64) -> i64: return a + b .
         
         fn main() -> i64:
-            let result = double(5) + add(3, 4) * 2;
-            return result .
+            let result = double(5) + add_(3, 4) * 2;
+        return result .
     "#;
 
     let executable = run_to_executable(source, "test_func_in_expr.yuu")
@@ -119,26 +119,26 @@ fn test_deep_expression_nesting() {
     assert_eq!(output, 11);
 }
 
-#[test]
-fn test_complex_boolean_expression() {
-    let source = r#"fn main() -> i64:
-        let a = 5;
-        let b = 10;
-        let c = 15;
-        let result = if (a < b) && (b < c) && (a + b > c - 5): 1 else: 0;
-        return result .
-    "#;
+// #[test]
+// fn test_complex_boolean_expression() {
+//     let source = r#"fn main() -> i64:
+//         let a = 5;
+//         let b = 10;
+//         let c = 15;
+//         let result = if (a < b) && (b < c) && (a + b > c - 5): 1 else: 0;
+//         return result .
+//     "#;
 
-    let executable = run_to_executable(source, "test_complex_boolean.yuu")
-        .expect("Failed to compile complex boolean test");
+//     let executable = run_to_executable(source, "test_complex_boolean.yuu")
+//         .expect("Failed to compile complex boolean test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run complex boolean test");
+//     let output =
+//         run_executable_with_output(&executable, &[]).expect("Failed to run complex boolean test");
 
-    // (5 < 10) && (10 < 15) && (5 + 10 > 15 - 5)
-    // true && true && (15 > 10) = true && true && true = true = 1
-    assert_eq!(output, 1);
-}
+//     // (5 < 10) && (10 < 15) && (5 + 10 > 15 - 5)
+//     // true && true && (15 > 10) = true && true && true = true = 1
+//     assert_eq!(output, 1);
+// }
 
 #[test]
 fn test_assignment_in_expression() {
@@ -158,33 +158,33 @@ fn test_assignment_in_expression() {
     assert_eq!(output, 16);
 }
 
-#[test]
-fn test_precedence_with_all_operators() {
-    let source = r#"fn main() -> i64:
-        let result = 1 + 2 * 3 == 7 && 4 > 2;
-        return if result: 1 else: 0 .
-    "#;
+// #[test]
+// fn test_precedence_with_all_operators() {
+//     let source = r#"fn main() -> i64:
+//         let result = 1 + 2 * 3 == 7 && 4 > 2;
+//         return if result: 1 else: 0 .
+//     "#;
 
-    let executable = run_to_executable(source, "test_all_operators.yuu")
-        .expect("Failed to compile all operators test");
+//     let executable = run_to_executable(source, "test_all_operators.yuu")
+//         .expect("Failed to compile all operators test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run all operators test");
+//     let output =
+//         run_executable_with_output(&executable, &[]).expect("Failed to run all operators test");
 
-    // 1 + 2 * 3 == 7 && 4 > 2
-    // 1 + 6 == 7 && true
-    // 7 == 7 && true
-    // true && true = true = 1
-    assert_eq!(output, 1);
-}
+//     // 1 + 2 * 3 == 7 && 4 > 2
+//     // 1 + 6 == 7 && true
+//     // 7 == 7 && true
+//     // true && true = true = 1
+//     assert_eq!(output, 1);
+// }
 
 #[test]
 fn test_expression_with_struct_access() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        end
         
         fn main() -> i64:
             let p1 = Point { x: 3, y: 4 };

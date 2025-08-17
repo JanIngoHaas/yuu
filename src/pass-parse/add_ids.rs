@@ -108,13 +108,12 @@ impl AddId for ExprNode {
                 for arm in &mut match_expr.arms {
                     arm.id = generator.next();
                     match &mut *arm.pattern {
-                        RefutablePatternNode::Enum(enum_pattern) => match enum_pattern {
-                            EnumPattern::Unit(unit_pattern) => unit_pattern.id = generator.next(),
-                            EnumPattern::WithData(data_pattern) => {
-                                data_pattern.id = generator.next();
-                                data_pattern.binding.add_id(generator);
+                        RefutablePatternNode::Enum(enum_pattern) => {
+                            enum_pattern.id = generator.next();
+                            if let Some(binding) = &mut enum_pattern.binding {
+                                binding.add_id(generator);
                             }
-                        },
+                        }
                     }
                     arm.body.add_id(generator);
                 }
@@ -170,13 +169,12 @@ impl AddId for BindingNode {
 impl AddId for RefutablePatternNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
-            RefutablePatternNode::Enum(enum_pattern) => match enum_pattern {
-                EnumPattern::Unit(unit_pattern) => unit_pattern.id = generator.next(),
-                EnumPattern::WithData(data_pattern) => {
-                    data_pattern.id = generator.next();
-                    data_pattern.binding.add_id(generator);
+            RefutablePatternNode::Enum(enum_pattern) => {
+                enum_pattern.id = generator.next();
+                if let Some(binding) = &mut enum_pattern.binding {
+                    binding.add_id(generator);
                 }
-            },
+            }
         }
     }
 }

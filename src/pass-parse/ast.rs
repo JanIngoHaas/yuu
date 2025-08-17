@@ -2,7 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::{pass_parse::token::Token, pass_type_inference::FieldsMap};
+use crate::pass_parse::token::Token;
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -22,6 +22,7 @@ pub enum BinOp {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     Eq,
     NotEq,
     Lt,
@@ -37,6 +38,7 @@ impl Display for BinOp {
             BinOp::Subtract => write!(f, "-"),
             BinOp::Multiply => write!(f, "*"),
             BinOp::Divide => write!(f, "/"),
+            BinOp::Modulo => write!(f, "%"),
             BinOp::Eq => write!(f, "=="),
             BinOp::NotEq => write!(f, "!="),
             BinOp::Lt => write!(f, "<"),
@@ -54,6 +56,7 @@ impl BinOp {
             BinOp::Subtract => "sub",
             BinOp::Multiply => "mul",
             BinOp::Divide => "div",
+            BinOp::Modulo => "mod",
             BinOp::Eq => "eq",
             BinOp::NotEq => "ne",
             BinOp::Lt => "lt",
@@ -164,7 +167,7 @@ pub struct IdentExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AssignmentExpr {
-    pub lhs: Box<ExprNode>, // Changed from Box<BindingNode>
+    pub lhs: Box<ExprNode>,
     pub rhs: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
@@ -178,28 +181,14 @@ pub struct MemberAccessExpr {
     pub id: NodeId,
 }
 
+// Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
-pub struct EnumUnitPattern {
+pub struct EnumPattern {
     pub enum_name: Ustr,
     pub variant_name: Ustr,
     pub span: Span,
     pub id: NodeId,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct EnumDataPattern {
-    pub enum_name: Ustr,
-    pub variant_name: Ustr,
-    pub binding: Box<BindingNode>,
-    pub span: Span,
-    pub id: NodeId,
-}
-
-// Enum-specific pattern for variant matching
-#[derive(Serialize, Deserialize, Clone)]
-pub enum EnumPattern {
-    Unit(EnumUnitPattern),     // enum name, variant name
-    WithData(EnumDataPattern), // Blue(pattern) - enum name, variant name, inner pattern
+    pub binding: Option<Box<BindingNode>>, // None for unit patterns, Some for data patterns
 }
 
 /// Refutable patterns...
@@ -295,7 +284,7 @@ impl BindingNode {
 impl Display for BindingNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BindingNode::Ident(ident) => write!(f, "{}", ident.name),
+            BindingNode::Ident(ident) => write!(f, "{}(id: {})", ident.name, ident.id),
         }
     }
 }

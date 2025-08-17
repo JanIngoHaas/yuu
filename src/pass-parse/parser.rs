@@ -33,7 +33,7 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
-            TokenKind::Asterix | TokenKind::Slash => (11, 12), // Multiplication/division (left-associative)
+            TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
             TokenKind::EqEq | TokenKind::NotEq => (5, 6), // Equality/Inequality (left-associative)
@@ -44,7 +44,7 @@ impl Parser {
 
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
-            TokenKind::Plus | TokenKind::Minus => 7, // Unary operators higher than binary
+            TokenKind::Plus | TokenKind::Minus => 13, // Unary operators bind tighter than * and +
             _ => -1,
         }
     }
@@ -106,8 +106,14 @@ impl Parser {
             }
 
             TokenKind::Ident(_) => {
-                // Check if this identifier is followed by a left brace (struct instantiation)
+                // Check if this identifier is followed by a double colon (enum instantiation)
                 let peek_next = self.lexer.peek_at(1);
+                if peek_next.kind == TokenKind::DoubleColon {
+                    // This is an enum instantiation expression
+                    return self.parse_enum_instantiation_expr();
+                }
+
+                // Check if this identifier is followed by a left brace (struct instantiation)
                 if peek_next.kind == TokenKind::LBrace {
                     // This is a struct instantiation expression
                     return self.parse_struct_instantiation_expr();
@@ -205,6 +211,7 @@ impl Parser {
             TokenKind::Minus => BinOp::Subtract,
             TokenKind::Asterix => BinOp::Multiply,
             TokenKind::Slash => BinOp::Divide,
+            TokenKind::Percent => BinOp::Modulo,
             TokenKind::EqEq => BinOp::Eq,
             TokenKind::NotEq => BinOp::NotEq,
             TokenKind::Lt => BinOp::Lt,
@@ -425,6 +432,7 @@ impl Parser {
                 | TokenKind::Minus
                 | TokenKind::Asterix
                 | TokenKind::Slash
+                | TokenKind::Percent
                 | TokenKind::Lt
                 | TokenKind::Gt
                 | TokenKind::NotEq
@@ -871,6 +879,60 @@ impl Parser {
         }
     }
 
+    pub fn parse_enum_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        // First token should be the enum name (identifier)
+        let enum_token = self.lexer.next_token();
+        let enum_name = match enum_token.kind {
+            TokenKind::Ident(name) => name,
+            _ => unreachable!("Should only be called when we know we have an identifier"),
+        };
+
+        // Expect double colon
+        let _ = self
+            .lexer
+            .expect(&[TokenKind::DoubleColon], &mut self.errors)?;
+
+        // Get variant name
+        let variant_token = self.lexer.next_token();
+        let variant_name = match variant_token.kind {
+            TokenKind::Ident(name) => name,
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        variant_token.span.clone(),
+                        "an identifier".to_string(),
+                        variant_token.kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected a variant name identifier after '::'".to_string()),
+                );
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        // Check for optional data expression in parentheses
+        let (data, end_span) = if self.lexer.peek().kind == TokenKind::LParen {
+            let _ = self.lexer.next_token(); // consume '('
+            let (_, expr) = self.parse_expr()?;
+            let rparen = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
+            (Some(Box::new(expr)), rparen.span.clone())
+        } else {
+            (None, variant_token.span.clone())
+        };
+
+        let span = enum_token.span.start..end_span.end;
+        let enum_instantiation = EnumInstantiationExpr {
+            id: 0,
+            span: span.clone(),
+            enum_name,
+            variant_name,
+            data,
+        };
+
+        Ok((span, ExprNode::EnumInstantiation(enum_instantiation)))
+    }
+
     pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {
         let colon = self.lexer.expect_colon(&mut self.errors)?;
         let mut stmts = Vec::new();
@@ -941,7 +1003,9 @@ impl Parser {
             TokenKind::Ident(name_discriminator) => {
                 let token = self.lexer.next_token(); // consume identifier
                 let span = token.span.clone();
-                let _ = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
+                let _ = self
+                    .lexer
+                    .expect(&[TokenKind::DoubleColon], &mut self.errors)?;
                 let discriminee = self.lexer.next_token();
                 let name_discriminee = match discriminee.kind {
                     TokenKind::Ident(name_discriminee) => name_discriminee,
@@ -954,7 +1018,7 @@ impl Parser {
                                 self.lexer.code_info.source.clone(),
                                 self.lexer.code_info.file_name.clone(),
                             )
-                            .with_help("Expected a variant name identifier after ':'".to_string()),
+                            .with_help("Expected a variant name identifier after '::'".to_string()),
                         );
                         return Err(self.lexer.synchronize());
                     }
@@ -968,26 +1032,27 @@ impl Parser {
                         let binding = self.parse_binding()?;
                         let last_tkn = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
                         let span = span.start..last_tkn.span.end;
-                        let enum_data = EnumDataPattern {
+                        let enum_pattern = EnumPattern {
                             enum_name: name_discriminator,
                             variant_name: name_discriminee,
-                            binding: Box::new(binding),
+                            binding: Some(Box::new(binding)),
                             span: span.clone(),
                             id: 0,
                         };
-                        let node = RefutablePatternNode::Enum(EnumPattern::WithData(enum_data));
+                        let node = RefutablePatternNode::Enum(enum_pattern);
                         Ok((span, node))
                     }
                     _ => {
                         // We only have a unit variant
                         let final_span = span.start..discriminee.span.end;
-                        let enum_unit = EnumUnitPattern {
+                        let enum_pattern = EnumPattern {
                             enum_name: name_discriminator,
                             variant_name: name_discriminee,
+                            binding: None,
                             span: final_span.clone(),
                             id: 0,
                         };
-                        let node = RefutablePatternNode::Enum(EnumPattern::Unit(enum_unit));
+                        let node = RefutablePatternNode::Enum(enum_pattern);
                         Ok((final_span, node))
                     }
                 }

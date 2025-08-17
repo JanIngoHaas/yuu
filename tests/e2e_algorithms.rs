@@ -10,7 +10,7 @@ fn test_fibonacci_recursive() {
         fn fibonacci(n: i64) -> i64:
             if n <= 1: return n .
             else: return fibonacci(n - 1) + fibonacci(n - 2) .
-        .
+        end
 
         fn main() -> i64: return fibonacci(10) .
     "#;
@@ -30,7 +30,8 @@ fn test_factorial_recursive() {
     let source = r#"
         fn factorial(n: i64) -> i64:
             if n <= 1: return 1 .
-            else: return n * factorial(n - 1) . .
+            else: return n * factorial(n - 1) .
+        end
         
         fn main() -> i64: return factorial(6) .
     "#;
@@ -53,8 +54,9 @@ fn test_factorial_iterative() {
             let mut i = 1;
             while i <= n:
                 result = result * i;
-                i = i + 1 .
-            return result .
+                i = i + 1;
+            end
+        return result .
         
         fn main() -> i64: return factorial_iter(5) .
     "#;
@@ -75,8 +77,8 @@ fn test_gcd_algorithm() {
         fn gcd(a: i64, b: i64) -> i64:
             if b == 0: return a .
             else: return gcd(b, a % b) .
-        .
-        
+        end
+
         fn main() -> i64: return gcd(48, 18) .
     "#;
 
@@ -95,7 +97,7 @@ fn test_power_function() {
             if exp == 0: return 1 .
             else if exp == 1: return base .
             else: return base * power(base, exp - 1) .
-        .
+        end
         
         fn main() -> i64: return power(2, 8) .
     "#;
@@ -117,11 +119,11 @@ fn test_sum_of_squares() {
             let mut i = 1;
             while i <= n:
                 sum = sum + i * i;
-                i = i + 1 .
-            return sum .
+                i = i + 1;
+            end
+        return sum .
         
-        fn main() -> i64:
-            return sum_of_squares(5) .
+        fn main() -> i64: return sum_of_squares(5) .
     "#;
 
     let executable = run_to_executable(source, "test_sum_squares.yuu")
@@ -145,8 +147,11 @@ fn test_is_prime() {
                 let mut i = 3;
                 while i * i <= n:
                     if n % i == 0: return 0 .
-                    i = i + 2 .
-                return 1 . .
+                    i = i + 2;
+                end
+                return 1;
+            end
+        end
         
         fn main() -> i64: return is_prime(17) .
     "#;
@@ -164,28 +169,33 @@ fn test_is_prime() {
 fn test_nth_prime() {
     let source = r#"
         fn is_prime(n: i64) -> i64:
-            if n <= 1: return 0;
-            else if n == 2: return 1;
-            else if n % 2 == 0: return 0;
+            if n <= 1: return 0 .
+            else if n == 2: return 1 .
+            else if n % 2 == 0: return 0 .
             else:
                 let mut i = 3;
                 while i * i <= n:
-                    if n % i == 0: return 0;
+                    if n % i == 0: return 0 .
                     i = i + 2;
-                return 1;
-        
+                end
+                return 1; 
+            end
+        end
+
         fn nth_prime(n: i64) -> i64:
             let mut count = 0;
             let mut candidate = 2;
             while count < n:
                 if is_prime(candidate) == 1:
                     count = count + 1;
-                    if count == n: return candidate;
-                candidate = candidate + 1;
-            return 0;
+                    if count == n: return candidate .
+                end
+                candidate = candidate + 1; 
+            end
+        return 0 . 
         
-        fn main() -> i64:
-            return nth_prime(5);
+
+        fn main() -> i64: return nth_prime(5) .
     "#;
 
     let executable =
@@ -208,10 +218,10 @@ fn test_collatz_sequence() {
                 if current % 2 == 0: current = current / 2 .
                 else: current = current * 3 + 1 .
                 count = count + 1;
-            return count;
+            end
+        return count .
         
-        fn main() -> i64:
-            return collatz_length(7);
+        fn main() -> i64: return collatz_length(7) .
     "#;
 
     let executable =
@@ -233,9 +243,11 @@ fn test_digital_root() {
                 let mut temp = n;
                 while temp > 0:
                     sum = sum + temp % 10;
-                    temp = temp / 10 .
-                n = sum .
-            return n .
+                    temp = temp / 10;
+                end
+                n = sum;
+            end
+        return n .
         
         fn main() -> i64: return digital_root(9875) .
     "#;

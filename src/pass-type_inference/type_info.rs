@@ -81,6 +81,7 @@ pub struct TypeInterner {
 
 // Use static references to ensure consistent memory addresses across calls
 static PRIMITIVE_I64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I64);
+static PRIMITIVE_U64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::U64);
 static PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
 static PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
 static PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
@@ -89,6 +90,10 @@ static INACTIVE_TYPE: TypeInfo = TypeInfo::Inactive;
 
 pub fn primitive_i64() -> &'static TypeInfo {
     &PRIMITIVE_I64
+}
+
+pub fn primitive_u64() -> &'static TypeInfo {
+    &PRIMITIVE_U64
 }
 
 pub fn primitive_f32() -> &'static TypeInfo {
@@ -153,6 +158,7 @@ impl From<PrimitiveType> for &'static TypeInfo {
     fn from(value: PrimitiveType) -> Self {
         match value {
             PrimitiveType::I64 => primitive_i64(),
+            PrimitiveType::U64 => primitive_u64(),
             PrimitiveType::F32 => primitive_f32(),
             PrimitiveType::F64 => primitive_f64(),
             PrimitiveType::Nil => primitive_nil(),
@@ -303,6 +309,7 @@ impl TypeInfoTable {
 #[derive(Clone, PartialEq, Eq, Copy, Debug)]
 pub enum PrimitiveType {
     I64,
+    U64,
     F32,
     F64,
     Nil,
@@ -313,6 +320,7 @@ impl Display for PrimitiveType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PrimitiveType::I64 => write!(f, "i64"),
+            PrimitiveType::U64 => write!(f, "u64"),
             PrimitiveType::F32 => write!(f, "f32"),
             PrimitiveType::F64 => write!(f, "f64"),
             PrimitiveType::Nil => write!(f, "nil"),
@@ -375,6 +383,14 @@ pub enum TypeInfo {
 }
 
 impl TypeInfo {
+    pub fn is_enum(&self) -> bool {
+        matches!(self, TypeInfo::Enum(_))
+    }
+
+    pub fn is_refutable_pattern(&self) -> bool {
+        self.is_enum()
+    }
+
     pub fn is_ptr(&self) -> bool {
         matches!(self, TypeInfo::Pointer(_))
     }

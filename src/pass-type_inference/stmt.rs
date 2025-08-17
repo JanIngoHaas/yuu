@@ -10,7 +10,6 @@ use super::{infer_expr, match_binding_node_to_type, pass_type_inference_impl::Tr
 pub enum ExitKind {
     Break,
     Proceed,
-    ImmediateReturn,
 }
 
 pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) -> ExitKind {
@@ -19,7 +18,8 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
             let ty_expr = infer_expr(&let_stmt.expr, block, data, None);
 
             if ty_expr.is_inactive() {
-                // Error here, as we can not bind inactive (never) type - see below
+                // TODO: Claude: Error here, as we can not bind inactive (never) type - see below
+                panic!("Cannot bind inactive type")
             }
 
             match_binding_node_to_type(block, &let_stmt.binding, ty_expr, data);
@@ -28,7 +28,7 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
         StmtNode::Atomic(expr) => {
             let exp_ty = infer_expr(expr, block, data, None);
             if exp_ty.is_inactive() {
-                return ExitKind::ImmediateReturn; // Code below that is dead code.
+                return ExitKind::Break; // Code below that is dead code 
             }
             ExitKind::Proceed
         }

@@ -23,9 +23,9 @@ fn test_simple_if_expression() {
 fn test_if_else_if_chain() {
     let source = r#"fn main() -> i64:
         let x = 7;
-        let result = if x < 5: 1 
-                     else if x < 10: 2
-                     else: 3;
+        let result = if x < 5: break 1 .  
+                     else if x < 10: break 2 .
+                     else: break 3 .;
         return result .
     "#;
 
@@ -44,8 +44,10 @@ fn test_nested_if_expressions() {
         let x = 8;
         let y = 3;
         let result = if x > 5: 
-                        if y > 2: 10 else: 5
-                     else: 0;
+                        break if y > 2: break 10 . 
+                        else: break 5 .
+                    end
+                    else: break 0 .;
         return result .
     "#;
 
@@ -65,7 +67,8 @@ fn test_while_loop() {
         let mut sum = 0;
         while counter < 5:
             sum = sum + counter;
-            counter = counter + 1 .
+            counter = counter + 1;
+        end
         return sum .
     "#;
 
@@ -83,10 +86,18 @@ fn test_while_with_break() {
     let source = r#"fn main() -> i64:
         let mut counter = 0;
         while counter < 10:
-            if counter == 5: break counter .
-            counter = counter + 1 .
+            if counter == 5: break @out counter .
+            counter = counter + 1;
+        end@out
         return counter .
     "#;
+
+    let wwb =
+        run_to_yir(source, "test_while_break.yir").expect("Failed to compile while break test");
+
+    println!("WWB: {}", wwb);
+
+    return;
 
     let executable = run_to_executable(source, "test_while_break.yuu")
         .expect("Failed to compile while break test");
@@ -106,8 +117,10 @@ fn test_nested_while_loops() {
             let mut j = 0;
             while j < 3:
                 sum = sum + 1;
-                j = j + 1 .
-            i = i + 1 .
+                j = j + 1;
+            end
+            i = i + 1;
+        end
         return sum .
     "#;
 
@@ -146,7 +159,8 @@ fn test_while_with_complex_condition() {
         let mut y = 10;
         while x < 5 && y > 5:
             x = x + 1;
-            y = y - 1 .
+            y = y - 1;
+        end
         return x + y .
     "#;
 

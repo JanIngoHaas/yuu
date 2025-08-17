@@ -1,8 +1,9 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::{FieldsMap, StructFieldInfo};
+use crate::pass_type_inference::StructFieldInfo;
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+    primitive_u64,
 };
 use indexmap::IndexMap;
 use std::fmt;
@@ -74,6 +75,10 @@ impl Label {
         Self { name, id }
     }
 
+    pub fn write_unique_name(&self, out: &mut impl fmt::Write) -> fmt::Result {
+        write!(out, "{}_{}", self.name, self.id)
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -86,6 +91,7 @@ impl Label {
 #[derive(Copy, Clone, PartialEq)]
 pub enum Operand {
     I64Const(i64),
+    U64Const(u64),
     F32Const(f32),
     F64Const(f64),
     BoolConst(bool),
@@ -97,6 +103,7 @@ impl Operand {
     pub fn ty(&self) -> &'static TypeInfo {
         match self {
             Operand::I64Const(_) => primitive_i64(),
+            Operand::U64Const(_) => primitive_u64(),
             Operand::F32Const(_) => primitive_f32(),
             Operand::F64Const(_) => primitive_f64(),
             Operand::BoolConst(_) => primitive_bool(),
@@ -112,6 +119,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Eq,
     NotEq,
     LessThan,
@@ -184,6 +192,14 @@ pub enum Instruction {
         name: Ustr,               // Function name
         args: Vec<Operand>,       // Arguments
     },
+
+    // Create an enum instance with variant index and optional data
+    MakeEnum {
+        target: Variable,      // Variable to hold the enum
+        variant_name: Ustr,    // The variant name (for union field access)
+        variant_index: u64,    // The variant index (discriminant)
+        data: Option<Operand>, // Optional data for the variant
+    },
     // Create a struct directly with values (not pointers)
     // MakeStruct {
     //     target: Variable,             // Variable to hold the struct
@@ -205,9 +221,10 @@ pub enum ControlFlow {
         if_false: Label,
     },
     JumpTable {
-        offset: Operand,                    // The value that we offset the jump table by
-        jump_targets: IndexMap<u64, Label>, // List of jump targets - the index (key) is the value of the offset. Reason: You can have a jump table with non-sequential offsets.
-        default: Option<Label>,             // Default jump target if offset is out of bounds
+        scrutinee: Operand,                  // The enum variable being matched
+        enum_name: Ustr,                     // The enum type name
+        jump_targets: IndexMap<Ustr, Label>, // Maps variant name -> label
+        default: Option<Label>,              // Default jump target if no variant matches
     },
     // Return from function
     Return(Option<Operand>),
@@ -238,6 +255,7 @@ impl BasicBlock {
                 Instruction::Binary { .. } => {}
                 Instruction::Unary { .. } => {}
                 Instruction::Call { .. } => {}
+                Instruction::MakeEnum { .. } => {}
             };
             return None;
         })
@@ -489,6 +507,7 @@ impl Function {
         // If we have a Immediate value, we can just store it directly
         let value_ptr = match value {
             Operand::I64Const(_)
+            | Operand::U64Const(_)
             | Operand::F32Const(_)
             | Operand::F64Const(_)
             | Operand::BoolConst(_) => {
@@ -568,6 +587,30 @@ impl Function {
         self.make_take_address(name_hint.intern(), target)
     }
 
+    pub fn make_enum(
+        &mut self,
+        name_hint: Ustr,
+        enum_type: &'static TypeInfo,
+        variant_name: Ustr,
+        variant_index: u64,
+        data: Option<Operand>,
+    ) -> Variable {
+        // Load data operand if it's a pointer (similar to other make_* methods)
+        let loaded_data = data.map(|d| self.load_if_pointer(d, "enum_data".intern()));
+
+        let target = self.fresh_variable(name_hint, enum_type);
+        let instr = Instruction::MakeEnum {
+            target,
+            variant_name,
+            variant_index,
+            data: loaded_data,
+        };
+        self.get_current_block_mut().instructions.push(instr);
+
+        // Return a pointer to stay in "pointer context"
+        self.make_take_address(name_hint, target)
+    }
+
     pub fn make_jump(&mut self, target: Label) {
         self.set_terminator(ControlFlow::Jump { target });
     }
@@ -607,25 +650,18 @@ impl Function {
         });
     }
 
-    pub fn make_jump_table(
+    pub fn make_jump_table_enum(
         &mut self,
-        // TODO: Claude: Offset is the wrong name here - we are not actually bumping an instruction counter by this offset. Not sure, what to call it, though. Give me some inspiration here.
-        offset: Operand,
-        jump_targets: IndexMap<u64, Label>,
+        scrutinee: Operand,
+        enum_name: Ustr,
+        jump_targets: IndexMap<Ustr, Label>,
         default: Option<Label>,
     ) {
-        let loaded_offset = self.load_if_pointer(offset, "jump_table_offset".intern());
-
-        // TODO: Claude: WE NEEEEEEED to implement u64 support now, especially for jump table support...
-        debug_assert_eq!(
-            loaded_offset.ty(),
-            primitive_i64(),
-            "Jump table offset must be i64, got {}",
-            loaded_offset.ty()
-        );
+        let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
 
         self.set_terminator(ControlFlow::JumpTable {
-            offset: loaded_offset,
+            scrutinee: loaded_scrutinee,
+            enum_name,
             jump_targets,
             default,
         });
@@ -671,6 +707,7 @@ impl Function {
         match operand {
             // Constants don't need loading
             Operand::I64Const(_)
+            | Operand::U64Const(_)
             | Operand::F32Const(_)
             | Operand::F64Const(_)
             | Operand::BoolConst(_)
@@ -702,6 +739,7 @@ impl Function {
 pub struct Module {
     pub functions: UstrMap<FunctionDeclarationState>,
     pub structs: Vec<Ustr>, // Just the names... NOthing else is really needed for
+    pub enums: Vec<Ustr>,   // Enum names for C generation
 }
 impl Default for Module {
     fn default() -> Self {
@@ -714,11 +752,16 @@ impl Module {
         Self {
             functions: UstrMap::default(),
             structs: Vec::new(),
+            enums: Vec::new(),
         }
     }
 
     pub fn define_struct(&mut self, name: Ustr) {
         self.structs.push(name);
+    }
+
+    pub fn define_enum(&mut self, name: Ustr) {
+        self.enums.push(name);
     }
 
     pub fn declare_function(&mut self, func: Function) {

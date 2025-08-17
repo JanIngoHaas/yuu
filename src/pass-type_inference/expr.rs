@@ -1,10 +1,14 @@
+use indexmap::IndexSet;
+
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
+use crate::pass_parse::RefutablePatternNode;
 use crate::pass_parse::add_ids::GetId;
-use crate::pass_type_inference::ExitKind;
+use crate::pass_type_inference::{ExitKind, match_binding_node_to_type};
 use crate::{
     pass_parse::ast::{
-        AssignmentExpr, BinaryExpr, BlockExpr, ExprNode, FuncCallExpr, IdentExpr, IfExpr,
-        LiteralExpr, Spanned, UnaryExpr,
+        AssignmentExpr, BinaryExpr, BlockExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
+        IdentExpr, IfExpr, LiteralExpr, MatchExpr, MemberAccessExpr, Spanned,
+        StructInstantiationExpr, UnaryExpr, WhileExpr,
     },
     pass_type_inference::binding_info::BindingInfo,
     pass_type_inference::type_info::{
@@ -173,10 +177,6 @@ pub fn infer_block_no_child_creation(
         let out = super::infer_stmt(stmt, root_func_block, data);
         // This is for when we break OUT of the current block!
         match out {
-            ExitKind::ImmediateReturn => {
-                span_break_ty = Some((stmt.span(), inactive_type()));
-                break;
-            }
             ExitKind::Break => {
                 // Store break type but keep processing
                 span_break_ty = Some((stmt.span(), inactive_type()));
@@ -455,6 +455,725 @@ fn infer_assignment(
     }) as _
 }
 
+fn infer_struct_instantiation(
+    struct_instantiation_expr: &StructInstantiationExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    for (_, expr_node) in &struct_instantiation_expr.fields {
+        infer_expr(expr_node, block, data, None);
+    }
+
+    let struct_name = struct_instantiation_expr.struct_name;
+    let struct_opt = data.type_registry.resolve_struct(struct_name);
+
+    if struct_opt.is_none() {
+        let err = YuuError::builder()
+            .kind(ErrorKind::ReferencedUndefinedStruct)
+            .message(format!(
+                "Cannot instantiate struct '{}' because it has not been defined",
+                struct_name
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                struct_instantiation_expr.span.clone(),
+                "attempted to instantiate undefined struct",
+            )
+            .help("Define this struct before using it")
+            .build();
+        data.errors.push(err);
+        data.type_registry
+            .type_info_table
+            .insert(struct_instantiation_expr.id, error_type());
+        return error_type();
+    }
+
+    let sinfo = struct_opt.unwrap();
+    let struct_type = sinfo.ty;
+
+    for (field, expr_node) in &struct_instantiation_expr.fields {
+        let expr_type = data
+            .type_registry
+            .type_info_table
+            .get(expr_node.node_id())
+            .expect("Compiler bug: expression type should be in registry");
+
+        if let Some(field_info) = sinfo.fields.get(&field.name) {
+            match expr_type.unify(field_info.ty) {
+                Ok(_) => {}
+                Err(err) => {
+                    let err_msg = YuuError::builder()
+                        .kind(ErrorKind::TypeMismatch)
+                        .message(format!(
+                            "Cannot assign {} to field '{}' of type {}",
+                            err.left, field.name, err.right
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(expr_node.span().clone(), format!("has type {}", err.left))
+                        .label(field.span.clone(), format!("expected type {}", err.right))
+                        .help("The types must be compatible for assignment")
+                        .build();
+                    data.errors.push(err_msg);
+                }
+            }
+        } else {
+            let err = YuuError::builder()
+                .kind(ErrorKind::ReferencedUndeclaredField)
+                .message(format!(
+                    "Cannot assign to undeclared field '{}' of struct '{}'",
+                    field.name, struct_name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    field.span.clone(),
+                    "attempted to assign to undeclared field",
+                )
+                .help("Define this field in the struct before using it")
+                .build();
+            data.errors.push(err);
+        }
+    }
+
+    data.type_registry
+        .type_info_table
+        .insert(struct_instantiation_expr.id, struct_type);
+
+    struct_type
+}
+
+fn infer_while(
+    while_expr: &WhileExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let cond_ty = infer_expr(&while_expr.condition_block.condition, block, data, None);
+    let while_expr_ty = infer_block(&while_expr.condition_block.body, block, data);
+
+    if let Err(err) = cond_ty.unify(primitive_bool()) {
+        let err_msg = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "While condition must be of type 'bool', got '{}'",
+                err.left
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                while_expr.condition_block.condition.span().clone(),
+                format!("has type '{}'", err.left),
+            )
+            .help("Conditions must evaluate to a boolean type")
+            .build();
+        data.errors.push(err_msg);
+        data.type_registry
+            .type_info_table
+            .insert(while_expr.id, error_type());
+        return error_type();
+    }
+
+    let unify_res = data
+        .type_registry
+        .type_info_table
+        .unify_and_insert(while_expr.id, while_expr_ty);
+
+    match unify_res {
+        Ok(ty) => ty,
+        Err(err) => {
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message("While loop has inconsistent break types")
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    while_expr.condition_block.body.span.clone(),
+                    format!("Cannot unify type '{}' and type '{}'", err.left, err.right),
+                )
+                .help("All break statements within a while loop must have compatible types")
+                .build();
+            data.errors.push(err_msg);
+
+            data.type_registry
+                .type_info_table
+                .insert(while_expr.id, error_type());
+            error_type()
+        }
+    }
+}
+
+fn infer_member_access(
+    member_access_expr: &MemberAccessExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
+
+    match lhs_ty {
+        TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
+            let si = data
+                .type_registry
+                .resolve_struct(s.name)
+                .expect("Compiler bug: Struct type should be resolved here.");
+
+            let field = si.fields.get(&member_access_expr.field.name).cloned();
+
+            match field {
+                Some(field_info) => {
+                    data.type_registry
+                        .type_info_table
+                        .insert(member_access_expr.id, field_info.ty);
+
+                    field_info.ty
+                }
+                None => {
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndeclaredField)
+                        .message(format!(
+                            "Struct '{}' has no field named '{}'",
+                            s.name, member_access_expr.field.name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(
+                            member_access_expr.field.span.clone(),
+                            "attempted to access undefined field",
+                        )
+                        .label(
+                            member_access_expr.lhs.span().clone(),
+                            format!("this expression has type '{}'", s.name),
+                        )
+                        .help(format!(
+                            "Available fields for struct '{}': {}",
+                            s.name,
+                            if si.fields.is_empty() {
+                                "none".to_string()
+                            } else {
+                                si.fields
+                                    .keys()
+                                    .map(|k| k.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
+                        .build();
+                    data.errors.push(err);
+
+                    data.type_registry
+                        .type_info_table
+                        .insert(member_access_expr.id, error_type());
+                    error_type()
+                }
+            }
+        }
+        _ => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Cannot access field '{}' on value of type '{}'",
+                    member_access_expr.field.name, lhs_ty
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    member_access_expr.span.clone(),
+                    "attempted member access on non-struct type",
+                )
+                .label(
+                    member_access_expr.lhs.span().clone(),
+                    format!("this expression has type '{}'", lhs_ty),
+                )
+                .label(
+                    member_access_expr.field.span.clone(),
+                    "field access attempted here",
+                )
+                .help("Member access is only supported on struct types")
+                .build();
+            data.errors.push(err);
+
+            data.type_registry
+                .type_info_table
+                .insert(member_access_expr.id, error_type());
+            error_type()
+        }
+    }
+}
+
+fn infer_enum_instantiation(
+    ei: &EnumInstantiationExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+    function_args: Option<&[&'static TypeInfo]>,
+) -> &'static TypeInfo {
+    let enum_type = data.type_registry.resolve_enum(ei.enum_name);
+    let inferred_ty = match enum_type {
+        Some(enum_info) => {
+            let variant_info_registered = enum_info.variants.get(&ei.variant_name);
+            match variant_info_registered {
+                Some(variant) => {
+                    let ty = enum_info.ty;
+                    match (&ei.data, variant.variant) {
+                        (Some(dexpr), Some(reg_ty)) => {
+                            let ty = infer_expr(&dexpr, block, data, function_args);
+                            if let Err(err) = ty.unify(reg_ty) {
+                                let err_msg = YuuError::builder()
+                                    .kind(ErrorKind::TypeMismatch)
+                                    .message(format!(
+                                        "Cannot assign '{}' to enum variant '{}::{}' which expects '{}'",
+                                        err.left, ei.enum_name, ei.variant_name, err.right
+                                    ))
+                                    .source(
+                                        data.src_code.source.clone(),
+                                        data.src_code.file_name.clone(),
+                                    )
+                                    .span(dexpr.span().clone(), format!("has type '{}'", err.left))
+                                    .label(ei.span.clone(), format!("expected type '{}'", err.right))
+                                    .help("The types must be compatible for enum variant instantiation")
+                                    .build();
+                                data.errors.push(err_msg);
+                            }
+                        }
+                        (None, None) => {
+                            // Nothing to do here...
+                        }
+                        (Some(dexpr), None) => {
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::InvalidExpression)
+                                .message(format!(
+                                    "Enum variant '{}::{}' does not accept data, but data was provided",
+                                    ei.enum_name, ei.variant_name
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(dexpr.span().clone(), "unexpected data provided here")
+                                .label(ei.span.clone(), "for this unit variant")
+                                .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
+                                .build();
+                            data.errors.push(err);
+                        }
+                        (None, Some(expected_ty)) => {
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::InvalidExpression)
+                                .message(format!(
+                                    "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
+                                    ei.enum_name, ei.variant_name, expected_ty
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(ei.span.clone(), "missing required data")
+                                .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
+                                .build();
+                            data.errors.push(err);
+                        }
+                    }
+                    ty
+                }
+                None => {
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndeclaredVariant)
+                        .message(format!(
+                            "Enum '{}' has no variant named '{}'",
+                            ei.enum_name, ei.variant_name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(ei.span.clone(), "attempted to use undefined variant")
+                        .help(format!(
+                            "Available variants for enum '{}': {}",
+                            ei.enum_name,
+                            if enum_info.variants.is_empty() {
+                                "none".to_string()
+                            } else {
+                                enum_info
+                                    .variants
+                                    .keys()
+                                    .map(|k| k.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
+                        .build();
+                    data.errors.push(err);
+                    error_type()
+                }
+            }
+        }
+        None => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::ReferencedUndefinedEnum)
+                .message(format!(
+                    "Cannot instantiate enum '{}' because it has not been defined",
+                    ei.enum_name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(ei.span.clone(), "attempted to instantiate undefined enum")
+                .help("Define this enum before using it")
+                .build();
+            data.errors.push(err);
+            error_type()
+        }
+    };
+    data.type_registry
+        .type_info_table
+        .insert(ei.id, inferred_ty);
+    inferred_ty
+}
+
+fn infer_match(me: &MatchExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
+    let scrutinee_ty = infer_expr(&me.scrutinee, block, data, None);
+
+    // Check if the scrutinee type is a refutable pattern
+    if !scrutinee_ty.is_refutable_pattern() {
+        let err = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message(format!(
+                "Cannot match on type '{}' because it is not a refutable pattern",
+                scrutinee_ty
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                me.scrutinee.span().clone(),
+                format!("this expression has type '{}'", scrutinee_ty),
+            )
+            .label(
+                me.span.clone(),
+                "match expression requires a refutable pattern",
+            )
+            .help("Match expressions can only be used with refutable patterns like enums. Consider using an if-let expression for other types, or ensure the scrutinee is an enum type.")
+            .build();
+        data.errors.push(err);
+        data.type_registry
+            .type_info_table
+            .insert(me.id, error_type());
+        return error_type();
+    }
+
+    // Check if we have exhaustive match arms + each arm is of type scrutinee_ty
+
+    let mut matches = IndexSet::new();
+
+    for arm in &me.arms {
+        match &*arm.pattern {
+            RefutablePatternNode::Enum(enum_pattern) => {
+                let enum_info = data.type_registry.resolve_enum(enum_pattern.enum_name);
+
+                match enum_info {
+                    Some(enum_info) => {
+                        // Check if the enum is the same as the scrutinee type
+                        if !scrutinee_ty.is_exact_same_type(enum_info.ty) {
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::TypeMismatch)
+                                .message(format!(
+                                    "Cannot match enum pattern '{}' against scrutinee of type '{}'",
+                                    enum_info.ty, scrutinee_ty
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(
+                                    enum_pattern.span.clone(),
+                                    format!("pattern expects type '{}'", enum_info.ty),
+                                )
+                                .label(
+                                    me.scrutinee.span().clone(),
+                                    format!("scrutinee has type '{}'", scrutinee_ty),
+                                )
+                                .help("All match patterns must be compatible with the scrutinee type. Ensure the enum pattern matches the type being matched on.")
+                                .build();
+                            data.errors.push(err);
+                            continue;
+                        }
+
+                        match enum_info.variants.get(&enum_pattern.variant_name) {
+                            Some(variant_info) => {
+                                if !matches.insert(variant_info.variant_name) {
+                                    let err = YuuError::builder()
+                                        .kind(ErrorKind::InvalidExpression)
+                                        .message(format!(
+                                            "Duplicate match arm for enum variant '{}::{}'",
+                                            enum_pattern.enum_name, enum_pattern.variant_name
+                                        ))
+                                        .source(
+                                            data.src_code.source.clone(),
+                                            data.src_code.file_name.clone(),
+                                        )
+                                        .span(
+                                            enum_pattern.span.clone(),
+                                            "duplicate pattern",
+                                        )
+                                        .help(format!(
+                                            "The variant '{}::{}' has already been matched in a previous arm. Remove this duplicate pattern or match on a different variant.",
+                                            enum_pattern.enum_name, enum_pattern.variant_name
+                                        ))
+                                        .build();
+                                    data.errors.push(err);
+                                    continue;
+                                }
+
+                                if let Some(binding) = &enum_pattern.binding {
+                                    match variant_info.variant {
+                                        Some(var_ty) => {
+                                            // Match the binding node to the type of the enum variant
+                                            match_binding_node_to_type(
+                                                block, binding, var_ty, data,
+                                            );
+                                        }
+                                        None => {
+                                            let err = YuuError::builder()
+                                                .kind(ErrorKind::InvalidExpression)
+                                                .message(format!(
+                                                    "Cannot bind value from unit enum variant '{}::{}'",
+                                                    enum_pattern.enum_name, enum_pattern.variant_name
+                                                ))
+                                                .source(
+                                                    data.src_code.source.clone(),
+                                                    data.src_code.file_name.clone(),
+                                                )
+                                                .span(
+                                                    binding.span().clone(),
+                                                    "binding not allowed here",
+                                                )
+                                                .label(
+                                                    enum_pattern.span.clone(),
+                                                    "unit variant has no data to bind",
+                                                )
+                                                .help(format!(
+                                                    "The variant '{}::{}' is a unit variant (has no associated data). Remove the binding or use a different variant that carries data.",
+                                                    enum_pattern.enum_name, enum_pattern.variant_name
+                                                ))
+                                                .build();
+                                            data.errors.push(err);
+                                        }
+                                    }
+                                }
+                            }
+                            None => {
+                                let err = YuuError::builder()
+                                    .kind(ErrorKind::ReferencedUndeclaredVariant)
+                                    .message(format!(
+                                        "Enum '{}' has no variant named '{}'",
+                                        enum_pattern.enum_name, enum_pattern.variant_name
+                                    ))
+                                    .source(
+                                        data.src_code.source.clone(),
+                                        data.src_code.file_name.clone(),
+                                    )
+                                    .span(
+                                        enum_pattern.span.clone(),
+                                        "undefined variant used in pattern",
+                                    )
+                                    .help(format!(
+                                        "Available variants for enum '{}': {}",
+                                        enum_pattern.enum_name,
+                                        if enum_info.variants.is_empty() {
+                                            "none".to_string()
+                                        } else {
+                                            enum_info
+                                                .variants
+                                                .keys()
+                                                .map(|k| k.as_str())
+                                                .collect::<Vec<_>>()
+                                                .join(", ")
+                                        }
+                                    ))
+                                    .build();
+                                data.errors.push(err);
+                            }
+                        }
+                    }
+                    None => {
+                        let err = YuuError::builder()
+                            .kind(ErrorKind::ReferencedUndefinedEnum)
+                            .message(format!(
+                                "Cannot match on enum '{}' because it has not been defined",
+                                enum_pattern.enum_name
+                            ))
+                            .source(
+                                data.src_code.source.clone(),
+                                data.src_code.file_name.clone(),
+                            )
+                            .span(enum_pattern.span.clone(), "undefined enum used in pattern")
+                            .help("Define this enum before using it in a match expression")
+                            .build();
+                        data.errors.push(err);
+                    }
+                }
+            }
+        }
+    }
+
+    // Now, check for exhaustiveness
+
+    match scrutinee_ty {
+        TypeInfo::Enum(enum_ty) => {
+            let enum_info = data.type_registry.resolve_enum(enum_ty.name);
+
+            // Check if default is set -> immediately exhaustive - currently doesn't exist...
+            // if me.default.is_some() {
+            //     todo!("TODO: Claude: What should I do here?")
+            // }
+
+            match enum_info {
+                Some(enum_info) => {
+                    // Check for exhaustiveness - happy path -> no allocation here
+                    let mut is_exhaustive = true;
+                    for variant_name in enum_info.variants.keys() {
+                        if !matches.contains(variant_name) {
+                            is_exhaustive = false;
+                            break;
+                        }
+                    }
+
+                    if !is_exhaustive {
+                        // Only now allocate the vector since we know there's an error - sad path
+                        let missing_variants: Vec<&str> = enum_info
+                            .variants
+                            .keys()
+                            .filter(|variant_name| !matches.contains(*variant_name))
+                            .map(|v| v.as_str())
+                            .collect();
+                        let err = YuuError::builder()
+                            .kind(ErrorKind::InvalidExpression)
+                            .message(format!(
+                                "Match expression is not exhaustive, missing variant(s): {}",
+                                missing_variants.join(", ")
+                            ))
+                            .source(
+                                data.src_code.source.clone(),
+                                data.src_code.file_name.clone(),
+                            )
+                            .span(
+                                me.span.clone(),
+                                "non-exhaustive match expression",
+                            )
+                            .help(format!(
+                                "Add match arms for the missing variant(s): {}. All possible variants of the enum must be covered in a match expression.",
+                                missing_variants.join(", ")
+                            ))
+                            .build();
+                        data.errors.push(err);
+                        data.type_registry
+                            .type_info_table
+                            .insert(me.id, error_type());
+                        return error_type();
+                    }
+                }
+                None => {
+                    // This should never happen since we already checked that scrutinee_ty is a refutable pattern
+                    // and the only refutable pattern currently supported is Enum, so the enum must exist
+                    unreachable!(
+                        "Compiler bug: Enum '{}' should exist since scrutinee type is '{}' which passed is_refutable_pattern()",
+                        match scrutinee_ty {
+                            TypeInfo::Enum(e) => e.name.as_str(),
+                            _ => "unknown",
+                        },
+                        scrutinee_ty
+                    );
+                }
+            }
+        }
+        _ => unreachable!(
+            "Compiler bug: Match expression should only be used with refutable patterns, but got '{}' - this should have been checked earlier",
+            scrutinee_ty
+        ),
+    }
+
+    let unified = me.arms.iter().fold(inactive_type(), |acc, arm| {
+        let arm_ty = infer_expr(&arm.body, block, data, None);
+
+        let unified = acc.unify(arm_ty);
+
+        match unified {
+            Ok(ty) => return ty,
+            Err(err) => {
+                let err_msg = YuuError::builder()
+                    .kind(ErrorKind::TypeMismatch)
+                    .message(format!(
+                        "Match arm has incompatible type: cannot unify '{}' with '{}'",
+                        err.left.to_string(),
+                        err.right.to_string()
+                    ))
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(arm.body.span(), "this match arm has an incompatible type")
+                    .help(format!(
+                        "All match arms must return the same type. Expected '{}' but this arm returns '{}'. Consider converting the values to a common type or using a different approach.",
+                        err.left.to_string(),
+                        err.right.to_string()
+                    ))
+                    .build();
+                data.errors.push(err_msg);
+                return error_type();
+            }
+        }
+    });
+
+    // Insert the unified type into the type registry
+    let overall_unified = data
+        .type_registry
+        .type_info_table
+        .unify_and_insert(me.id, unified);
+
+    match overall_unified {
+        Ok(ty) => return ty,
+        Err(err) => {
+            // This can happen when break statements in nested expressions within match arms
+            // cause type inconsistencies that aren't caught during the fold operation
+            let err_msg = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message(format!(
+                    "Match arms have incompatible types: cannot unify '{}' with '{}'",
+                    err.left.to_string(), err.right.to_string()
+                ))
+                .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                .span(me.span.clone(), "match expression with incompatible arms")
+                .help(format!(
+                    "All match arms must evaluate to the same type. This error commonly occurs when:\n\
+                    1. Different arms return different types ('{}' vs '{}')\n\
+                    2. Break statements within nested expressions cause type conflicts\n\
+                    3. Control flow statements jump out of deeply nested expressions\n\n\
+                    Consider:\n\
+                    - Ensuring all arms return the same type\n\
+                    - Avoiding break statements in nested match arm expressions",
+                    err.left.to_string(), err.right.to_string()
+                ))
+                .build();
+            data.errors.push(err_msg);
+            return error_type();
+        }
+    }
+}
+
 fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
     // Check condition
     let src_code = data.src_code.clone();
@@ -607,394 +1326,15 @@ pub fn infer_expr(
         ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data),
         ExprNode::Assignment(assignment) => infer_assignment(assignment, block, data),
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
-            for (_, expr_node) in &struct_instantiation_expr.fields {
-                infer_expr(expr_node, block, data, None);
-            }
-
-            let struct_name = struct_instantiation_expr.struct_name;
-            let struct_opt = data.type_registry.resolve_struct(struct_name);
-
-            if struct_opt.is_none() {
-                let err = YuuError::builder()
-                    .kind(ErrorKind::ReferencedUndefinedStruct)
-                    .message(format!(
-                        "Cannot instantiate struct '{}' because it has not been defined",
-                        struct_name
-                    ))
-                    .source(
-                        data.src_code.source.clone(),
-                        data.src_code.file_name.clone(),
-                    )
-                    .span(
-                        struct_instantiation_expr.span.clone(),
-                        "attempted to instantiate undefined struct",
-                    )
-                    .help("Define this struct before using it")
-                    .build();
-                data.errors.push(err);
-                data.type_registry
-                    .type_info_table
-                    .insert(struct_instantiation_expr.id, error_type());
-                return error_type();
-            }
-
-            let sinfo = struct_opt.unwrap();
-            let struct_type = sinfo.ty;
-
-            for (field, expr_node) in &struct_instantiation_expr.fields {
-                // Get the already inferred expression type from the registry
-                let expr_type = data
-                    .type_registry
-                    .type_info_table
-                    .get(expr_node.node_id())
-                    .expect("Compiler bug: expression type should be in registry");
-
-                if let Some(field_info) = sinfo.fields.get(&field.name) {
-                    match expr_type.unify(field_info.ty) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            let err_msg = YuuError::builder()
-                                .kind(ErrorKind::TypeMismatch)
-                                .message(format!(
-                                    "Cannot assign {} to field '{}' of type {}",
-                                    err.left, field.name, err.right
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(expr_node.span().clone(), format!("has type {}", err.left))
-                                .label(field.span.clone(), format!("expected type {}", err.right))
-                                .help("The types must be compatible for assignment")
-                                .build();
-                            data.errors.push(err_msg);
-                        }
-                    }
-                } else {
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndeclaredField)
-                        .message(format!(
-                            "Cannot assign to undeclared field '{}' of struct '{}'",
-                            field.name, struct_name
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            field.span.clone(),
-                            "attempted to assign to undeclared field",
-                        )
-                        .help("Define this field in the struct before using it")
-                        .build();
-                    data.errors.push(err);
-                }
-            }
-
-            // Register the type for the struct instantiation expression
-            data.type_registry
-                .type_info_table
-                .insert(struct_instantiation_expr.id, struct_type);
-
-            struct_type
+            infer_struct_instantiation(struct_instantiation_expr, block, data)
         }
-        ExprNode::While(while_expr) => {
-            let cond_ty = infer_expr(&while_expr.condition_block.condition, block, data, None);
-            let while_expr_ty = infer_block(&while_expr.condition_block.body, block, data);
 
-            if let Err(err) = cond_ty.unify(primitive_bool()) {
-                let err_msg = YuuError::builder()
-                    .kind(ErrorKind::TypeMismatch)
-                    .message(format!(
-                        "While condition must be of type 'bool', got '{}'",
-                        err.left
-                    ))
-                    .source(
-                        data.src_code.source.clone(),
-                        data.src_code.file_name.clone(),
-                    )
-                    .span(
-                        while_expr.condition_block.condition.span().clone(),
-                        format!("has type '{}'", err.left),
-                    )
-                    .help("Conditions must evaluate to a boolean type")
-                    .build();
-                data.errors.push(err_msg);
-                // Continue execution but mark as error
-                data.type_registry
-                    .type_info_table
-                    .insert(while_expr.id, error_type());
-                return error_type();
-            }
-
-            let unify_res = data
-                .type_registry
-                .type_info_table
-                .unify_and_insert(while_expr.id, while_expr_ty);
-
-            match unify_res {
-                Ok(ty) => ty,
-                Err(err) => {
-                    let err_msg = YuuError::builder()
-                        .kind(ErrorKind::TypeMismatch)
-                        .message("While loop has inconsistent break types")
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            while_expr.condition_block.body.span.clone(),
-                            // TODO: I should collect "breaks" in a separate datastructure so we can pinpoint the breaks which are incompatible and have a better error message
-                            format!("Cannot unify type '{}' and type '{}'", err.left, err.right),
-                        )
-                        .help("All break statements within a while loop must have compatible types")
-                        .build();
-                    data.errors.push(err_msg);
-
-                    data.type_registry
-                        .type_info_table
-                        .insert(while_expr.id, error_type());
-                    error_type()
-                }
-            }
-        }
+        ExprNode::While(while_expr) => infer_while(while_expr, block, data),
         ExprNode::MemberAccess(member_access_expr) => {
-            // Infer the type of the left-hand side expression
-            let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
-
-            // Check if lhs is a struct type
-            match lhs_ty {
-                TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
-                    // Let's see if the struct has the field
-                    let si = data
-                        .type_registry
-                        .resolve_struct(s.name)
-                        .expect("Compiler bug: Struct type should be resolved here.");
-
-                    let field = si.fields.get(&member_access_expr.field.name).cloned(); // Cloning is fine - no heap alloc
-
-                    match field {
-                        Some(field_info) => {
-                            // Register the field type in the type registry
-                            data.type_registry
-                                .type_info_table
-                                .insert(member_access_expr.id, field_info.ty);
-
-                            // Return the field type
-                            field_info.ty
-                        }
-                        None => {
-                            // error for accessing undefined field
-                            let err = YuuError::builder()
-                                .kind(ErrorKind::ReferencedUndeclaredField)
-                                .message(format!(
-                                    "Struct '{}' has no field named '{}'",
-                                    s.name, member_access_expr.field.name
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(
-                                    member_access_expr.field.span.clone(),
-                                    "attempted to access undefined field",
-                                )
-                                .label(
-                                    member_access_expr.lhs.span().clone(),
-                                    format!("this expression has type '{}'", s.name),
-                                )
-                                .help(format!(
-                                    "Available fields for struct '{}': {}",
-                                    s.name,
-                                    if si.fields.is_empty() {
-                                        "none".to_string()
-                                    } else {
-                                        si.fields
-                                            .keys()
-                                            .map(|k| k.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    }
-                                ))
-                                .build();
-                            data.errors.push(err);
-
-                            // Register error type and return it
-                            data.type_registry
-                                .type_info_table
-                                .insert(member_access_expr.id, error_type());
-                            error_type()
-                        }
-                    }
-                }
-                _ => {
-                    // error for member access on non-struct type
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::InvalidExpression)
-                        .message(format!(
-                            "Cannot access field '{}' on value of type '{}'",
-                            member_access_expr.field.name, lhs_ty
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            member_access_expr.span.clone(),
-                            "attempted member access on non-struct type",
-                        )
-                        .label(
-                            member_access_expr.lhs.span().clone(),
-                            format!("this expression has type '{}'", lhs_ty),
-                        )
-                        .label(
-                            member_access_expr.field.span.clone(),
-                            "field access attempted here",
-                        )
-                        .help("Member access is only supported on struct types")
-                        .build();
-                    data.errors.push(err);
-
-                    // Register error type and return it
-                    data.type_registry
-                        .type_info_table
-                        .insert(member_access_expr.id, error_type());
-                    error_type()
-                }
-            }
+            infer_member_access(member_access_expr, block, data)
         }
-        ExprNode::EnumInstantiation(ei) => {
-            // Check the enum type
-            let enum_type = data.type_registry.resolve_enum(ei.enum_name);
-            let inferred_ty = match enum_type {
-                Some(enum_info) => {
-                    // Check the variant
-                    let variant_info_registered = enum_info.variants.get(&ei.variant_name); // Check if name is registered
-                    match variant_info_registered {
-                        Some(variant) => {
-                            // Variant is indeed registered - now type-check the expression
-                            let ty = enum_info.ty;
-                            match (&ei.data, variant.variant) {
-                                (Some(dexpr), Some(reg_ty)) => {
-                                    let ty = infer_expr(&dexpr, block, data, function_args);
-                                    // Check if the data type matches the variant's data type
-                                    if let Err(err) = ty.unify(reg_ty) {
-                                        let err_msg = YuuError::builder()
-                                            .kind(ErrorKind::TypeMismatch)
-                                            .message(format!(
-                                                "Cannot assign '{}' to enum variant '{}::{}' which expects '{}'",
-                                                err.left, ei.enum_name, ei.variant_name, err.right
-                                            ))
-                                            .source(
-                                                data.src_code.source.clone(),
-                                                data.src_code.file_name.clone(),
-                                            )
-                                            .span(dexpr.span().clone(), format!("has type '{}'", err.left))
-                                            .label(ei.span.clone(), format!("expected type '{}'", err.right))
-                                            .help("The types must be compatible for enum variant instantiation")
-                                            .build();
-                                        data.errors.push(err_msg);
-                                    }
-                                }
-                                (None, None) => {
-                                    // Nothing to do here...
-                                }
-                                (Some(dexpr), None) => {
-                                    let err = YuuError::builder()
-                                        .kind(ErrorKind::InvalidExpression)
-                                        .message(format!(
-                                            "Enum variant '{}::{}' does not accept data, but data was provided",
-                                            ei.enum_name, ei.variant_name
-                                        ))
-                                        .source(
-                                            data.src_code.source.clone(),
-                                            data.src_code.file_name.clone(),
-                                        )
-                                        .span(dexpr.span().clone(), "unexpected data provided here")
-                                        .label(ei.span.clone(), "for this unit variant")
-                                        .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
-                                        .build();
-                                    data.errors.push(err);
-                                }
-                                (None, Some(expected_ty)) => {
-                                    let err = YuuError::builder()
-                                        .kind(ErrorKind::InvalidExpression)
-                                        .message(format!(
-                                            "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
-                                            ei.enum_name, ei.variant_name, expected_ty
-                                        ))
-                                        .source(
-                                            data.src_code.source.clone(),
-                                            data.src_code.file_name.clone(),
-                                        )
-                                        .span(ei.span.clone(), "missing required data")
-                                        .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
-                                        .build();
-                                    data.errors.push(err);
-                                }
-                            }
-                            ty
-                        }
-                        None => {
-                            // Error: Variant not found
-                            let err = YuuError::builder()
-                                .kind(ErrorKind::ReferencedUndeclaredVariant)
-                                .message(format!(
-                                    "Enum '{}' has no variant named '{}'",
-                                    ei.enum_name, ei.variant_name
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(ei.span.clone(), "attempted to use undefined variant")
-                                .help(format!(
-                                    "Available variants for enum '{}': {}",
-                                    ei.enum_name,
-                                    if enum_info.variants.is_empty() {
-                                        "none".to_string()
-                                    } else {
-                                        enum_info
-                                            .variants
-                                            .keys()
-                                            .map(|k| k.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    }
-                                ))
-                                .build();
-                            data.errors.push(err);
-                            error_type()
-                        }
-                    }
-                }
-                None => {
-                    // Error: Enum not found
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndefinedEnum)
-                        .message(format!(
-                            "Cannot instantiate enum '{}' because it has not been defined",
-                            ei.enum_name
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(ei.span.clone(), "attempted to instantiate undefined enum")
-                        .help("Define this enum before using it")
-                        .build();
-                    data.errors.push(err);
-                    error_type()
-                }
-            };
-            data.type_registry
-                .type_info_table
-                .insert(ei.id, inferred_ty);
-            inferred_ty
-        }
-        ExprNode::Match(me) => {
-            // TODO: Implement match expression type inference
-            todo!("Match expression type inference not yet implemented - similar to if expression");
-        }
+
+        ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
+        ExprNode::Match(me) => infer_match(me, block, data),
     }
 }

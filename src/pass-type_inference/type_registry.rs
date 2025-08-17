@@ -12,7 +12,7 @@ use crate::{
         binding_info::BindingInfo,
         type_info::{
             FunctionType, GiveMePtrHashes, TypeInfo, TypeInfoTable, function_type, primitive_bool,
-            primitive_f32, primitive_f64, primitive_i64, struct_type,
+            primitive_f32, primitive_f64, primitive_i64, primitive_u64, struct_type,
         },
     },
     pass_yir_lowering::block::{BindingTable, Block},
@@ -114,6 +114,12 @@ impl TypeRegistry {
             primitive_f32(),
         );
         reg.register_binary_op(
+            "mod".intern(),
+            next(),
+            &[primitive_f32(), primitive_f32()],
+            primitive_f32(),
+        );
+        reg.register_binary_op(
             "eq".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
@@ -176,6 +182,12 @@ impl TypeRegistry {
             primitive_i64(),
         );
         reg.register_binary_op(
+            "mod".intern(),
+            next(),
+            &[primitive_i64(), primitive_i64()],
+            primitive_i64(),
+        );
+        reg.register_binary_op(
             "eq".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
@@ -212,6 +224,74 @@ impl TypeRegistry {
             primitive_bool(),
         );
 
+        // U64 operations
+        reg.register_binary_op(
+            "add".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_u64(),
+        );
+        reg.register_binary_op(
+            "sub".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_u64(),
+        );
+        reg.register_binary_op(
+            "mul".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_u64(),
+        );
+        reg.register_binary_op(
+            "div".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_u64(),
+        );
+        reg.register_binary_op(
+            "mod".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_u64(),
+        );
+        reg.register_binary_op(
+            "eq".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "lt".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "gt".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "le".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ge".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+        reg.register_binary_op(
+            "ne".intern(),
+            next(),
+            &[primitive_u64(), primitive_u64()],
+            primitive_bool(),
+        );
+
         // F64 operations
         reg.register_binary_op(
             "add".intern(),
@@ -233,6 +313,12 @@ impl TypeRegistry {
         );
         reg.register_binary_op(
             "div".intern(),
+            next(),
+            &[primitive_f64(), primitive_f64()],
+            primitive_f64(),
+        );
+        reg.register_binary_op(
+            "mod".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
@@ -277,6 +363,9 @@ impl TypeRegistry {
         // Unary operations for i64
         reg.register_unary_op("neg".intern(), next(), primitive_i64(), primitive_i64());
         reg.register_unary_op("pos".intern(), next(), primitive_i64(), primitive_i64());
+
+        // Unary operations for u64
+        reg.register_unary_op("pos".intern(), next(), primitive_u64(), primitive_u64());
 
         // Unary operations for f32
         reg.register_unary_op("neg".intern(), next(), primitive_f32(), primitive_f32());

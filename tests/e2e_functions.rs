@@ -61,7 +61,7 @@ fn test_recursive_function() {
     let source = r#"
         fn factorial(n: i64) -> i64:
             if n <= 1: return 1 .
-            else: return n * factorial(n - 1) . .
+            else: return n * factorial(n - 1) .
         
         fn main() -> i64: return factorial(5) .
     "#;
@@ -160,7 +160,7 @@ fn test_fibonacci_recursive() {
     let source = r#"
         fn fibonacci(n: i64) -> i64:
             if n <= 1: return n .
-            else: return fibonacci(n - 1) + fibonacci(n - 2) . .
+            else: return fibonacci(n - 1) + fibonacci(n - 2) .
         
         fn main() -> i64: return fibonacci(8) .
     "#;

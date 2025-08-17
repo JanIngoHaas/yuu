@@ -38,6 +38,7 @@ pub enum Integer {
 #[logos(skip r"\^-[-]+.*")]
 #[logos(skip r"<--[-]+.*")]
 pub enum TokenKind {
+    #[token("end")]
     #[regex(r"\s+[.]")]
     BlockTerminator,
 
@@ -162,6 +163,8 @@ pub enum TokenKind {
     Asterix,
     #[token("/")]
     Slash,
+    #[token("%")]
+    Percent,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -228,6 +231,7 @@ impl Display for TokenKind {
             TokenKind::Minus => "'-'".fmt(f),
             TokenKind::Asterix => "'*'".fmt(f),
             TokenKind::Slash => "'/'".fmt(f),
+            TokenKind::Percent => "'%'".fmt(f),
             TokenKind::LParen => "'('".fmt(f),
             TokenKind::RParen => "')'".fmt(f),
             TokenKind::LBrace => "'{'".fmt(f),

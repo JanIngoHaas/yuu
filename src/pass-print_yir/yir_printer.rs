@@ -1,4 +1,5 @@
 use crate::pass_type_inference::TypeInfo;
+use crate::pass_yir_lowering::Label;
 use crate::pass_yir_lowering::yir::{BinOp, ControlFlow, Instruction, Operand, UnaryOp, Variable};
 use indexmap::IndexMap;
 use std::fmt;
@@ -226,6 +227,13 @@ pub fn format_operand(op: &Operand, do_color: bool) -> String {
                 colorize("@i64", "type", do_color)
             )
         }
+        Operand::U64Const(n) => {
+            format!(
+                "{}{}",
+                colorize(&n.to_string(), "constant", do_color),
+                colorize("@u64", "type", do_color)
+            )
+        }
         Operand::F32Const(f) => {
             format!(
                 "{}{}",
@@ -267,8 +275,10 @@ pub fn format_keyword(keyword: &str, do_color: bool) -> String {
     colorize(keyword, "keyword", do_color)
 }
 
-pub fn format_label(label: &str, do_color: bool) -> String {
-    format!(":{}", colorize(label, "label", do_color))
+pub fn format_label(label: &Label, do_color: bool) -> String {
+    let mut lname = String::new();
+    label.write_unique_name(&mut lname);
+    format!(":{}", colorize(&lname, "label", do_color))
 }
 
 pub fn format_operator(op: &str, do_color: bool) -> String {
@@ -281,6 +291,7 @@ pub fn format_binop(op: &BinOp, do_color: bool) -> String {
         BinOp::Sub => "-",
         BinOp::Mul => "*",
         BinOp::Div => "/",
+        BinOp::Mod => "%",
         BinOp::Eq => "==",
         BinOp::NotEq => "!=",
         BinOp::LessThan => "<",
@@ -423,6 +434,25 @@ pub fn format_instruction(
                 write!(f, "{}", format_operand(arg, do_color))?;
             }
             writeln!(f, ")")
+        }
+        Instruction::MakeEnum {
+            target,
+            variant_name,
+            variant_index,
+            data,
+        } => {
+            write!(
+                f,
+                "{} := {} {}#{}",
+                format_variable(target, do_color),
+                format_keyword("enum", do_color),
+                colorize(variant_name, "literal", do_color),
+                variant_index
+            )?;
+            if let Some(data_operand) = data {
+                write!(f, "({})", format_operand(data_operand, do_color))?;
+            }
+            writeln!(f)
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,
@@ -456,7 +486,7 @@ pub fn format_control_flow(
                 f,
                 "{} {}",
                 format_keyword("jump", do_color),
-                format_label(target.name(), do_color)
+                format_label(target, do_color)
             )
         }
         ControlFlow::Branch {
@@ -469,8 +499,8 @@ pub fn format_control_flow(
                 "{} {} ? {}, {}",
                 format_keyword("branch", do_color),
                 format_operand(condition, do_color),
-                format_label(if_true.name(), do_color),
-                format_label(if_false.name(), do_color)
+                format_label(if_true, do_color),
+                format_label(if_false, do_color)
             )
         }
         ControlFlow::Return(value) => {
@@ -481,6 +511,30 @@ pub fn format_control_flow(
             writeln!(f)
         }
         ControlFlow::Unterminated => writeln!(f, "<unreachable>"),
+        ControlFlow::JumpTable {
+            scrutinee,
+            enum_name,
+            jump_targets,
+            default,
+        } => {
+            write!(
+                f,
+                "jump_table {} enum {} {{",
+                format_operand(scrutinee, false),
+                enum_name
+            )?;
+            writeln!(f)?;
+
+            for (variant_name, label) in jump_targets {
+                writeln!(f, "    {} -> {}", variant_name, label.name())?;
+            }
+
+            if let Some(default_label) = default {
+                writeln!(f, "    default -> {}", default_label.name())?;
+            }
+
+            writeln!(f, "}}")
+        }
     }
 }
 
@@ -517,7 +571,7 @@ pub fn format_yir(
     // Blocks
     for (_, block) in &function.blocks {
         // Block label
-        writeln!(f, "{}:", format_label(block.label.name(), do_color))?;
+        writeln!(f, "{}:", format_label(&block.label, do_color))?;
 
         // Instructions
         for inst in &block.instructions {

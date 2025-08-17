@@ -185,7 +185,7 @@ fn test_recursive_function_type_checking() {
     let source = r#"
         fn factorial(n: i64) -> i64:
             if n <= 1: return 1 .
-            else: return n * factorial(n - 1) . .
+            else: return n * factorial(n - 1) .
         
         fn main() -> i64:
             return factorial(5) .

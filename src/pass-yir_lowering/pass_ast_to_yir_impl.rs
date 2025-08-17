@@ -1,15 +1,13 @@
-use std::intrinsics::offset;
-
 use crate::{
     pass_parse::{
-        EnumPattern, GetId, RefutablePatternNode,
+        GetId, RefutablePatternNode,
         ast::{
             AST, BinOp, BindingNode, BlockExpr, ExprNode, IfExpr, InternUstr, NodeId, StmtNode,
             StructuralNode, UnaryOp,
         },
         token::{Integer, Token, TokenKind},
     },
-    pass_type_inference::{FieldsMap, PrimitiveType, TypeInfo, TypeRegistry},
+    pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
@@ -81,6 +79,7 @@ impl<'a> TransientData<'a> {
                     BinOp::Subtract => YirBinOp::Sub,
                     BinOp::Multiply => YirBinOp::Mul,
                     BinOp::Divide => YirBinOp::Div,
+                    BinOp::Modulo => YirBinOp::Mod,
                     BinOp::Eq => YirBinOp::Eq,
                     BinOp::NotEq => YirBinOp::NotEq,
                     BinOp::Lt => YirBinOp::LessThan,
@@ -118,8 +117,8 @@ impl<'a> TransientData<'a> {
                 // Find the NodeId of the variable declaration this identifier refers to
                 let binding_id = *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
                     panic!(
-                        "Compiler Bug: No binding found for ident expr {}",
-                        ident_expr.id
+                        "Compiler Bug: No binding found for ident expr '{}': {} -> Span: {:#?}; bindings: {:#?}",
+                        ident_expr.ident, ident_expr.id, ident_expr.span, self.tr.bindings
                     )
                 });
 
@@ -276,9 +275,36 @@ impl<'a> TransientData<'a> {
 
                 Operand::Variable(field_ptr)
             }
-            ExprNode::EnumInstantiation(_) => {
-                // TODO: Implement enum instantiation in YIR lowering
-                todo!("Enum instantiation YIR lowering not yet implemented")
+            ExprNode::EnumInstantiation(ei) => {
+                let enum_info = self
+                    .tr
+                    .resolve_enum(ei.enum_name)
+                    .expect("Compiler bug: enum not found in lowering to YIR");
+
+                let variant_info = enum_info
+                    .variants
+                    .get(&ei.variant_name)
+                    .expect("Compiler bug: enum variant not found in lowering to YIR");
+
+                let variant_index = variant_info.variant_idx;
+
+                // Handle associated data if present
+                let data_operand = if let Some(data_expr) = &ei.data {
+                    Some(self.lower_expr(data_expr))
+                } else {
+                    None
+                };
+
+                // Create the enum using the new MakeEnum instruction
+                let enum_var = self.function.make_enum(
+                    "enum_result".intern(),
+                    enum_info.ty,
+                    ei.variant_name,
+                    variant_index,
+                    data_operand,
+                );
+
+                Operand::Variable(enum_var)
             }
             ExprNode::Match(m) => {
                 // Lower the scrutinee expression
@@ -291,42 +317,46 @@ impl<'a> TransientData<'a> {
 
                 let merge_label = self.function.add_block("match_merge".intern());
 
-                let mut offset_labels = IndexMap::new();
+                let mut variant_labels = IndexMap::new();
+                let mut enum_name = None;
 
                 for arm in m.arms.iter() {
                     match &*arm.pattern {
                         RefutablePatternNode::Enum(enum_pattern) => {
+                            // Store enum name for jump table (should be same for all arms)
+                            if enum_name.is_none() {
+                                enum_name = Some(enum_pattern.enum_name);
+                            }
+
                             // Create a label for this case
                             let case_label = self.function.add_block("match_case".intern());
 
                             // We are in the case block now
                             self.function.set_current_block(&case_label);
 
-                            match enum_pattern {
-                                EnumPattern::Unit(enum_unit_pattern) => {
-                                    let enum_info = self
-                                        .tr
-                                        .resolve_enum(enum_unit_pattern.enum_name)
-                                        .expect("Compiler bug: enum not found in lowering to YIR");
+                            // Handle the binding for enum data patterns
+                            if let Some(binding) = &enum_pattern.binding {
+                                match binding.as_ref() {
+                                    BindingNode::Ident(ident_binding) => {
+                                        let binding_id = ident_binding.id;
+                                        let name_hint = ident_binding.name;
+                                        let var_type = self.get_type(binding_id);
 
-                                    let current_variant = enum_info.variants.get(&enum_unit_pattern.variant_name).expect("Compiler bug: enum variant not found in lowering to YIR");
-                                    let variant_idx = current_variant.variant_idx;
-                                    offset_labels.insert(variant_idx, case_label);
-                                }
-                                EnumPattern::WithData(enum_data_pattern) => {
-                                    // TODO: Claude: lower binding here -> refactor corresponding functions
-                                    // TODO: Claude: Here, we have some redundancy, i.e. enum_data_pattern and enum_unit_pattern could have a common struct and then just an Option<> for the inner refutable pattern... This would make things easier for us. Try to refactor this here and everywhere else.
-                                    let binding = "hi".intern();
-                                    let enum_info = self
-                                        .tr
-                                        .resolve_enum(enum_data_pattern.enum_name)
-                                        .expect("Compiler bug: enum not found in lowering to YIR");
+                                        // Create a variable to hold the extracted enum data
+                                        // This will be populated when the enum variant matches
+                                        let yir_var = self.function.make_alloca(
+                                            name_hint, var_type,
+                                            None, // No initial value - will be set during match
+                                        );
 
-                                    let current_variant = enum_info.variants.get(&enum_data_pattern.variant_name).expect("Compiler bug: enum variant not found in lowering to YIR");
-                                    let variant_idx = current_variant.variant_idx;
-                                    offset_labels.insert(variant_idx, case_label);
+                                        // Map the AST binding ID to the new YIR variable
+                                        self.var_map.insert(binding_id, yir_var);
+                                    }
                                 }
                             }
+
+                            // Map variant name to case label
+                            variant_labels.insert(enum_pattern.variant_name, case_label);
                             let arm_body_lowered = self.lower_expr(&arm.body);
 
                             // Store the result of the arm body into the target variable
@@ -338,9 +368,13 @@ impl<'a> TransientData<'a> {
                     }
                 }
 
-                // Now we have all the case labels, we can create the jump table
-                self.function
-                    .make_jump_table(scrutinee, offset_labels, None); // TODO: For now: No default case, need to do this later though!
+                // Now we have all the case labels, we can create the semantic jump table
+                self.function.make_jump_table_enum(
+                    scrutinee,
+                    enum_name.expect("No enum patterns found in match"),
+                    variant_labels,
+                    None, // TODO: For now: No default case, need to do this later though!
+                );
 
                 Operand::Variable(target_var)
             }
@@ -466,14 +500,10 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_if_expr(&mut self, if_expr: &IfExpr) -> Operand {
-        // Evaluate the condition
-        let cond = self.lower_expr(&if_expr.if_block.condition);
-
         // Get the result type for the if expression
         let result_type = self.get_type(if_expr.id);
 
         // Declare a variable to hold the result of the if-expression, if it has a result type
-
         let if_result_var = if !matches!(
             result_type,
             TypeInfo::Inactive | TypeInfo::BuiltInPrimitive(PrimitiveType::Nil)
@@ -486,20 +516,43 @@ impl<'a> TransientData<'a> {
             None // If the result type is inactive, we don't need a variable
         };
 
-        // Create all blocks first, merge will be the next block for both branches
-        let (then_label, else_label) = self.function.make_branch(cond);
         let merge_label = self.function.add_block("merge".intern());
 
-        // Lower the then block, setting merge as its next block
+        // Process the main if condition
+        let main_cond = self.lower_expr(&if_expr.if_block.condition);
+        let (then_label, next_label) = self.function.make_branch(main_cond);
+
+        // Lower the then block
         self.function.set_current_block(&then_label);
         let then_value = self.lower_block_expr(&if_expr.if_block.body);
         if let Some(if_result_var) = if_result_var {
             self.function.make_store(if_result_var, then_value);
-        } // Assign then_value to if_result_var
+        }
         self.function.make_jump_if_no_terminator(merge_label);
 
-        // Lower the else block, also setting merge as its next block
-        self.function.set_current_block(&else_label);
+        // Process each else-if block by chaining them
+        let mut current_label = next_label;
+        for else_if_block in &if_expr.else_if_blocks {
+            self.function.set_current_block(&current_label);
+            
+            // Evaluate the else-if condition
+            let elif_cond = self.lower_expr(&else_if_block.condition);
+            let (elif_then_label, elif_next_label) = self.function.make_branch(elif_cond);
+
+            // Lower the else-if body
+            self.function.set_current_block(&elif_then_label);
+            let elif_value = self.lower_block_expr(&else_if_block.body);
+            if let Some(if_result_var) = if_result_var {
+                self.function.make_store(if_result_var, elif_value);
+            }
+            self.function.make_jump_if_no_terminator(merge_label);
+
+            // Continue with the next else-if or final else
+            current_label = elif_next_label;
+        }
+
+        // Handle the final else block
+        self.function.set_current_block(&current_label);
         let else_value = if let Some(else_block) = &if_expr.else_block {
             self.lower_block_expr(else_block)
         } else {
@@ -507,12 +560,12 @@ impl<'a> TransientData<'a> {
         };
 
         if let Some(if_result_var) = if_result_var {
-            self.function.make_store(if_result_var, else_value); // Assign else_value to if_result_var
+            self.function.make_store(if_result_var, else_value);
         }
 
         self.function.make_jump_if_no_terminator(merge_label);
 
-        // Set merge block as current (no next block needed since it's the end)
+        // Set merge block as current
         self.function.set_current_block(&merge_label);
         if_result_var.map_or(Operand::NoOp, Operand::Variable)
     }
@@ -562,6 +615,11 @@ impl YirLowering {
                 // Define structs
                 StructuralNode::StructDef(sdefs) => {
                     module.define_struct(sdefs.decl.name);
+                }
+
+                // Define enums
+                StructuralNode::EnumDef(edefs) => {
+                    module.define_enum(edefs.decl.name);
                 }
                 _ => (),
             }

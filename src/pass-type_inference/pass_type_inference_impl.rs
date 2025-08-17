@@ -102,9 +102,10 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
         StructuralNode::EnumDef(ed) => {
             let mut enum_defs = FieldsMap::default();
 
-            for variant in &ed.variants {
+            for (idx, variant) in ed.variants.iter().enumerate() {
                 let evi = EnumVariantInfo {
                     variant_name: variant.name,
+                    variant_idx: idx as u64,
                     variant: variant.data_type.as_ref().map(|x| infer_type(x, data)),
                 };
                 enum_defs.insert(variant.name, evi);

@@ -140,7 +140,7 @@ impl Lexer {
         self.expect(&[TokenKind::Colon], errors)
     }
 
-    pub fn expect_fat_arrow(&mut self, errors: &mut Vec<ParseError>) {
+    pub fn expect_fat_arrow(&mut self, _errors: &mut Vec<ParseError>) {
         todo!()
     }
 
