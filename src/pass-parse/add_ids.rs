@@ -52,28 +52,12 @@ impl AddId for ExprNode {
                 un.operand.add_id(generator);
             }
             ExprNode::Ident(id) => id.id = generator.next(),
-            ExprNode::Block(block) => {
-                block.add_id(generator);
-            }
             ExprNode::FuncCall(func_call_expr) => {
                 func_call_expr.lhs.add_id(generator);
                 for arg in &mut func_call_expr.args {
                     arg.add_id(generator);
                 }
                 func_call_expr.id = generator.next();
-            }
-            ExprNode::If(if_expr) => {
-                if_expr.id = generator.next();
-                if_expr.if_block.condition.add_id(generator);
-                if_expr.if_block.body.add_id(generator);
-                // Add IDs to else-if blocks
-                for else_if in &mut if_expr.else_if_blocks {
-                    else_if.condition.add_id(generator);
-                    else_if.body.add_id(generator);
-                }
-                if let Some(else_expr) = &mut if_expr.else_block {
-                    else_expr.add_id(generator);
-                }
             }
             ExprNode::Assignment(assignment_expr) => {
                 assignment_expr.id = generator.next();
@@ -85,11 +69,6 @@ impl AddId for ExprNode {
                 for (_name, field) in &mut struct_instantiation_expr.fields {
                     field.add_id(generator);
                 }
-            }
-            ExprNode::While(while_expr) => {
-                while_expr.id = generator.next();
-                while_expr.condition_block.body.add_id(generator);
-                while_expr.condition_block.condition.add_id(generator);
             }
             ExprNode::MemberAccess(member_access_expr) => {
                 member_access_expr.id = generator.next();
@@ -137,6 +116,30 @@ impl AddId for StmtNode {
             StmtNode::Break(exit_stmt) => {
                 exit_stmt.id = generator.next();
                 exit_stmt.expr.add_id(generator);
+            }
+            StmtNode::If(if_stmt) => {
+                if_stmt.id = generator.next();
+                if_stmt.if_block.condition.add_id(generator);
+                if_stmt.if_block.body.add_id(generator);
+                // Add IDs to else-if blocks
+                for else_if in &mut if_stmt.else_if_blocks {
+                    else_if.condition.add_id(generator);
+                    else_if.body.add_id(generator);
+                }
+                if let Some(else_expr) = &mut if_stmt.else_block {
+                    else_expr.add_id(generator);
+                }
+            }
+            StmtNode::While(while_stmt) => {
+                while_stmt.id = generator.next();
+                while_stmt.condition_block.body.add_id(generator);
+                while_stmt.condition_block.condition.add_id(generator);
+            }
+            StmtNode::Block(block_stmt) => {
+                block_stmt.id = generator.next();
+                for stmt in &mut block_stmt.body {
+                    stmt.add_id(generator);
+                }
             }
             StmtNode::Error(e) => *e = generator.next(),
         }
@@ -283,14 +286,11 @@ impl GetId for ExprNode {
             ExprNode::Binary(bin) => bin.id,
             ExprNode::Unary(un) => un.id,
             ExprNode::Ident(id) => id.id,
-            ExprNode::Block(block) => block.id,
             ExprNode::FuncCall(func_call_expr) => func_call_expr.id,
-            ExprNode::If(if_expr) => if_expr.id,
             ExprNode::Assignment(assignment_expr) => assignment_expr.id,
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.id
             }
-            ExprNode::While(while_expr) => while_expr.id,
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
             ExprNode::Match(match_expr) => match_expr.id,
@@ -304,6 +304,9 @@ impl GetId for StmtNode {
             StmtNode::Let(let_stmt) => let_stmt.id,
             StmtNode::Atomic(expr) => expr.node_id(),
             StmtNode::Break(exit_stmt) => exit_stmt.id,
+            StmtNode::If(if_stmt) => if_stmt.id,
+            StmtNode::While(while_stmt) => while_stmt.id,
+            StmtNode::Block(block_stmt) => block_stmt.id,
             StmtNode::Error(x) => *x,
         }
     }

@@ -125,6 +125,30 @@ pub struct WhileExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct IfStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub if_block: ConditionWithBody,
+    pub else_if_blocks: Vec<ConditionWithBody>,
+    pub else_block: Option<BlockExpr>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WhileStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub condition_block: ConditionWithBody,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BlockStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub body: Vec<StmtNode>,
+    pub label: Option<Ustr>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Field {
     pub name: Ustr,
     pub span: Span,
@@ -232,10 +256,7 @@ pub enum ExprNode {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
     Ident(IdentExpr),
-    Block(BlockExpr),
     FuncCall(FuncCallExpr),
-    If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
-    While(WhileExpr),
     Assignment(AssignmentExpr),
     StructInstantiation(StructInstantiationExpr),
     EnumInstantiation(EnumInstantiationExpr),
@@ -432,6 +453,9 @@ pub enum StmtNode {
     Atomic(ExprNode),
     //Return(ReturnStmt),
     Break(BreakStmt), // new variant
+    If(IfStmt),
+    While(WhileStmt),
+    Block(BlockStmt),
     Error(NodeId),
 }
 
@@ -480,9 +504,7 @@ impl Spanned for ExprNode {
             ExprNode::Binary(bin) => bin.span.clone(),
             ExprNode::Unary(un) => un.span.clone(),
             ExprNode::Ident(id) => id.span.clone(),
-            ExprNode::Block(block_expr) => block_expr.span.clone(),
             ExprNode::FuncCall(func_call_expr) => func_call_expr.span.clone(),
-            ExprNode::If(if_expr) => if_expr.span.clone(),
             ExprNode::Assignment(assign) => assign.span.clone(),
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.span.clone()
@@ -490,7 +512,6 @@ impl Spanned for ExprNode {
             ExprNode::EnumInstantiation(enum_instantiation_expr) => {
                 enum_instantiation_expr.span.clone()
             }
-            ExprNode::While(while_expr) => while_expr.span.clone(),
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Match(match_expr) => match_expr.span.clone(),
         }
@@ -504,6 +525,9 @@ impl Spanned for StmtNode {
             StmtNode::Atomic(expr_node) => expr_node.span(),
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
+            StmtNode::If(if_stmt) => if_stmt.span.clone(),
+            StmtNode::While(while_stmt) => while_stmt.span.clone(),
+            StmtNode::Block(block_stmt) => block_stmt.span.clone(),
             StmtNode::Error(_) => 0..0,
         }
     }

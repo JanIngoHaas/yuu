@@ -1321,15 +1321,12 @@ pub fn infer_expr(
         ExprNode::Binary(binary) => infer_binary(binary, block, data),
         ExprNode::Unary(unary) => infer_unary(unary, block, data),
         ExprNode::Ident(ident) => infer_ident(ident, block, data, function_args),
-        ExprNode::Block(block_expr) => infer_block(block_expr, block, data),
         ExprNode::FuncCall(func_call) => infer_func_call(func_call, block, data),
-        ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data),
         ExprNode::Assignment(assignment) => infer_assignment(assignment, block, data),
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
             infer_struct_instantiation(struct_instantiation_expr, block, data)
         }
 
-        ExprNode::While(while_expr) => infer_while(while_expr, block, data),
         ExprNode::MemberAccess(member_access_expr) => {
             infer_member_access(member_access_expr, block, data)
         }

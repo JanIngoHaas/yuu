@@ -171,18 +171,6 @@ impl Parser {
                     }
                 }
             }
-            TokenKind::IfKw => {
-                self.lexer.next_token();
-                self.parse_if_expr()
-            }
-            TokenKind::WhileKw => {
-                self.lexer.next_token();
-                self.parse_while_expr()
-            }
-            TokenKind::Colon => {
-                let (span, block_expr) = self.parse_block_expr()?;
-                Ok((span.clone(), ExprNode::Block(block_expr)))
-            }
             _ => {
                 let t = self.lexer.next_token();
                 let x = YuuError::unexpected_token(
@@ -286,11 +274,12 @@ impl Parser {
         ))
     }
 
-    pub fn parse_while_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+
+    pub fn parse_while_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (overall_span, cond_with_body) = self.parse_condition_with_body()?;
         Ok((
             overall_span.clone(),
-            ExprNode::While(WhileExpr {
+            StmtNode::While(WhileStmt {
                 id: 0,
                 span: overall_span,
                 condition_block: cond_with_body,
@@ -298,7 +287,21 @@ impl Parser {
         ))
     }
 
-    pub fn parse_if_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+    pub fn parse_block_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let (span, block_expr) = self.parse_block_expr()?;
+        Ok((
+            span.clone(),
+            StmtNode::Block(BlockStmt {
+                id: 0,
+                span: span.clone(),
+                body: block_expr.body,
+                label: block_expr.label,
+            }),
+        ))
+    }
+
+
+    pub fn parse_if_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (body_span, cond_with_body) = self.parse_condition_with_body()?;
         let start_span = body_span;
 
@@ -334,7 +337,7 @@ impl Parser {
 
         let overall_span = start_span.start..last_body_span.end; // Use stored start span
 
-        let if_expr = IfExpr {
+        let if_stmt = IfStmt {
             id: 0,
             span: overall_span.clone(),
             if_block: cond_with_body,
@@ -342,7 +345,7 @@ impl Parser {
             else_block: else_,
         };
 
-        Ok((overall_span, ExprNode::If(if_expr)))
+        Ok((overall_span, StmtNode::If(if_stmt)))
     }
 
     // What if member is a function pointer? Then transforming as we do it here, won't work. The function pointer call has to be resolved explicitly through "a.*b()" syntax...
@@ -518,15 +521,7 @@ impl Parser {
 
     pub fn parse_atomic_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (span, expr) = self.parse_expr()?;
-
-        let final_span = if matches!(
-            expr,
-            ExprNode::If(_) | ExprNode::While(_) | ExprNode::Block(_)
-        ) {
-            span
-        } else {
-            self.expect_semicolon_or_block_terminator(span.clone(), span.clone())?
-        };
+        let final_span = self.expect_semicolon_or_block_terminator(span.clone(), span.clone())?;
         Ok((final_span, StmtNode::Atomic(expr)))
     }
 
@@ -1426,6 +1421,9 @@ impl Parser {
             //TokenKind::OutKw => self.parse_out_stmt(),
             TokenKind::BreakKw => self.parse_break_stmt(),
             TokenKind::Return => self.parse_return_stmt(),
+            TokenKind::IfKw => self.parse_if_stmt(),
+            TokenKind::WhileKw => self.parse_while_stmt(),
+            TokenKind::Colon => self.parse_block_stmt(),
             _ => self.parse_atomic_stmt(),
         }
     }

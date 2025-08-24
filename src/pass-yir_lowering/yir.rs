@@ -15,7 +15,7 @@ use ustr::{Ustr, UstrMap};
 Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5 /
 */
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Variable {
     name: Ustr,
     id: i64,
@@ -88,7 +88,7 @@ impl Label {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Operand {
     I64Const(i64),
     U64Const(u64),
@@ -397,7 +397,52 @@ impl Function {
         };
 
         target
-    } // Builder method for Assign
+    }
+
+    // Helper function to allocate only for valid types (not Inactive or pointers to Inactive)
+    pub fn make_alloca_if_valid_type(
+        &mut self,
+        name_hint: Ustr,
+        ty: &'static TypeInfo,
+        init_value: Option<Operand>,
+    ) -> Option<Variable> {
+        // Don't allocate for inactive types following the same pattern as make_store
+        if matches!(
+            ty,
+            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+        ) {
+            return None;
+        }
+
+        Some(self.make_alloca(name_hint, ty, init_value))
+    }
+
+    // Helper function to store only for valid types (not Inactive or pointers to Inactive)
+    pub fn make_store_if_valid_type(&mut self, target: Variable, value: Operand) -> bool {
+        // Check if the value's type is valid using the same pattern as existing debug assertions
+        let value_type = value.ty();
+        if matches!(
+            value_type,
+            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+        ) {
+            return false;
+        }
+
+        self.make_store(target, value);
+        true
+    }
+
+    // Helper function to store only if the target variable exists (reducing if-let boilerplate)
+    pub fn make_store_if_exists(&mut self, target: Option<Variable>, value: Operand) -> bool {
+        if let Some(var) = target {
+            self.make_store(var, value);
+            true
+        } else {
+            false
+        }
+    }
+
+    // Builder method for Assign
 
     // Use make_store instead of make_assign
     // pub fn make_assign(&mut self, target: Variable, value: Operand) -> Variable {
@@ -667,7 +712,12 @@ impl Function {
         });
     }
 
-    pub fn make_branch(&mut self, condition: Operand) -> (Label, Label) {
+    pub fn make_branch(
+        &mut self,
+        condition: Operand,
+        name_then: Option<Ustr>,
+        name_else: Option<Ustr>,
+    ) -> (Label, Label) {
         // Case j) - Yes, load the condition first
         let loaded_condition = self.load_if_pointer(condition, "branch_condition".intern());
 
@@ -678,8 +728,8 @@ impl Function {
             loaded_condition.ty()
         );
 
-        let true_label = self.add_block("then".intern());
-        let false_label = self.add_block("else".intern());
+        let true_label = self.add_block(name_then.unwrap_or_else(|| "then".intern()));
+        let false_label = self.add_block(name_else.unwrap_or_else(|| "else".intern()));
 
         self.set_terminator(ControlFlow::Branch {
             condition: loaded_condition,

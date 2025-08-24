@@ -8,8 +8,11 @@ use crate::{
         token::{Integer, Token, TokenKind},
     },
     pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry},
-    pass_yir_lowering::yir::{
-        self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
+    pass_yir_lowering::{
+        Label,
+        yir::{
+            self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
+        },
     },
 };
 use indexmap::IndexMap;
@@ -20,13 +23,13 @@ pub struct TransientData<'a> {
     // Renamed from variable_bindings
     var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
     // New map for labeled blocks: Maps AST BlockExpr NodeId -> (Merge Label, Result Variable)
-    labeled_block_info: IndexMap<NodeId, (yir::Label, Variable)>,
+    merge_block_info: IndexMap<NodeId, (yir::Label, Option<Variable>)>,
 }
 
 enum StmtRes {
     Proceed,
     Break(Operand),
-    BreakWithLabel,
+    BreakWithLabel(Label, Operand),
 }
 
 impl<'a> TransientData<'a> {
@@ -35,7 +38,7 @@ impl<'a> TransientData<'a> {
             function,
             tr,
             var_map: IndexMap::new(),
-            labeled_block_info: IndexMap::new(), // Initialize the new map
+            merge_block_info: IndexMap::new(), // Initialize the new map
         }
     }
 
@@ -112,7 +115,6 @@ impl<'a> TransientData<'a> {
                     UnaryOp::Pos => operand,
                 }
             }
-            ExprNode::If(if_expr) => self.lower_if_expr(if_expr),
             ExprNode::Ident(ident_expr) => {
                 // Find the NodeId of the variable declaration this identifier refers to
                 let binding_id = *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
@@ -132,7 +134,17 @@ impl<'a> TransientData<'a> {
 
                 Operand::Variable(yir_var)
             }
-            ExprNode::Block(block_expr) => self.lower_block_expr(block_expr),
+            ExprNode::Block(block_expr) => {
+                let (entry, exit, val) = self.lower_block_expr(block_expr);
+
+                // Connect entry with exit
+                let tmp = *self.function.get_current_block_label();
+                self.function.set_current_block(&entry);
+                self.function.make_jump_if_no_terminator(exit);
+                self.function.set_current_block(&tmp);
+
+                val
+            }
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
                     ExprNode::Ident(ident) => ident.ident,
@@ -224,28 +236,26 @@ impl<'a> TransientData<'a> {
                 // Return the struct variable pointer (already in pointer context from declare_var)
                 Operand::Variable(struct_var)
             }
+
             ExprNode::While(while_expr) => {
                 // Create labels
                 let cond_label = self.function.add_block("while_cond".intern());
-                let body_label = self.function.add_block("while_body".intern());
-                let exit_label = self.function.add_block("while_exit".intern());
+
                 // Jump into the condition check
                 self.function.make_jump(cond_label); // Condition block
                 self.function.set_current_block(&cond_label);
                 let cond = self.lower_expr(&while_expr.condition_block.condition);
 
+                let (entry, exit, result) = self.lower_block_expr(&while_expr.condition_block.body);
+
                 // Branch to body or exit
-                self.function
-                    .make_branch_to_existing(cond, body_label, exit_label);
-                // Body block
-                self.function.set_current_block(&body_label);
-                let body_val = self.lower_block_expr(&while_expr.condition_block.body);
-                // After body (if not broken out), loop back to condition
+                self.function.make_branch_to_existing(cond, entry, exit);
+
+                // From entry, jump back to condition.
+                self.function.set_current_block(&entry);
                 self.function.make_jump_if_no_terminator(cond_label);
-                // Exit block
-                self.function.set_current_block(&exit_label);
-                // Loop yields the last body value (or NoOp)
-                body_val
+                self.function.set_current_block(&exit);
+                result
             }
             ExprNode::MemberAccess(member_access_expr) => {
                 // Lower the left-hand side expression
@@ -311,9 +321,11 @@ impl<'a> TransientData<'a> {
                 let scrutinee = self.lower_expr(&m.scrutinee);
 
                 // Create a target variable for the match result
-                let target_var =
-                    self.function
-                        .make_alloca("match_result".intern(), self.get_type(m.id), None);
+                let target_var = self.function.make_alloca_if_valid_type(
+                    "match_result".intern(),
+                    self.get_type(m.id),
+                    None,
+                );
 
                 let merge_label = self.function.add_block("match_merge".intern());
 
@@ -359,8 +371,9 @@ impl<'a> TransientData<'a> {
                             variant_labels.insert(enum_pattern.variant_name, case_label);
                             let arm_body_lowered = self.lower_expr(&arm.body);
 
-                            // Store the result of the arm body into the target variable
-                            self.function.make_store(target_var, arm_body_lowered);
+                            // Store the result of the arm body into the target variable if it exists
+                            self.function
+                                .make_store_if_exists(target_var, arm_body_lowered);
 
                             // Jump to the merge block after executing the arm
                             self.function.make_jump_if_no_terminator(merge_label);
@@ -376,31 +389,42 @@ impl<'a> TransientData<'a> {
                     None, // TODO: For now: No default case, need to do this later though!
                 );
 
-                Operand::Variable(target_var)
+                target_var.map(Operand::Variable).unwrap_or(Operand::NoOp)
             }
         }
     }
 
-    fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> Operand {
-        // For labeled blocks, create result variable
-        let result_with_label = if let Some(label_name) = block_expr.label {
-            let result = self.function.make_alloca(
-                "block_return".intern(),
-                self.get_type(block_expr.id),
-                None,
-            );
+    fn lower_block_expr(&mut self, block_expr: &BlockExpr) -> (Label, Label, Operand) {
+        // Create the "merge" part
 
-            // Make a labeld_block_merge bb that we jump to...
-            let block = self.function.add_block(
-                /*format!("{}_merge", label_name.as_str()).intern()*/ label_name,
-            );
-            self.labeled_block_info
-                .insert(block_expr.id, (block, result)); // That's where we jump to from deep within the callstack (or from the block itself)
+        let curr_block_tmp = *self.function.get_current_block_label();
 
-            Some((result, block))
+        let block_result = self.function.make_alloca_if_valid_type(
+            "block_result".intern(),
+            self.get_type(block_expr.id),
+            None,
+        );
+
+        let exit_block_label = self.function.add_block("merge_block".intern());
+
+        if let Some(result_var) = block_result {
+            self.merge_block_info
+                .insert(block_expr.id, (exit_block_label, Some(result_var)));
         } else {
-            None
-        };
+            self.merge_block_info
+                .insert(block_expr.id, (exit_block_label, None));
+        }
+
+        // Create the "execution" part
+        let entry_block_name = block_expr
+            .label
+            .iter()
+            .copied()
+            .next()
+            .unwrap_or("anon_block".intern());
+
+        let entry_block_label = self.function.add_block(entry_block_name);
+        self.function.set_current_block(&entry_block_label);
 
         // Process statements in current block
         for stmt in &block_expr.body {
@@ -409,37 +433,56 @@ impl<'a> TransientData<'a> {
             match res {
                 // Direct break, referencing the parent block
                 StmtRes::Break(value) => {
-                    match result_with_label {
-                        // Labeled block: jump to next with value in result
-                        Some((result, label)) => {
-                            // Assign the value to the result variable
-                            self.function.make_store(result, value);
-                            self.function.make_jump_if_no_terminator(label);
-                            self.function.set_current_block(&label);
-                            return Operand::Variable(result);
-                        }
-                        // Unlabeled block: Just return the value, no jumping around needed
-                        _ => return value,
-                    }
+                    // Assign the value to the result variable if it exists
+                    self.function.make_store_if_exists(block_result, value);
+                    self.function.make_jump_if_no_terminator(exit_block_label);
+                    self.function.set_current_block(&curr_block_tmp);
+                    println!(
+                        "In Break: ({:?}, {:?})",
+                        entry_block_label.name(),
+                        exit_block_label.name(),
+                    );
+                    return (
+                        entry_block_label,
+                        exit_block_label,
+                        block_result.map(Operand::Variable).unwrap_or(Operand::NoOp),
+                    );
                 }
                 StmtRes::Proceed => (),
-                StmtRes::BreakWithLabel => {
-                    // This is a break with label, we don't need to do anything here
-                    // The break was already handled in the lower_stmt function
-                    // But, we don't have to proceed with the rest of the block - it's essentially dead code
-                    break;
+                StmtRes::BreakWithLabel(jump_to, write_to_value) => {
+                    println!("Jumping to: {:?}", jump_to.name());
+                    self.function.make_jump(jump_to);
+                    self.function
+                        .make_store_if_exists(block_result, write_to_value);
+
+                    self.function.set_current_block(&curr_block_tmp);
+                    println!(
+                        "In BreakWithLabel: ({:?}, {:?}, {:?})",
+                        entry_block_label.name(),
+                        exit_block_label.name(),
+                        block_result.map(Operand::Variable).unwrap_or(Operand::NoOp),
+                    );
+                    return (
+                        entry_block_label,
+                        exit_block_label,
+                        block_result.map(Operand::Variable).unwrap_or(Operand::NoOp),
+                    );
                 }
             }
         }
 
-        // no break stmt - jump to the next block, not writing anything
-        if let Some((result, label)) = result_with_label {
-            self.function.make_jump_if_no_terminator(label);
-            self.function.set_current_block(&label);
-            Operand::Variable(result)
-        } else {
-            Operand::NoOp
-        }
+        self.function.set_current_block(&curr_block_tmp); // Restore the previous current block
+        println!(
+            "At end of block: ({:?}, {:?}, {:?})",
+            entry_block_label.name(),
+            exit_block_label.name(),
+            block_result.map(Operand::Variable).unwrap_or(Operand::NoOp),
+        );
+        (
+            entry_block_label,
+            exit_block_label,
+            block_result.map(Operand::Variable).unwrap_or(Operand::NoOp),
+        )
     }
 
     fn lower_stmt(&mut self, stmt: &StmtNode) -> StmtRes {
@@ -479,19 +522,20 @@ impl<'a> TransientData<'a> {
                 }
                 debug_assert!(self.tr.bindings.contains_key(&exit_stmt.id));
                 debug_assert!(
-                    self.labeled_block_info
+                    self.merge_block_info
                         .contains_key(&self.tr.bindings[&exit_stmt.id])
                 );
-                if let Some((target_label, result_var)) = self
+                let (target_label, result_var) = self
                     .tr
                     .bindings
                     .get(&exit_stmt.id)
-                    .and_then(|x| self.labeled_block_info.get(x))
-                {
-                    self.function.make_store(*result_var, value);
-                    self.function.make_jump(*target_label);
-                }
-                StmtRes::BreakWithLabel
+                    .and_then(|x| self.merge_block_info.get(x))
+                    .unwrap();
+
+                StmtRes::BreakWithLabel(
+                    *target_label,
+                    result_var.map(Operand::Variable).unwrap_or(Operand::NoOp),
+                )
             }
             StmtNode::Error(_) => unreachable!(
                 "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
@@ -500,74 +544,86 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_if_expr(&mut self, if_expr: &IfExpr) -> Operand {
-        // Get the result type for the if expression
-        let result_type = self.get_type(if_expr.id);
+        // For all branches (exit nodes), we finally jump to the merge block
+        let merge_final = self.function.add_block("if_merge".intern());
+        let merge_final_var = self.function.make_alloca_if_valid_type(
+            "if_merge_result".intern(),
+            self.get_type(if_expr.id),
+            None,
+        );
 
-        // Declare a variable to hold the result of the if-expression, if it has a result type
-        let if_result_var = if !matches!(
-            result_type,
-            TypeInfo::Inactive | TypeInfo::BuiltInPrimitive(PrimitiveType::Nil)
-        ) {
-            Some(
-                self.function
-                    .make_alloca("if_result".intern(), result_type, None),
-            )
-        } else {
-            None // If the result type is inactive, we don't need a variable
-        };
+        let cond_block = self.function.add_block("if_cond".intern());
+        self.function.make_jump_if_no_terminator(cond_block);
+        self.function.set_current_block(&cond_block);
 
-        let merge_label = self.function.add_block("merge".intern());
+        let mut prev_cond = self.lower_expr(&if_expr.if_block.condition);
 
-        // Process the main if condition
-        let main_cond = self.lower_expr(&if_expr.if_block.condition);
-        let (then_label, next_label) = self.function.make_branch(main_cond);
+        // ==== Lower 'then' block ====
+        let (entry_if, exit_if, value_if) = self.lower_block_expr(&if_expr.if_block.body);
 
-        // Lower the then block
-        self.function.set_current_block(&then_label);
-        let then_value = self.lower_block_expr(&if_expr.if_block.body);
-        if let Some(if_result_var) = if_result_var {
-            self.function.make_store(if_result_var, then_value);
-        }
-        self.function.make_jump_if_no_terminator(merge_label);
+        self.function.set_current_block(&exit_if);
+        self.function.make_jump_if_no_terminator(merge_final);
 
-        // Process each else-if block by chaining them
-        let mut current_label = next_label;
+        self.function.set_current_block(&entry_if);
+        self.function
+            .make_store_if_exists(merge_final_var, value_if);
+        self.function.make_jump_if_no_terminator(merge_final);
+
+        let mut prev_body = entry_if;
+
+        // Lower the else-if blocks
         for else_if_block in &if_expr.else_if_blocks {
-            self.function.set_current_block(&current_label);
-            
-            // Evaluate the else-if condition
-            let elif_cond = self.lower_expr(&else_if_block.condition);
-            let (elif_then_label, elif_next_label) = self.function.make_branch(elif_cond);
+            let (entry_elif, exit_elif, value_elif) = self.lower_block_expr(&else_if_block.body);
 
-            // Lower the else-if body
-            self.function.set_current_block(&elif_then_label);
-            let elif_value = self.lower_block_expr(&else_if_block.body);
-            if let Some(if_result_var) = if_result_var {
-                self.function.make_store(if_result_var, elif_value);
-            }
-            self.function.make_jump_if_no_terminator(merge_label);
+            let cond_block = self.function.add_block("elif_cond".intern());
 
-            // Continue with the next else-if or final else
-            current_label = elif_next_label;
+            // Cond jump to either prev_body or to this cond block
+            self.function
+                .make_branch_to_existing(prev_cond, prev_body, cond_block);
+
+            // Now, remember to connect the exit elif block to the final merge block first
+            self.function.set_current_block(&exit_elif);
+            self.function.make_jump_if_no_terminator(merge_final);
+
+            self.function.set_current_block(&entry_elif);
+            self.function
+                .make_store_if_exists(merge_final_var, value_elif);
+            self.function.make_jump_if_no_terminator(merge_final);
+
+            self.function.set_current_block(&cond_block);
+            prev_cond = self.lower_expr(&else_if_block.condition);
+
+            prev_body = entry_elif;
         }
 
-        // Handle the final else block
-        self.function.set_current_block(&current_label);
-        let else_value = if let Some(else_block) = &if_expr.else_block {
-            self.lower_block_expr(else_block)
+        // Lower the else block ( if it exists )
+
+        if let Some(else_block) = &if_expr.else_block {
+            let (entry_else, exit_else, value_else) = self.lower_block_expr(else_block);
+
+            // Cond jump to either prev_body or to this else entry block (because there is no condition!)
+            self.function
+                .make_branch_to_existing(prev_cond, prev_body, entry_else);
+
+            // Now, connect the exit/entry to else block to the final merge block
+            self.function.set_current_block(&exit_else);
+            self.function.make_jump_if_no_terminator(merge_final);
+
+            self.function.set_current_block(&entry_else);
+            self.function
+                .make_store_if_exists(merge_final_var, value_else);
+            self.function.make_jump_if_no_terminator(merge_final);
         } else {
-            Operand::NoOp // If there's no else block, the value is NoOp
-        };
-
-        if let Some(if_result_var) = if_result_var {
-            self.function.make_store(if_result_var, else_value);
+            // No else block - just jump to merge from the last condition's "false" branch
+            self.function
+                .make_branch_to_existing(prev_cond, prev_body, merge_final);
         }
 
-        self.function.make_jump_if_no_terminator(merge_label);
-
-        // Set merge block as current
-        self.function.set_current_block(&merge_label);
-        if_result_var.map_or(Operand::NoOp, Operand::Variable)
+        // Finally, we need to ensure the merge block is connected properly
+        self.function.set_current_block(&merge_final);
+        merge_final_var
+            .map(Operand::Variable)
+            .unwrap_or(Operand::NoOp)
     }
 }
 
@@ -606,10 +662,18 @@ impl YirLowering {
                         data.var_map.insert(arg.id, param_ptr);
                     }
 
-                    let final_out = data.lower_block_expr(&func.body);
+                    let (entry, exit, final_out) = data.lower_block_expr(&func.body);
+
+                    data.function.make_jump(entry);
+
+                    data.function.set_current_block(&entry);
+                    data.function.make_jump_if_no_terminator(exit);
+                    data.function.set_current_block(&exit);
                     data.function.make_return(Some(final_out));
+
                     data.function.sort_blocks_by_id();
                     module.define_function(data.function);
+                    println!("End function: {}\n", func.decl.name);
                 }
 
                 // Define structs
