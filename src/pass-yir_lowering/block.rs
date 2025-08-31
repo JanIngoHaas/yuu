@@ -119,11 +119,10 @@ impl Block {
     }
 
     pub fn get_block_binding(&self, searched_name: &str) -> Option<BindingInfo> {
-        if let (Some(name), binding) = &self.named_block_binding {
-            if name == searched_name {
+        if let (Some(name), binding) = &self.named_block_binding
+            && name == searched_name {
                 return Some(binding.clone());
             }
-        }
 
         self.get_parent()
             .and_then(|p| p.get_block_binding(searched_name))

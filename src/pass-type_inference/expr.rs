@@ -559,7 +559,7 @@ fn infer_enum_instantiation(
                         // Yes, we have both
                         (Some(dexpr), Some(reg_ty)) => {
                             // Calculate type (semantic) from associated data (syntactical)
-                            let ty = infer_expr(&dexpr, block, data, function_args);
+                            let ty = infer_expr(dexpr, block, data, function_args);
                             // See if the types match
                             if let Err(err) = ty.unify(reg_ty) {
                                 let err_msg = YuuError::builder()

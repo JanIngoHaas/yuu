@@ -651,7 +651,7 @@ impl Parser {
                 self.errors.push(YuuError::unexpected_token(
                     la.span.clone(),
                     "a comma ',' or a block terminator '.'".to_string(),
-                    la.kind.clone(),
+                    la.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 ).with_help("Struct fields should be separated by commas, with finalized by a block terminator '.'".to_string()));
@@ -676,7 +676,7 @@ impl Parser {
                 self.errors.push(YuuError::unexpected_token(
                     la.span.clone(),
                     "a comma ',' or a closing parenthesis ')'".to_string(),
-                    la.kind.clone(),
+                    la.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 ).with_help("Function arguments should be separated by commas, with the list ending with a closing parenthesis".to_string()));
@@ -830,7 +830,7 @@ impl Parser {
                                         YuuError::unexpected_token(
                                             la.span.clone(),
                                             "a comma ',' or a closing brace '}'".to_string(),
-                                            la.kind.clone(),
+                                            la.kind,
                                             self.lexer.code_info.source.clone(),
                                             self.lexer.code_info.file_name.clone(),
                                         )
@@ -1055,7 +1055,7 @@ impl Parser {
                     YuuError::unexpected_token(
                         peek.span.clone(),
                         "a pattern".to_string(),
-                        peek.kind.clone(),
+                        peek.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
@@ -1119,14 +1119,14 @@ impl Parser {
 
         let match_stmt = MatchStmt {
             id: 0,
-            span: (match_start.span.start..end_span).into(),
+            span: (match_start.span.start..end_span),
             scrutinee: Box::new(scrutinee.1),
             arms,
             default_case,
         };
 
         Ok((
-            (match_start.span.start..end_span).into(),
+            (match_start.span.start..end_span),
             StmtNode::Match(match_stmt),
         ))
     }
@@ -1324,7 +1324,7 @@ impl Parser {
                 self.errors.push(YuuError::unexpected_token(
                     la.span.clone(),
                     "a comma ',' or a block terminator '.'".to_string(),
-                    la.kind.clone(),
+                    la.kind,
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 ).with_help("Enum variants should be separated by commas, with the list ending with a block terminator ' .'".to_string()));
@@ -1452,7 +1452,7 @@ impl Parser {
                     YuuError::unexpected_token(
                         t.span.clone(),
                         "fn".to_string(),
-                        t.kind.clone(),
+                        t.kind,
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )

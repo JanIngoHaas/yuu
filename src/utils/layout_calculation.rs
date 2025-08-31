@@ -240,8 +240,8 @@ pub fn calculate_variable_memory_layout(func: &Function) -> HashMap<i64, u64> {
 
     // Add parameters (they also need stack space in WASM)
     for param in &func.params {
-        if !layout.contains_key(&param.id()) {
-            layout.insert(param.id(), offset);
+        if let std::collections::hash_map::Entry::Vacant(e) = layout.entry(param.id()) {
+            e.insert(offset);
             let size = calc_type_layout(param.ty(), platform).size as u64;
             offset += size;
             let alignment = platform.calling_convention().stack_alignment as u64;

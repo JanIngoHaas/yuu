@@ -313,11 +313,11 @@ impl CLowering {
                 self.gen_operand(data, condition)?;
                 writeln!(data.output, ") {{")?;
                 write!(data.output, "        goto ")?;
-                Self::write_label(&if_true, &mut data.output)?;
+                Self::write_label(if_true, &mut data.output)?;
                 writeln!(data.output, ";")?;
                 writeln!(data.output, "    }} else {{")?;
                 write!(data.output, "        goto ")?;
-                Self::write_label(&if_false, &mut data.output)?;
+                Self::write_label(if_false, &mut data.output)?;
                 writeln!(data.output, ";")?;
                 writeln!(data.output, "    }}")?;
             }
@@ -343,13 +343,13 @@ impl CLowering {
 
                 for (variant_name, label) in jump_targets {
                     write!(data.output, "        case {}: goto ", variant_name)?;
-                    Self::write_label(&label, &mut data.output)?;
+                    Self::write_label(label, &mut data.output)?;
                     writeln!(data.output, ";")?;
                 }
 
                 if let Some(default_label) = default {
                     write!(data.output, "        default: goto ")?;
-                    Self::write_label(&default_label, &mut data.output)?;
+                    Self::write_label(default_label, &mut data.output)?;
                     writeln!(data.output, ";")?;
                 }
 

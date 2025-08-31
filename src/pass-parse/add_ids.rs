@@ -102,10 +102,9 @@ impl AddId for StmtNode {
             }
             StmtNode::Return(return_stmt) => {
                 return_stmt.id = generator.next();
-                return_stmt
+                if let Some(expr) = return_stmt
                     .expr
-                    .as_deref_mut()
-                    .map(|expr| expr.add_id(generator));
+                    .as_deref_mut() { expr.add_id(generator) }
             }
             StmtNode::If(if_stmt) => {
                 if_stmt.id = generator.next();

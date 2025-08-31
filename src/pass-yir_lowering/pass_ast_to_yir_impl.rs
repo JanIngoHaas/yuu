@@ -19,8 +19,6 @@ pub struct TransientData<'a> {
     tr: &'a TypeRegistry,
     // Renamed from variable_bindings
     var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
-    // New map for labeled blocks: Maps AST BlockExpr NodeId -> (Merge Label, Result Variable)
-    merge_block_info: IndexMap<NodeId, (yir::Label, Option<Variable>)>,
     // Loop context stack to track current loop merge blocks for break statements
     loop_context: Vec<yir::Label>,
 }
@@ -36,8 +34,7 @@ impl<'a> TransientData<'a> {
             function,
             tr,
             var_map: IndexMap::new(),
-            merge_block_info: IndexMap::new(), // Initialize the new map
-            loop_context: Vec::new(),          // Initialize the loop context stack
+            loop_context: Vec::new(), // Initialize the loop context stack
         }
     }
 
@@ -267,11 +264,7 @@ impl<'a> TransientData<'a> {
                 let variant_index = variant_info.variant_idx;
 
                 // Handle associated data if present
-                let data_operand = if let Some(data_expr) = &ei.data {
-                    Some(self.lower_expr(data_expr))
-                } else {
-                    None
-                };
+                let data_operand = ei.data.as_ref().map(|data_expr| self.lower_expr(data_expr));
 
                 // Create the enum using the new MakeEnum instruction
                 let enum_var = self.function.make_enum(
@@ -348,7 +341,7 @@ impl<'a> TransientData<'a> {
                 "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
             ),
             StmtNode::Return(return_stmt) => {
-                let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(&e));
+                let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e));
                 self.function.make_return(ret_value);
                 StmtRes::Break
             }
@@ -451,7 +444,7 @@ impl<'a> TransientData<'a> {
                         .make_branch_to_existing(prev_condition, prev_body, else_body);
 
                     self.function.set_current_block(&else_body);
-                    self.lower_block_body(&else_block);
+                    self.lower_block_body(else_block);
                     self.function.make_jump_if_no_terminator(merge_block);
                 }
 
