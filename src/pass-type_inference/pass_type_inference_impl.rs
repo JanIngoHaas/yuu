@@ -4,6 +4,8 @@ use crate::{
     pass_type_inference::{
         EnumVariantInfo,
         binding_info::BindingInfo,
+        inactive_type,
+        type_info::TypeInfo,
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
     pass_yir_lowering::block::{Block, RootBlock},
@@ -16,6 +18,7 @@ pub struct TransientData<'a> {
     pub ast: &'a AST,
     pub errors: Vec<YuuError>,
     pub src_code: SourceInfo,
+    pub current_function_return_type: &'static TypeInfo,
 }
 
 pub struct TypeInferenceErrors(pub Vec<YuuError>);
@@ -27,7 +30,12 @@ impl<'a> TransientData<'a> {
             ast,
             errors: Vec::default(),
             src_code,
+            current_function_return_type: inactive_type(),
         }
+    }
+
+    pub fn set_current_function_return_type(&mut self, return_type: &'static TypeInfo) {
+        self.current_function_return_type = return_type;
     }
 }
 
@@ -59,7 +67,7 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
             );
         }
         StructuralNode::FuncDef(def) => {
-            let ret = declare_function(
+            let _ = declare_function(
                 def.decl.name,
                 &def.decl.args,
                 &def.decl.ret_ty,
@@ -68,7 +76,6 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 block,
                 data,
             );
-            data.type_registry.type_info_table.insert(def.body.id, ret);
         }
         StructuralNode::Error(_) => (),
         StructuralNode::StructDecl(_struct_decl) => {

@@ -277,7 +277,7 @@ pub fn format_keyword(keyword: &str, do_color: bool) -> String {
 
 pub fn format_label(label: &Label, do_color: bool) -> String {
     let mut lname = String::new();
-    label.write_unique_name(&mut lname);
+    let _ = label.write_unique_name(&mut lname);
     format!(":{}", colorize(&lname, "label", do_color))
 }
 
@@ -513,15 +513,13 @@ pub fn format_control_flow(
         ControlFlow::Unterminated => writeln!(f, "<unreachable>"),
         ControlFlow::JumpTable {
             scrutinee,
-            enum_name,
             jump_targets,
             default,
         } => {
             write!(
                 f,
-                "jump_table {} enum {} {{",
-                format_operand(scrutinee, false),
-                enum_name
+                "jump_table {} {{",
+                format_operand(scrutinee, false)
             )?;
             writeln!(f)?;
 

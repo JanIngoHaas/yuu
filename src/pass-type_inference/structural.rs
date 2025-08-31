@@ -1,13 +1,16 @@
 use crate::{
     pass_parse::ast::{Arg, InternUstr, NodeId, StructuralNode, TypeNode},
-    pass_type_inference::binding_info::BindingInfo,
-    pass_type_inference::type_info::{TypeInfo, error_type, primitive_nil},
+    pass_type_inference::{
+        binding_info::BindingInfo,
+        inactive_type, infer_stmt,
+        type_info::{TypeInfo, error_type, primitive_nil},
+    },
     pass_yir_lowering::block::{Block, FUNC_BLOCK_NAME},
 };
 use logos::Span;
 use ustr::Ustr;
 
-use super::{infer_block_no_child_creation, infer_type, pass_type_inference_impl::TransientData};
+use super::{infer_type, pass_type_inference_impl::TransientData};
 
 pub fn declare_function(
     name: Ustr,
@@ -41,6 +44,8 @@ pub fn declare_function(
         primitive_nil()
     };
 
+    data.type_registry.type_info_table.insert(id, ret_type);
+
     data.type_registry.add_function(
         &func_arg_types,
         ret_type,
@@ -70,12 +75,21 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
                 func_block.insert_variable(arg.name, arg.id, Some(arg.span.clone()), arg.is_mut);
             }
 
-            // Process function body separately
-            // for stmt in &def.body.body {
-            //     infer_stmt(stmt, func_block, data)?;
-            // }
+            // Set the current function's return type for return statement validation
+            let return_type = data
+                .type_registry
+                .type_info_table
+                .get(def.id)
+                .expect("Function type should be registered by now");
+            data.set_current_function_return_type(return_type);
 
-            infer_block_no_child_creation(&def.body, func_block, data);
+            // Process function body separately
+            for stmt in &def.body.body {
+                infer_stmt(stmt, func_block, data);
+            }
+
+            // Clear the current function return type after processing
+            data.current_function_return_type = inactive_type();
         }
         StructuralNode::Error(estr) => {
             data.type_registry

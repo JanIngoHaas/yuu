@@ -221,10 +221,9 @@ pub enum ControlFlow {
         if_false: Label,
     },
     JumpTable {
-        scrutinee: Operand,                  // The enum variable being matched
-        enum_name: Ustr,                     // The enum type name
-        jump_targets: IndexMap<Ustr, Label>, // Maps variant name -> label
-        default: Option<Label>,              // Default jump target if no variant matches
+        scrutinee: Operand,                 // The enum variable being matched
+        jump_targets: IndexMap<i64, Label>, // Maps variant index -> label
+        default: Option<Label>,             // Default jump target if no variant matches
     },
     // Return from function
     Return(Option<Operand>),
@@ -257,7 +256,7 @@ impl BasicBlock {
                 Instruction::Call { .. } => {}
                 Instruction::MakeEnum { .. } => {}
             };
-            return None;
+            None
         })
     }
 }
@@ -510,7 +509,22 @@ impl Function {
         field_info: &StructFieldInfo,
     ) -> Variable {
         // Case d) - base needs to be a pointer, but here, DONT load it.
-        // TODO: Add validation for checking that base is a pointer to a struct type
+        // Validate that base is a pointer to a struct type
+        let base_type = base.ty();
+        debug_assert!(
+            matches!(base_type, TypeInfo::Pointer(_)),
+            "make_get_field_ptr: base operand must be a pointer type, got {:?}",
+            base_type
+        );
+
+        if let TypeInfo::Pointer(inner_type) = base_type {
+            debug_assert!(
+                matches!(inner_type, TypeInfo::Struct(_)),
+                "make_get_field_ptr: base must be pointer to struct, got pointer to {:?}",
+                inner_type
+            );
+        }
+
         let target_type = field_info.ty.ptr_to();
         let target = self.fresh_variable(name_hint, target_type);
         let instr = Instruction::GetFieldPtr {
@@ -695,18 +709,23 @@ impl Function {
         });
     }
 
-    pub fn make_jump_table_enum(
+    pub fn make_jump_table(
         &mut self,
         scrutinee: Operand,
-        enum_name: Ustr,
-        jump_targets: IndexMap<Ustr, Label>,
+        jump_targets: IndexMap<i64, Label>,
         default: Option<Label>,
     ) {
         let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
 
+        debug_assert_eq!(
+            loaded_scrutinee.ty(),
+            primitive_i64(),
+            "Jump table scrutinee must be i64 (enum discriminant), got {}",
+            loaded_scrutinee.ty()
+        );
+
         self.set_terminator(ControlFlow::JumpTable {
             scrutinee: loaded_scrutinee,
-            enum_name,
             jump_targets,
             default,
         });

@@ -334,7 +334,6 @@ impl CLowering {
             }
             ControlFlow::JumpTable {
                 scrutinee,
-                enum_name: _,
                 jump_targets,
                 default,
             } => {

@@ -30,7 +30,7 @@ pub enum Integer {
     // Idx(isize),
 }
 
-#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone, Copy)]
 #[logos(skip r"\s+")] // Skip whitespace
 #[logos(skip r"//.*")]
 #[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
@@ -47,6 +47,9 @@ pub enum TokenKind {
 
     #[token("case")]
     CaseKw,
+
+    #[token("default")]
+    DefaultKw,
 
     #[token("while")]
     WhileKw,
@@ -247,6 +250,7 @@ impl Display for TokenKind {
             TokenKind::At => "'@'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
+            TokenKind::DefaultKw => "'default'".fmt(f),
         }
     }
 }

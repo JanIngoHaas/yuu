@@ -81,22 +81,6 @@ impl AddId for ExprNode {
                     data.add_id(generator);
                 }
             }
-            ExprNode::Match(match_expr) => {
-                match_expr.id = generator.next();
-                match_expr.scrutinee.add_id(generator);
-                for arm in &mut match_expr.arms {
-                    arm.id = generator.next();
-                    match &mut *arm.pattern {
-                        RefutablePatternNode::Enum(enum_pattern) => {
-                            enum_pattern.id = generator.next();
-                            if let Some(binding) = &mut enum_pattern.binding {
-                                binding.add_id(generator);
-                            }
-                        }
-                    }
-                    arm.body.add_id(generator);
-                }
-            }
         }
     }
 }
@@ -115,7 +99,13 @@ impl AddId for StmtNode {
             StmtNode::Atomic(expr) => expr.add_id(generator),
             StmtNode::Break(exit_stmt) => {
                 exit_stmt.id = generator.next();
-                exit_stmt.expr.add_id(generator);
+            }
+            StmtNode::Return(return_stmt) => {
+                return_stmt.id = generator.next();
+                return_stmt
+                    .expr
+                    .as_deref_mut()
+                    .map(|expr| expr.add_id(generator));
             }
             StmtNode::If(if_stmt) => {
                 if_stmt.id = generator.next();
@@ -139,6 +129,25 @@ impl AddId for StmtNode {
                 block_stmt.id = generator.next();
                 for stmt in &mut block_stmt.body {
                     stmt.add_id(generator);
+                }
+            }
+            StmtNode::Match(match_stmt) => {
+                match_stmt.id = generator.next();
+                match_stmt.scrutinee.add_id(generator);
+                for arm in &mut match_stmt.arms {
+                    arm.id = generator.next();
+                    match &mut *arm.pattern {
+                        RefutablePatternNode::Enum(enum_pattern) => {
+                            enum_pattern.id = generator.next();
+                            if let Some(binding) = &mut enum_pattern.binding {
+                                binding.add_id(generator);
+                            }
+                        }
+                    }
+                    arm.body.add_id(generator);
+                }
+                if let Some(default_case) = &mut match_stmt.default_case {
+                    default_case.add_id(generator);
                 }
             }
             StmtNode::Error(e) => *e = generator.next(),
@@ -246,7 +255,7 @@ impl AddId for StructuralNode {
     }
 }
 
-impl AddId for BlockExpr {
+impl AddId for BlockStmt {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         self.id = generator.next();
         for stmt in &mut self.body {
@@ -293,7 +302,6 @@ impl GetId for ExprNode {
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
-            ExprNode::Match(match_expr) => match_expr.id,
         }
     }
 }
@@ -304,9 +312,11 @@ impl GetId for StmtNode {
             StmtNode::Let(let_stmt) => let_stmt.id,
             StmtNode::Atomic(expr) => expr.node_id(),
             StmtNode::Break(exit_stmt) => exit_stmt.id,
+            StmtNode::Return(return_stmt) => return_stmt.id,
             StmtNode::If(if_stmt) => if_stmt.id,
             StmtNode::While(while_stmt) => while_stmt.id,
             StmtNode::Block(block_stmt) => block_stmt.id,
+            StmtNode::Match(match_stmt) => match_stmt.id,
             StmtNode::Error(x) => *x,
         }
     }

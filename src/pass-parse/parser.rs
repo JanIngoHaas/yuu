@@ -245,7 +245,7 @@ impl Parser {
 
     pub fn parse_condition_with_body(&mut self) -> ParseResult<(Span, ConditionWithBody)> {
         let (_, condition) = self.parse_expr_chain(0)?;
-        let (block_span, block) = self.parse_block_expr()?;
+        let (block_span, block) = self.parse_block_stmt_inner()?;
 
         Ok((
             condition.span().start..block_span.end,
@@ -274,7 +274,6 @@ impl Parser {
         ))
     }
 
-
     pub fn parse_while_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (overall_span, cond_with_body) = self.parse_condition_with_body()?;
         Ok((
@@ -288,18 +287,17 @@ impl Parser {
     }
 
     pub fn parse_block_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let (span, block_expr) = self.parse_block_expr()?;
+        let (span, block_stmt) = self.parse_block_stmt_inner()?;
         Ok((
             span.clone(),
             StmtNode::Block(BlockStmt {
                 id: 0,
                 span: span.clone(),
-                body: block_expr.body,
-                label: block_expr.label,
+                body: block_stmt.body,
+                label: block_stmt.label,
             }),
         ))
     }
-
 
     pub fn parse_if_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let (body_span, cond_with_body) = self.parse_condition_with_body()?;
@@ -328,7 +326,7 @@ impl Parser {
 
         let else_ = if maybe_else.kind == TokenKind::ElseKw {
             let _ = self.lexer.next_token();
-            let (body_span, block) = self.parse_block_expr()?;
+            let (body_span, block) = self.parse_block_stmt_inner()?;
             last_body_span = body_span;
             Some(block)
         } else {
@@ -692,10 +690,10 @@ impl Parser {
         stmts: Vec<StmtNode>,
         span: Span,
         label: Option<Ustr>,
-    ) -> (Span, BlockExpr) {
+    ) -> (Span, BlockStmt) {
         (
             span.clone(),
-            BlockExpr {
+            BlockStmt {
                 id: 0,
                 span,
                 body: stmts,
@@ -928,7 +926,7 @@ impl Parser {
         Ok((span, ExprNode::EnumInstantiation(enum_instantiation)))
     }
 
-    pub fn parse_block_expr(&mut self) -> ParseResult<(Span, BlockExpr)> {
+    pub fn parse_block_stmt_inner(&mut self) -> ParseResult<(Span, BlockStmt)> {
         let colon = self.lexer.expect_colon(&mut self.errors)?;
         let mut stmts = Vec::new();
 
@@ -1071,7 +1069,7 @@ impl Parser {
         }
     }
 
-    pub fn parse_match_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+    pub fn parse_match_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let match_start = self.lexer.expect(&[TokenKind::MatchKw], &mut self.errors)?;
         let scrutinee = self.parse_expr()?;
         let _ = self.lexer.expect_colon(&mut self.errors)?;
@@ -1090,77 +1088,58 @@ impl Parser {
             let pattern = self.parse_refutable_pattern()?;
             let _ = self.lexer.expect_colon(&mut self.errors)?;
 
-            let expr = self.parse_expr()?;
+            let block = self.parse_block_stmt_inner()?;
             let match_arm = MatchArm {
-                body: Box::new(expr.1),
+                body: block.1,
                 id: 0,
                 pattern: Box::new(pattern.1),
-                span: pattern.0.start..expr.0.end,
+                span: pattern.0.start..block.0.end,
             };
 
             arms.push(match_arm);
         }
 
-        let end_span = if let Some(last_arm) = arms.last() {
+        // Check for optional default case
+        let default_case = if self.lexer.peek().kind == TokenKind::DefaultKw {
+            let _ = self.lexer.next_token(); // consume "default"
+            let _ = self.lexer.expect_colon(&mut self.errors)?;
+            let block = self.parse_block_stmt_inner()?;
+            Some(block.1)
+        } else {
+            None
+        };
+
+        let end_span = if let Some(default_case) = &default_case {
+            default_case.span.end
+        } else if let Some(last_arm) = arms.last() {
             last_arm.span.end
         } else {
             scrutinee.0.end
         };
 
-        let match_expr = MatchExpr {
+        let match_stmt = MatchStmt {
             id: 0,
             span: (match_start.span.start..end_span).into(),
             scrutinee: Box::new(scrutinee.1),
             arms,
+            default_case,
         };
 
         Ok((
             (match_start.span.start..end_span).into(),
-            ExprNode::Match(match_expr),
+            StmtNode::Match(match_stmt),
         ))
     }
 
     pub fn parse_break_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let break_token = self.lexer.expect(&[TokenKind::BreakKw], &mut self.errors)?;
 
-        // Check for optional label
-        let target = if self.lexer.peek().kind == TokenKind::At {
-            let _ = self.lexer.next_token(); // consume @
-            let label_token = self.lexer.next_token();
-            match label_token.kind {
-                TokenKind::Ident(label) => Some(label),
-                _ => {
-                    self.errors.push(
-                        YuuError::unexpected_token(
-                            label_token.span.clone(),
-                            "a label identifier".to_string(),
-                            label_token.kind,
-                            self.lexer.code_info.source.clone(),
-                            self.lexer.code_info.file_name.clone(),
-                        )
-                        .with_help("Expected a label identifier after @".to_string()),
-                    );
-                    return Err(self.lexer.synchronize());
-                }
-            }
-        } else {
-            None
-        };
+        let span = self.expect_semicolon_or_block_terminator(
+            break_token.span.clone(),
+            break_token.span.clone(),
+        )?;
 
-        let (expr_span, expr) = self.parse_expr()?;
-
-        let span =
-            self.expect_semicolon_or_block_terminator(break_token.span.clone(), expr_span)?;
-
-        Ok((
-            span.clone(),
-            StmtNode::Break(BreakStmt {
-                span,
-                expr: Box::new(expr),
-                target,
-                id: 0,
-            }),
-        ))
+        Ok((span.clone(), StmtNode::Break(BreakStmt { span, id: 0 })))
     }
 
     pub fn parse_func_decl(&mut self) -> ParseResult<(Span, FuncDeclStructural)> {
@@ -1393,7 +1372,7 @@ impl Parser {
         &mut self,
         span: Span,
         decl: FuncDeclStructural,
-        body: BlockExpr,
+        body: BlockStmt,
     ) -> (Span, FuncDefStructural) {
         (
             span.clone(),
@@ -1408,7 +1387,7 @@ impl Parser {
 
     pub fn parse_func_def(&mut self) -> ParseResult<(Span, FuncDefStructural)> {
         let (span, decl) = self.parse_func_decl()?;
-        let (block_span, mut block) = self.parse_block_expr()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
+        let (block_span, mut block) = self.parse_block_stmt_inner()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
         block.label = Some(ustr(FUNC_BLOCK_NAME)); // 🤡
         let span = span.start..block_span.end;
         Ok(self.make_func_def(span, decl, block))
@@ -1423,70 +1402,33 @@ impl Parser {
             TokenKind::Return => self.parse_return_stmt(),
             TokenKind::IfKw => self.parse_if_stmt(),
             TokenKind::WhileKw => self.parse_while_stmt(),
+            TokenKind::MatchKw => self.parse_match_stmt(),
             TokenKind::Colon => self.parse_block_stmt(),
             _ => self.parse_atomic_stmt(),
         }
     }
 
-    // fn parse_out_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-    //     let out_token = self.lexer.expect(&[TokenKind::OutKw], &mut self.errors)?;
-
-    //     // Check for :
-    //     let colon = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
-    //     // Must be followed by identifier (i.e. :label)
-    //     let label_token = self.lexer.next_token();
-    //     let target = match label_token.kind {
-    //         TokenKind::Ident(label) => Some(label),
-    //         _ => {
-    //             let mut error = YuuError::unexpected_token(
-    //                 label_token.span.clone(),
-    //                 "a label identifier".to_string(),
-    //                 label_token.kind,
-    //                 self.lexer.code_info.source.clone(),
-    //                 self.lexer.code_info.file_name.clone(),
-    //             )
-    //             .with_help("Expected a label identifier after colon".to_string());
-
-    //             error = error.with_related_info(
-    //                 "The preceding colon is here - this marks the start of a block label, so a block identifier is expected".to_string(),
-    //                 Some((colon.span.clone(), "colon")),
-    //             );
-
-    //             self.errors.push(error);
-    //             return Err(self.lexer.synchronize());
-    //         }
-    //     };
-
-    //     // Parse the value expression
-    //     let (expr_span, expr) = self.parse_expr()?;
-    //     let span = out_token.span.start..expr_span.end;
-
-    //     Ok((
-    //         span.clone(),
-    //         StmtNode::Break(BreakStmt {
-    //             span,
-    //             expr: Box::new(expr),
-    //             target,
-    //             id: 0,
-    //         }),
-    //     ))
-    // }
-
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let ret_token = self.lexer.expect(&[TokenKind::Return], &mut self.errors)?;
 
-        let (expr_span, expr) = self.parse_expr()?;
-
-        let span = self.expect_semicolon_or_block_terminator(ret_token.span.clone(), expr_span)?;
+        // Check if there's an expression or if we hit a semicolon/block terminator
+        let peek_kind = self.lexer.peek().kind;
+        let (span, expr) =
+            if peek_kind == TokenKind::Semicolon || peek_kind == TokenKind::BlockTerminator {
+                // No expression - return nil
+                let span = ret_token.span.clone();
+                (span, None)
+            } else {
+                // Parse the expression
+                let (expr_span, expr) = self.parse_expr()?;
+                let span =
+                    self.expect_semicolon_or_block_terminator(ret_token.span.clone(), expr_span)?;
+                (span, Some(Box::new(expr)))
+            };
 
         Ok((
             span.clone(),
-            StmtNode::Break(BreakStmt {
-                span,
-                expr: Box::new(expr),
-                target: Some(ustr(FUNC_BLOCK_NAME)),
-                id: 0,
-            }),
+            StmtNode::Return(ReturnStmt { span, expr, id: 0 }),
         ))
     }
 

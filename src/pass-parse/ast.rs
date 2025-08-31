@@ -104,24 +104,7 @@ pub struct LiteralExpr {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ConditionWithBody {
     pub condition: Box<ExprNode>,
-    pub body: BlockExpr,
-}
-
-/// Represents an if expression in the AST
-#[derive(Serialize, Deserialize, Clone)]
-pub struct IfExpr {
-    pub id: NodeId,
-    pub span: Span,
-    pub if_block: ConditionWithBody,
-    pub else_if_blocks: Vec<ConditionWithBody>,
-    pub else_block: Option<BlockExpr>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct WhileExpr {
-    pub id: NodeId,
-    pub span: Span,
-    pub condition_block: ConditionWithBody,
+    pub body: BlockStmt,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -130,7 +113,7 @@ pub struct IfStmt {
     pub span: Span,
     pub if_block: ConditionWithBody,
     pub else_if_blocks: Vec<ConditionWithBody>,
-    pub else_block: Option<BlockExpr>,
+    pub else_block: Option<BlockStmt>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -225,18 +208,19 @@ pub enum RefutablePatternNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MatchArm {
     pub pattern: Box<RefutablePatternNode>,
-    pub body: Box<ExprNode>,
+    pub body: BlockStmt,
     pub span: Span,
     pub id: NodeId,
 }
 
 /// Match expression
 #[derive(Serialize, Deserialize, Clone)]
-pub struct MatchExpr {
+pub struct MatchStmt {
     pub id: NodeId,
     pub span: Span,
     pub scrutinee: Box<ExprNode>, // The expression being matched
     pub arms: Vec<MatchArm>,
+    pub default_case: Option<BlockStmt>, // Optional default case
 }
 
 /// Enum variant instantiation (Color::Red or Color::Blue(value))
@@ -261,7 +245,6 @@ pub enum ExprNode {
     StructInstantiation(StructInstantiationExpr),
     EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
-    Match(MatchExpr),
     //Error,
 }
 
@@ -368,14 +351,6 @@ pub struct FuncDeclStructural {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BlockExpr {
-    pub id: NodeId,
-    pub span: Span,
-    pub body: Vec<StmtNode>,
-    pub label: Option<Ustr>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct FuncCallExpr {
     pub id: NodeId,
     pub span: Span,
@@ -387,7 +362,7 @@ pub struct FuncCallExpr {
 pub struct FuncDefStructural {
     pub id: NodeId,
     pub decl: FuncDeclStructural,
-    pub body: BlockExpr,
+    pub body: BlockStmt,
     pub span: Span,
 }
 
@@ -442,8 +417,13 @@ pub enum StructuralNode {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BreakStmt {
     pub span: Span,
-    pub expr: Box<ExprNode>,  // Optional for => ; case
-    pub target: Option<Ustr>, // None for break expr, Some(label) for break label expr
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ReturnStmt {
+    pub span: Span,
+    pub expr: Option<Box<ExprNode>>,
     pub id: NodeId,
 }
 
@@ -452,7 +432,9 @@ pub enum StmtNode {
     Let(LetStmt),
     Atomic(ExprNode),
     //Return(ReturnStmt),
-    Break(BreakStmt), // new variant
+    Break(BreakStmt),
+    Return(ReturnStmt),
+    Match(MatchStmt),
     If(IfStmt),
     While(WhileStmt),
     Block(BlockStmt),
@@ -513,7 +495,6 @@ impl Spanned for ExprNode {
                 enum_instantiation_expr.span.clone()
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
-            ExprNode::Match(match_expr) => match_expr.span.clone(),
         }
     }
 }
@@ -525,9 +506,11 @@ impl Spanned for StmtNode {
             StmtNode::Atomic(expr_node) => expr_node.span(),
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
+            StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::If(if_stmt) => if_stmt.span.clone(),
             StmtNode::While(while_stmt) => while_stmt.span.clone(),
             StmtNode::Block(block_stmt) => block_stmt.span.clone(),
+            StmtNode::Match(match_stmt) => match_stmt.span.clone(),
             StmtNode::Error(_) => 0..0,
         }
     }

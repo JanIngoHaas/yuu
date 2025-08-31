@@ -2,10 +2,12 @@ use crate::{pass_parse::BindingNode, pass_type_inference::TypeInfo, pass_yir_low
 
 use super::pass_type_inference_impl::TransientData;
 
-pub fn match_binding_node_to_type(
+// TODO: For non-identifier bindings, we need to consider the possibility that the expression type might not match
+// the binding type
+pub fn infer_binding(
     block: &mut Block,
     binding: &BindingNode,
-    ty: &'static TypeInfo,
+    expr_type: &'static TypeInfo,
     data: &mut TransientData,
 ) {
     match binding {
@@ -15,7 +17,7 @@ pub fn match_binding_node_to_type(
                 ident_binding.name,
                 ident_binding.id,
                 Some(ident_binding.span.clone()),
-                ty,
+                expr_type,
             );
         }
     }
