@@ -3,7 +3,6 @@ use miette::{IntoDiagnostic, Result};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use tempfile::NamedTempFile;
 
 pub struct CCompilation;
 
@@ -21,11 +20,12 @@ impl CCompilation {
 
 pub struct CExecutable {
     pub path: String,
-    pub temp_file: Option<NamedTempFile>,
 }
 
 impl CExecutable {
     pub fn execute(&self, args: &[&str]) -> Result<std::process::Output> {
+        println!("Here: {}", self.path);
+
         Command::new(&self.path)
             .args(args)
             .output()
@@ -33,38 +33,37 @@ impl CExecutable {
     }
 }
 
-impl Drop for CExecutable {
-    fn drop(&mut self) {
-        // Clean up the executable file
-        if let Err(e) = fs::remove_file(&self.path) {
-            eprintln!(
-                "Warning: Failed to clean up executable {}: {}",
-                self.path, e
-            );
-        }
-    }
-}
-
 impl CCompilation {
-    pub fn compile_c_code(&self, c_code: &CSourceCode) -> Result<CExecutable> {
-        // Create temporary C source file
-        let c_file = NamedTempFile::with_suffix(".c").into_diagnostic()?;
-        fs::write(c_file.path(), &c_code.0).into_diagnostic()?;
+    pub fn compile_c_code(
+        &self,
+        c_code: &CSourceCode,
+        base_path: impl AsRef<Path>,
+        filename: &str,
+    ) -> Result<CExecutable> {
+        let base = base_path.as_ref();
+        // build is the single build directory; files inside are named
+        // <filename>.c and <filename>(.exe)
+        let build_dir = base.join("build").join("C");
+        fs::create_dir_all(&build_dir).into_diagnostic()?;
 
-        // Create temporary executable file
-        let exe_file = NamedTempFile::new().into_diagnostic()?;
-        let exe_path = exe_file.path().to_string_lossy().to_string();
+        // write C source to build/C/<filename>.c (overwrite if exists)
+        let c_path = build_dir.join(format!("{}.c", filename));
+        fs::write(&c_path, &c_code.0).into_diagnostic()?;
+
+        // executable path: build/C/<filename> (with .exe on Windows)
+        let mut exe_path_buf = build_dir.join(filename);
+        if cfg!(windows) {
+            exe_path_buf.set_extension("exe");
+        }
+        let exe_path = exe_path_buf.to_string_lossy().to_string();
 
         // Try clang first, then gcc
         let compile_result = self
-            .try_compile_with_clang(c_file.path(), &exe_path)
-            .or_else(|_| self.try_compile_with_gcc(c_file.path(), &exe_path));
+            .try_compile_with_clang(&c_path, &exe_path)
+            .or_else(|_| self.try_compile_with_gcc(&c_path, &exe_path));
 
         match compile_result {
-            Ok(_) => Ok(CExecutable {
-                path: exe_path,
-                temp_file: Some(exe_file),
-            }),
+            Ok(_) => Ok(CExecutable { path: exe_path }),
             Err(e) => Err(e),
         }
     }

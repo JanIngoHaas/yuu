@@ -1094,12 +1094,19 @@ pub fn create_no_overload_error(
             );
         }
     }
-
     // Add more detailed help
     if !candidates.is_empty() {
+        let given_types = provided_args
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let help_types = &format!("Provided argument types: ({})", given_types);
+
         let mut help = format!(
-            "Function '{}' exists but arguments don't match.\nCandidate overloads:\n",
-            name
+            "Function '{}' exists but arguments don't match.\n{}\n\nCandidate overloads:\n",
+            name, help_types
         );
         for (i, func) in candidates.iter().enumerate() {
             let arg_types = func
@@ -1120,13 +1127,6 @@ pub fn create_no_overload_error(
             ));
         }
 
-        let given_types = provided_args
-            .iter()
-            .map(|t| t.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        help.push_str(&format!("\nProvided argument types: ({})\n", given_types));
         builder = builder.help(help);
     }
 

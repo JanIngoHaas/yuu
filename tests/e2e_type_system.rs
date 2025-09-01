@@ -89,10 +89,10 @@ fn test_return_type_matching() {
 #[test]
 fn test_struct_type_checking() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        end
         
         fn distance_squared(p: Point) -> i64:
             return p.x * p.x + p.y * p.y .
@@ -158,10 +158,9 @@ fn test_comparison_operator_types() {
         let b = 5;
         let greater = a > b;
         let equal = a == b;
-        let result = 
-            if greater: break 1 . 
-            else: break 0 .
-        ;
+        let mut result = 0;
+        if greater: result = 1 . 
+        else: result = 0 .
         return result .
     "#;
 
@@ -177,9 +176,9 @@ fn test_comparison_operator_types() {
 #[test]
 fn test_nested_type_inference() {
     let source = r#"
-        struct Container {
+        struct Container:
             value: i64,
-        }
+        end
         
         fn create_container(val: i64) -> Container:
             return Container { value: val } .

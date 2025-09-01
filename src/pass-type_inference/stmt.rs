@@ -64,7 +64,7 @@ fn infer_return_stmt(return_stmt: &ReturnStmt, block: &mut Block, data: &mut Tra
                     expr.span().clone(),
                     format!("expression has type '{}'", err.left),
                 )
-                .help("Return expression must match function's declared return type")
+                .help("Type of return expression must match function's declared return type")
                 .build();
             data.errors.push(err_msg);
         };

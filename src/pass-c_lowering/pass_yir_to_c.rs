@@ -53,11 +53,7 @@ impl CLowering {
         }
     }
 
-    fn gen_type(
-        &self,
-        data: &mut TransientData,
-        ty: &'static TypeInfo,
-    ) -> Result<(), std::fmt::Error> {
+    fn gen_type(data: &mut TransientData, ty: &'static TypeInfo) -> Result<(), std::fmt::Error> {
         match ty {
             TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
                 PrimitiveType::Bool => write!(data.output, "bool"),
@@ -71,7 +67,7 @@ impl CLowering {
                 write!(data.output, "void*")
             }
             TypeInfo::Pointer(type_info) => {
-                self.gen_type(data, type_info)?;
+                Self::gen_type(data, type_info)?;
                 write!(data.output, "*")
             }
             TypeInfo::Inactive => panic!(
@@ -130,9 +126,9 @@ impl CLowering {
         var: &Variable,
     ) -> Result<(), std::fmt::Error> {
         let ty = var.ty();
-        self.gen_type(data, ty.deref_ptr())?;
+        Self::gen_type(data, ty.deref_ptr())?;
         write!(data.output, " mem_{}_{}; ", var.name(), var.id())?;
-        self.gen_type(data, ty)?;
+        Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
         write!(data.output, " = &mem_{}_{}; ", var.name(), var.id())
@@ -143,7 +139,7 @@ impl CLowering {
         data: &mut TransientData,
         var: &Variable,
     ) -> Result<(), std::fmt::Error> {
-        self.gen_type(data, var.ty())?;
+        Self::gen_type(data, var.ty())?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)
     }
@@ -168,7 +164,7 @@ impl CLowering {
                 writeln!(data.output, ";")?;
             }
             Instruction::TakeAddress { target, source } => {
-                self.gen_type(data, target.ty())?;
+                Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = &")?;
@@ -256,31 +252,32 @@ impl CLowering {
                 write!(data.output, ")")?;
                 writeln!(data.output, ";")?;
             }
-            Instruction::MakeEnum {
+            Instruction::StoreActiveVariantIdx { dest, value } => {
+                write!(data.output, "    ")?;
+                Self::write_var_name(dest, &mut data.output)?;
+                write!(data.output, "->tag = ")?;
+                self.gen_operand(data, value)?;
+                writeln!(data.output, ";")?;
+            }
+            Instruction::LoadActiveVariantIdx { target, source } => {
+                self.gen_simple_var_decl(data, target)?;
+                write!(data.output, " = ")?;
+                self.gen_operand(data, source)?;
+                writeln!(data.output, "->tag;")?;
+            }
+            Instruction::GetVariantDataPtr {
                 target,
-                variant_name,
-                variant_index,
-                data: enum_data,
+                base,
+                variant,
             } => {
-                // Declare the enum variable
                 self.gen_variable_decl(data, target)?;
                 writeln!(data.output, ";")?;
                 write!(data.output, "    ")?;
-
-                // Initialize the enum with designated initializers
-                write!(data.output, "*")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, " = (")?;
-                self.gen_type(data, target.ty().deref_ptr())?;
-                write!(data.output, "){{.tag = {}", variant_index)?;
-
-                // Set data field if present
-                if let Some(data_operand) = enum_data {
-                    write!(data.output, ", .data.{}_data = ", variant_name)?;
-                    self.gen_operand(data, data_operand)?;
-                }
-
-                writeln!(data.output, "}};")?;
+                write!(data.output, " = &(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, "->data.{}_data)", variant)?;
+                writeln!(data.output, ";")?;
             }
         }
         Ok(())
@@ -339,7 +336,7 @@ impl CLowering {
             } => {
                 writeln!(data.output, "    switch (")?;
                 self.gen_operand(data, scrutinee)?;
-                writeln!(data.output, ".tag) {{")?;
+                writeln!(data.output, ") {{")?;
 
                 for (variant_name, label) in jump_targets {
                     write!(data.output, "        case {}: goto ", variant_name)?;
@@ -377,7 +374,7 @@ impl CLowering {
         func: &Function,
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
-        self.gen_type(data, func.return_type)?;
+        Self::gen_type(data, func.return_type)?;
         write!(data.output, " ")?;
         Self::write_function_name(&func.name, &mut data.output)?;
         write!(data.output, "(")?;
@@ -385,7 +382,7 @@ impl CLowering {
             if i > 0 {
                 write!(data.output, ", ")?;
             }
-            self.gen_type(data, param.ty())?;
+            Self::gen_type(data, param.ty())?;
             write!(data.output, " ")?;
             Self::write_var_name(param, &mut data.output)?;
         }
@@ -405,7 +402,7 @@ impl CLowering {
         writeln!(data.output, "struct {} {{", sinfo.name)?;
         for (fname, finfo) in &sinfo.fields {
             write!(data.output, "    ")?;
-            self.gen_type(data, finfo.ty)?;
+            Self::gen_type(data, finfo.ty)?;
             writeln!(data.output, " {};", fname)?;
         }
         writeln!(data.output, "}};")?;
@@ -443,7 +440,7 @@ impl CLowering {
             for (variant_name, variant_info) in &einfo.variants {
                 if let Some(variant_type) = variant_info.variant {
                     write!(data.output, "        ")?;
-                    self.gen_type(data, variant_type)?;
+                    Self::gen_type(data, variant_type)?;
                     writeln!(data.output, " {}_data;", variant_name)?;
                 }
             }

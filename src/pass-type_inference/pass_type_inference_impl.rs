@@ -67,7 +67,7 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
             );
         }
         StructuralNode::FuncDef(def) => {
-            let _ = declare_function(
+            let ret_type = declare_function(
                 def.decl.name,
                 &def.decl.args,
                 &def.decl.ret_ty,
@@ -76,6 +76,9 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 block,
                 data,
             );
+            data.type_registry
+                .type_info_table
+                .insert(def.body.id, ret_type);
         }
         StructuralNode::Error(_) => (),
         StructuralNode::StructDecl(_struct_decl) => {

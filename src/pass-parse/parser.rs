@@ -275,6 +275,7 @@ impl Parser {
     }
 
     pub fn parse_while_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let _ = self.lexer.expect(&[TokenKind::WhileKw], &mut self.errors)?;
         let (overall_span, cond_with_body) = self.parse_condition_with_body()?;
         Ok((
             overall_span.clone(),
@@ -300,6 +301,7 @@ impl Parser {
     }
 
     pub fn parse_if_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let _ = self.lexer.expect(&[TokenKind::IfKw], &mut self.errors)?;
         let (body_span, cond_with_body) = self.parse_condition_with_body()?;
         let start_span = body_span;
 
@@ -927,14 +929,14 @@ impl Parser {
     }
 
     pub fn parse_block_stmt_inner(&mut self) -> ParseResult<(Span, BlockStmt)> {
-        let colon = self.lexer.expect_colon(&mut self.errors)?;
+        let colon = self.lexer.expect(&[TokenKind::Colon], &mut self.errors)?;
         let mut stmts = Vec::new();
 
         loop {
             // Check for empty block or end of block
             let next = self.lexer.peek();
             if next.kind == TokenKind::BlockTerminator {
-                let dot = self.lexer.next_token();
+                let bt = self.lexer.next_token();
 
                 // Check if there's a label after the block terminator
                 let (label, label_end_span) = if self.lexer.peek().kind == TokenKind::At {
@@ -961,7 +963,7 @@ impl Parser {
                     // If there's a label, extend span to include it
                     colon.span.start..label_span.end
                 } else {
-                    colon.span.start..dot.span.end
+                    colon.span.start..bt.span.end
                 };
 
                 return Ok(self.make_block_expr(stmts, span, label));
@@ -976,7 +978,7 @@ impl Parser {
                     self.lexer.eat();
                     StmtNode::Error(0)
                 }
-                Err(CatchIn::BlockEnd) => {
+                Err(CatchIn::BlockTerminator) => {
                     // Hit a block terminator while parsing statements
                     // This means we've recovered to a block boundary, continue to the next iteration
                     // which will detect the BlockTerminator and handle it properly
@@ -1024,16 +1026,16 @@ impl Parser {
                         let _ = self.lexer.next_token();
                         let binding = self.parse_binding()?;
                         let last_tkn = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
-                        let span = span.start..last_tkn.span.end;
+                        let full_span = span.start..last_tkn.span.end;
                         let enum_pattern = EnumPattern {
                             enum_name: name_discriminator,
                             variant_name: name_discriminee,
                             binding: Some(Box::new(binding)),
-                            span: span.clone(),
+                            span: full_span.clone(),
                             id: 0,
                         };
                         let node = RefutablePatternNode::Enum(enum_pattern);
-                        Ok((span, node))
+                        Ok((full_span, node))
                     }
                     _ => {
                         // We only have a unit variant
@@ -1079,14 +1081,12 @@ impl Parser {
         loop {
             // Check if we should stop parsing cases
             let peek = self.lexer.peek();
-            if peek.kind != TokenKind::CaseKw {
+            if peek.kind == TokenKind::DefaultKw || peek.kind == TokenKind::BlockTerminator {
                 break;
             }
 
-            let _ = self.lexer.next_token(); // consume "case"
             // Pattern parsing
             let pattern = self.parse_refutable_pattern()?;
-            let _ = self.lexer.expect_colon(&mut self.errors)?;
 
             let block = self.parse_block_stmt_inner()?;
             let match_arm = MatchArm {
@@ -1102,31 +1102,27 @@ impl Parser {
         // Check for optional default case
         let default_case = if self.lexer.peek().kind == TokenKind::DefaultKw {
             let _ = self.lexer.next_token(); // consume "default"
-            let _ = self.lexer.expect_colon(&mut self.errors)?;
             let block = self.parse_block_stmt_inner()?;
             Some(block.1)
         } else {
             None
         };
 
-        let end_span = if let Some(default_case) = &default_case {
-            default_case.span.end
-        } else if let Some(last_arm) = arms.last() {
-            last_arm.span.end
-        } else {
-            scrutinee.0.end
-        };
+        // Now we expect a block terminator:
+        let bt = self
+            .lexer
+            .expect(&[TokenKind::BlockTerminator], &mut self.errors)?;
 
         let match_stmt = MatchStmt {
             id: 0,
-            span: (match_start.span.start..end_span),
+            span: (match_start.span.start..bt.span.end),
             scrutinee: Box::new(scrutinee.1),
             arms,
             default_case,
         };
 
         Ok((
-            (match_start.span.start..end_span),
+            (match_start.span.start..bt.span.end),
             StmtNode::Match(match_stmt),
         ))
     }
@@ -1270,6 +1266,27 @@ impl Parser {
 
                 // Check if there's a colon for a data variant
                 let peek = self.lexer.peek();
+
+                // Check common error: "("
+                if peek.kind == TokenKind::LParen {
+                    self.errors.push(
+                        YuuError::builder()
+                            .kind(ErrorKind::UnexpectedToken)
+                            .message("Unexpected '(' after variant name".to_string())
+                            .source(
+                                self.lexer.code_info.source.clone(),
+                                self.lexer.code_info.file_name.clone(),
+                            )
+                            .span(
+                                peek.span.clone(),
+                                "Did you mean to use ':' for a data variant?",
+                            )
+                            .help("Enum variant data types should be specified with a colon ':', not parentheses '()'".to_string())
+                            .build(),
+                    );
+                    return Err(self.lexer.synchronize());
+                }
+
                 if peek.kind == TokenKind::Colon {
                     // Data variant: consume colon and parse type
                     let _ = self.lexer.next_token(); // consume colon
@@ -1484,7 +1501,7 @@ impl Parser {
                     structural_nodes.push(Box::new(StructuralNode::Error(0)));
                     continue;
                 }
-                Err(CatchIn::BlockEnd) => {
+                Err(CatchIn::BlockTerminator) => {
                     // Recover from malformed structural element by syncing to block end
                     // The synchronizer positioned us AT the BlockTerminator but didn't consume it
                     // We need to consume it to avoid infinite loop, then continue parsing

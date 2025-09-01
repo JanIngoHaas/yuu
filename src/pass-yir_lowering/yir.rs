@@ -1,6 +1,6 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::StructFieldInfo;
+use crate::pass_type_inference::{EnumVariantInfo, StructFieldInfo};
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
     primitive_u64,
@@ -193,19 +193,22 @@ pub enum Instruction {
         args: Vec<Operand>,       // Arguments
     },
 
-    // Create an enum instance with variant index and optional data
-    MakeEnum {
-        target: Variable,      // Variable to hold the enum
-        variant_name: Ustr,    // The variant name (for union field access)
-        variant_index: u64,    // The variant index (discriminant)
-        data: Option<Operand>, // Optional data for the variant
+    // Enum specific
+    GetVariantDataPtr {
+        target: Variable, // result pointer Variable to the data of the enum.
+        base: Operand,    // base operand (must be an enum)
+        variant: Ustr,    // variant name
     },
-    // Create a struct directly with values (not pointers)
-    // MakeStruct {
-    //     target: Variable,             // Variable to hold the struct
-    //     type_ident: Ustr,             // Name of struct type
-    //     fields: Vec<(Ustr, Operand)>, // Field name and value pairs
-    // },
+
+    LoadActiveVariantIdx {
+        target: Variable, // Variable to hold the active variant index
+        source: Operand,  // Base operand (must be an enum ptr)
+    },
+
+    StoreActiveVariantIdx {
+        dest: Variable, // Destination pointer operand (the enum itself, not the data ptr!)
+        value: Operand, // Must be of type u64
+    },
 }
 
 #[derive(Clone)]
@@ -222,7 +225,7 @@ pub enum ControlFlow {
     },
     JumpTable {
         scrutinee: Operand,                 // The enum variable being matched
-        jump_targets: IndexMap<i64, Label>, // Maps variant index -> label
+        jump_targets: IndexMap<u64, Label>, // Maps variant index -> label
         default: Option<Label>,             // Default jump target if no variant matches
     },
     // Return from function
@@ -254,7 +257,9 @@ impl BasicBlock {
                 Instruction::Binary { .. } => {}
                 Instruction::Unary { .. } => {}
                 Instruction::Call { .. } => {}
-                Instruction::MakeEnum { .. } => {}
+                Instruction::LoadActiveVariantIdx { .. } => {}
+                Instruction::GetVariantDataPtr { .. } => {}
+                Instruction::StoreActiveVariantIdx { .. } => {}
             };
             None
         })
@@ -377,6 +382,31 @@ impl Function {
         if matches!(current_block.terminator, ControlFlow::Unterminated) {
             current_block.terminator = ControlFlow::Jump { target };
         }
+    }
+
+    pub fn make_store_active_variant_idx(&mut self, dest: Variable, variant_info: &EnumVariantInfo) {
+        let value = Operand::U64Const(variant_info.variant_idx);
+        let instr = Instruction::StoreActiveVariantIdx { dest, value };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    pub fn make_load_active_variant_idx(&mut self, name_hint: Ustr, source: Operand) -> Variable {
+        let target = self.fresh_variable(name_hint, primitive_u64());
+        let instr = Instruction::LoadActiveVariantIdx { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    pub fn make_get_variant_data_ptr(&mut self, name_hint: Ustr, base: Operand, variant_info: &EnumVariantInfo) -> Variable {
+        let target_type = variant_info.variant.expect("Variant must have data type").ptr_to();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::GetVariantDataPtr { 
+            target, 
+            base, 
+            variant: variant_info.variant_name 
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
     }
 
     // Builder method for DeclareVar
@@ -646,29 +676,30 @@ impl Function {
         self.make_take_address(name_hint.intern(), target)
     }
 
-    pub fn make_enum(
-        &mut self,
-        name_hint: Ustr,
-        enum_type: &'static TypeInfo,
-        variant_name: Ustr,
-        variant_index: u64,
-        data: Option<Operand>,
-    ) -> Variable {
-        // Load data operand if it's a pointer (similar to other make_* methods)
-        let loaded_data = data.map(|d| self.load_if_pointer(d, "enum_data".intern()));
+    // pub fn make_enum(
+    //     &mut self,
+    //     name_hint: Ustr,
+    //     enum_type: &'static TypeInfo,
+    //     variant_name: Ustr,
+    //     variant_index: u64,
+    //     data: Option<Operand>,
+    // ) -> Variable {
+    //     // Load data operand if it's a pointer (similar to other make_* methods)
+    //     let loaded_data = data.map(|d| self.load_if_pointer(d, "enum_data".intern()));
 
-        let target = self.fresh_variable(name_hint, enum_type);
-        let instr = Instruction::MakeEnum {
-            target,
-            variant_name,
-            variant_index,
-            data: loaded_data,
-        };
-        self.get_current_block_mut().instructions.push(instr);
+    //     let target = self.fresh_variable(name_hint, enum_type);
+    //     let target_variant_idx = self.fresh_variable(name_hint, primitive_u64());
+    //     let instr = Instruction::MakeUnion {
+    //         target,
+    //         variant_name,
+    //         variant_index,
+    //         data: loaded_data,
+    //     };
+    //     self.get_current_block_mut().instructions.push(instr);
 
-        // Return a pointer to stay in "pointer context"
-        self.make_take_address(name_hint, target)
-    }
+    //     // Return a pointer to stay in "pointer context"
+    //     self.make_take_address(name_hint, target)
+    // }
 
     pub fn make_jump(&mut self, target: Label) {
         self.set_terminator(ControlFlow::Jump { target });
@@ -712,15 +743,25 @@ impl Function {
     pub fn make_jump_table(
         &mut self,
         scrutinee: Operand,
-        jump_targets: IndexMap<i64, Label>,
+        jump_targets: IndexMap<u64, Label>,
         default: Option<Label>,
     ) {
-        let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
-
+        //let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
+        
+        let loaded_scrutinee = match scrutinee.ty() {
+            TypeInfo::Pointer(TypeInfo::Enum(_et)) => {
+                // Load only the active variant index for this operation...
+                Operand::Variable(self.make_load_active_variant_idx("variant_idx".intern(), scrutinee)) 
+            },
+            _ => {
+                self.load_if_pointer(scrutinee, "enum_scrutinee".intern())
+            }
+        };
+        
         debug_assert_eq!(
             loaded_scrutinee.ty(),
-            primitive_i64(),
-            "Jump table scrutinee must be i64 (enum discriminant), got {}",
+            primitive_u64(),
+            "Jump table scrutinee must be u64, got {}",
             loaded_scrutinee.ty()
         );
 

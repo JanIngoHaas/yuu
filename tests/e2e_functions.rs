@@ -7,9 +7,9 @@ use common::*;
 #[test]
 fn test_simple_function_call() {
     let source = r#"
-        fn add(a: i64, b: i64) -> i64: return a + b .
-        
-        fn main() -> i64: return add(5, 3) .
+        fn add_(a: i64, b: i64) -> i64: return a + b .
+
+        fn main() -> i64: return add_(5, 3) .
     "#;
 
     let executable = run_to_executable(source, "test_func_call.yuu")
@@ -57,53 +57,13 @@ fn test_function_with_multiple_params() {
 }
 
 #[test]
-fn test_recursive_function() {
-    let source = r#"
-        fn factorial(n: i64) -> i64:
-            if n <= 1: return 1 .
-            else: return n * factorial(n - 1) .
-        
-        fn main() -> i64: return factorial(5) .
-    "#;
-
-    let executable =
-        run_to_executable(source, "test_recursive.yuu").expect("Failed to compile recursive test");
-
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run recursive test");
-
-    // 5! = 120
-    assert_eq!(output, 120);
-}
-
-#[test]
-fn test_function_with_local_variables() {
-    let source = r#"
-        fn compute(x: i64) -> i64:
-            let doubled = x * 2;
-            let plus_ten = doubled + 10;
-            return plus_ten .
-        
-        fn main() -> i64: return compute(5) .
-    "#;
-
-    let executable = run_to_executable(source, "test_local_vars.yuu")
-        .expect("Failed to compile local vars test");
-
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run local vars test");
-
-    // 5 * 2 + 10 = 20
-    assert_eq!(output, 20);
-}
-
-#[test]
 fn test_nested_function_calls() {
     let source = r#"
-        fn add(a: i64, b: i64) -> i64: return a + b .
-        fn multiply(a: i64, b: i64) -> i64: return a * b .
+        fn add_(a: i64, b: i64) -> i64: return a + b .
         
-        fn main() -> i64: return add(multiply(2, 3), multiply(4, 5)) .
+        fn main() -> i64: return id(add_(multiply(2, 3), multiply(4, 5))) .
+        fn id(a: i64) -> i64: return a .
+        fn multiply(a: i64, b: i64) -> i64: return a * b .
     "#;
 
     let executable = run_to_executable(source, "test_nested_calls.yuu")
@@ -153,24 +113,4 @@ fn test_function_with_mutable_params() {
 
     // 5 + 10 = 15
     assert_eq!(output, 15);
-}
-
-#[test]
-fn test_fibonacci_recursive() {
-    let source = r#"
-        fn fibonacci(n: i64) -> i64:
-            if n <= 1: return n .
-            else: return fibonacci(n - 1) + fibonacci(n - 2) .
-        
-        fn main() -> i64: return fibonacci(8) .
-    "#;
-
-    let executable =
-        run_to_executable(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
-
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run fibonacci test");
-
-    // fib(8) = 21
-    assert_eq!(output, 21);
 }

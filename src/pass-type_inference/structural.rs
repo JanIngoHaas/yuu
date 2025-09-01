@@ -44,8 +44,6 @@ pub fn declare_function(
         primitive_nil()
     };
 
-    data.type_registry.type_info_table.insert(id, ret_type);
-
     data.type_registry.add_function(
         &func_arg_types,
         ret_type,
@@ -79,7 +77,7 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
             let return_type = data
                 .type_registry
                 .type_info_table
-                .get(def.id)
+                .get(def.body.id)
                 .expect("Function type should be registered by now");
             data.set_current_function_return_type(return_type);
 

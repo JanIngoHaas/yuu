@@ -61,11 +61,9 @@ fn test_comparison_operations() {
     let source = r#"fn main() -> i64:
         let a = 10;
         let b = 5;
-        let result = 
-            if a > b: break 1 . <--- need the dot here
-            else: break 0 .
-                            ^---- keep the dot here
-        ;
+        let mut result = 0;
+        if a > b: result = 1 .
+        else: result = 0 .
         return result .
     "#;
 

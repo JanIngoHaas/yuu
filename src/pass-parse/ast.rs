@@ -52,17 +52,17 @@ impl Display for BinOp {
 impl BinOp {
     pub fn static_name(&self) -> Ustr {
         match self {
-            BinOp::Add => "add",
-            BinOp::Subtract => "sub",
-            BinOp::Multiply => "mul",
-            BinOp::Divide => "div",
-            BinOp::Modulo => "mod",
-            BinOp::Eq => "eq",
-            BinOp::NotEq => "ne",
-            BinOp::Lt => "lt",
-            BinOp::LtEq => "le",
-            BinOp::Gt => "gt",
-            BinOp::GtEq => "ge",
+            BinOp::Add => "_add",
+            BinOp::Subtract => "_sub",
+            BinOp::Multiply => "_mul",
+            BinOp::Divide => "_div",
+            BinOp::Modulo => "_mod",
+            BinOp::Eq => "_eq",
+            BinOp::NotEq => "_ne",
+            BinOp::Lt => "_lt",
+            BinOp::LtEq => "_le",
+            BinOp::Gt => "_gt",
+            BinOp::GtEq => "_ge",
         }
         .intern()
     }
@@ -78,8 +78,8 @@ pub enum UnaryOp {
 impl UnaryOp {
     pub fn static_name(&self) -> Ustr {
         match self {
-            UnaryOp::Pos => "pos",
-            UnaryOp::Negate => "neg",
+            UnaryOp::Pos => "_pos",
+            UnaryOp::Negate => "_neg",
         }
         .intern()
     }
@@ -451,6 +451,7 @@ pub enum Node {
     Binding(BindingNode),
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AST {
     pub structurals: Vec<Box<StructuralNode>>,
 }

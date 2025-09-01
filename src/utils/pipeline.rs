@@ -13,11 +13,11 @@ use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
 use crate::pass_type_inference::{TypeInferenceErrors, TypeRegistry};
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
 use crate::pass_yir_lowering::{Module, RootBlock};
-use miette::Result;
+use miette::{IntoDiagnostic, Result};
 
 #[derive(Default)]
 pub struct Pipeline {
-    ast: Option<AST>,
+    pub ast: Option<AST>,
     source_info: Option<SourceInfo>,
     syntax_errors: Option<SyntaxErrors>,
     type_registry: Option<TypeRegistry>,
@@ -31,7 +31,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn parse(source: String, file_name: String) -> Result<Self> {
+    pub fn new(source: String, file_name: String) -> Result<Self> {
         let source_info = SourceInfo {
             source: std::sync::Arc::from(source),
             file_name: std::sync::Arc::from(file_name),
@@ -61,14 +61,8 @@ impl Pipeline {
             return Ok(self);
         }
 
-        let ast = self
-            .ast
-            .as_ref()
-            .ok_or_else(|| miette::miette!("AST not available"))?;
-        let source_info = self
-            .source_info
-            .as_ref()
-            .ok_or_else(|| miette::miette!("SourceInfo not available"))?;
+        let ast = self.ast.as_ref().unwrap();
+        let source_info = self.source_info.as_ref().unwrap();
 
         let (type_registry, root_block, type_errors) =
             TypeInference::new().run(ast, source_info.clone())?;
@@ -76,9 +70,7 @@ impl Pipeline {
         self.type_registry = Some(type_registry);
         self.root_block = Some(root_block);
         self.type_errors = Some(type_errors);
-
-        // Run semantic analysis passes
-        self.semantic_analysis()
+        Ok(self)
     }
 
     pub fn semantic_analysis(mut self) -> Result<Self> {
@@ -95,23 +87,13 @@ impl Pipeline {
             self = self.type_inference()?;
         }
 
-        let ast = self
-            .ast
-            .as_ref()
-            .ok_or_else(|| miette::miette!("AST not available"))?;
-        let type_registry = self
-            .type_registry
-            .as_ref()
-            .ok_or_else(|| miette::miette!("TypeRegistry not available"))?;
-        let source_info = self
-            .source_info
-            .as_ref()
-            .ok_or_else(|| miette::miette!("SourceInfo not available"))?;
+        let ast = self.ast.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
+        let source_info = self.source_info.as_ref().unwrap();
 
-        Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
-
-        // Run diagnostics
-        self.diagnostics()
+        self.control_flow_errors =
+            Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
+        Ok(self)
     }
 
     pub fn yir_lowering(mut self) -> Result<Self> {
@@ -120,19 +102,13 @@ impl Pipeline {
             return Ok(self);
         }
 
-        // Auto-compute semantic analysis if not available
+        // Auto-compute diagnostics (boundary) if not available
         if self.control_flow_errors.is_none() {
-            self = self.semantic_analysis()?;
+            self = self.diagnostics()?;
         }
 
-        let ast = self
-            .ast
-            .as_ref()
-            .ok_or_else(|| miette::miette!("AST not available"))?;
-        let type_registry = self
-            .type_registry
-            .as_ref()
-            .ok_or_else(|| miette::miette!("TypeRegistry not available"))?;
+        let ast = self.ast.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
 
         let module = YirLowering::new().run(ast, type_registry)?;
         self.module = Some(module);
@@ -151,14 +127,8 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
 
-        let module = self
-            .module
-            .as_ref()
-            .ok_or_else(|| miette::miette!("Module not available"))?;
-        let type_registry = self
-            .type_registry
-            .as_ref()
-            .ok_or_else(|| miette::miette!("TypeRegistry not available"))?;
+        let module = self.module.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
 
         let c_code = CLowering::new().run(module, type_registry)?;
         self.c_code = Some(c_code);
@@ -194,10 +164,7 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
 
-        let module = self
-            .module
-            .as_ref()
-            .ok_or_else(|| miette::miette!("Module not available"))?;
+        let module = self.module.as_ref().unwrap();
         YirToString::new().run(module)
     }
 
@@ -207,11 +174,12 @@ impl Pipeline {
             self = self.yir_lowering()?;
         }
 
-        let module = self
-            .module
-            .as_ref()
-            .ok_or_else(|| miette::miette!("Module not available"))?;
+        let module = self.module.as_ref().unwrap();
         YirToColoredString::new().run(module)
+    }
+
+    pub fn get_ast(&self) -> &AST {
+        self.ast.as_ref().unwrap()
     }
 
     pub fn get_c_code(&mut self) -> Result<&CSourceCode> {
@@ -220,9 +188,7 @@ impl Pipeline {
             *self = std::mem::take(self).c_lowering()?;
         }
 
-        self.c_code
-            .as_ref()
-            .ok_or_else(|| miette::miette!("C code not available"))
+        Ok(self.c_code.as_ref().unwrap())
     }
 
     pub fn get_module(&mut self) -> Result<&Module> {
@@ -242,10 +208,13 @@ impl Pipeline {
             *self = std::mem::take(self).c_lowering()?;
         }
 
-        let c_code = self
-            .c_code
+        let c_code = self.c_code.as_ref().unwrap();
+        let base = std::env::current_dir().into_diagnostic()?;
+        let filename = self
+            .source_info
             .as_ref()
-            .ok_or_else(|| miette::miette!("C code not available"))?;
-        CCompilation::new().compile_c_code(c_code)
+            .map(|s| s.file_name.as_ref().to_string())
+            .unwrap_or_else(|| "temp".to_string());
+        CCompilation::new().compile_c_code(c_code, base, &filename)
     }
 }

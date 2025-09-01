@@ -67,7 +67,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::C { input, output } => {
             let (source, filename) = read_source_file(&input)?;
-            let mut pipeline = Pipeline::parse(source, filename)
+            let mut pipeline = Pipeline::new(source, filename)
                 .map_err(|e| miette::miette!("Parse error: {}", e))?;
             let c_code = pipeline
                 .get_c_code()
@@ -80,7 +80,7 @@ fn main() -> Result<()> {
             no_color,
         } => {
             let (source, filename) = read_source_file(&input)?;
-            let pipeline = Pipeline::parse(source, filename)
+            let pipeline = Pipeline::new(source, filename)
                 .map_err(|e| miette::miette!("Parse error: {}", e))?;
             let yir_output = if no_color {
                 pipeline
@@ -95,7 +95,7 @@ fn main() -> Result<()> {
         }
         Commands::Check { input } => {
             let (source, filename) = read_source_file(&input)?;
-            let pipeline = Pipeline::parse(source, filename)
+            let pipeline = Pipeline::new(source, filename)
                 .map_err(|e| miette::miette!("Parse error: {}", e))?;
             pipeline
                 .diagnostics()

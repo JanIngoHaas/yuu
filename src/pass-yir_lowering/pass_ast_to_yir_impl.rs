@@ -1,6 +1,6 @@
 use crate::{
     pass_parse::{
-        BlockStmt, GetId,
+        BlockStmt, GetId, RefutablePatternNode,
         ast::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode,
             UnaryOp,
@@ -261,19 +261,27 @@ impl<'a> TransientData<'a> {
                     .get(&ei.variant_name)
                     .expect("Compiler bug: enum variant not found in lowering to YIR");
 
-                let variant_index = variant_info.variant_idx;
-
                 // Handle associated data if present
                 let data_operand = ei.data.as_ref().map(|data_expr| self.lower_expr(data_expr));
 
-                // Create the enum using the new MakeEnum instruction
-                let enum_var = self.function.make_enum(
-                    "enum_result".intern(),
-                    enum_info.ty,
-                    ei.variant_name,
-                    variant_index,
-                    data_operand,
-                );
+                // Allocate some memory for the enum:
+                let enum_var =
+                    self.function
+                        .make_alloca("enum_result".intern(), enum_info.ty, None);
+
+                // Store the active variant index
+                self.function
+                    .make_store_active_variant_idx(enum_var, &variant_info);
+
+                // Store the associated data if present
+                if let Some(data_operand) = data_operand {
+                    let variant_ptr = self.function.make_get_variant_data_ptr(
+                        "variant_ptr".intern(),
+                        Operand::Variable(enum_var),
+                        &variant_info,
+                    );
+                    self.function.make_store(variant_ptr, data_operand);
+                }
 
                 Operand::Variable(enum_var)
             }
@@ -300,25 +308,7 @@ impl<'a> TransientData<'a> {
             StmtNode::Let(let_stmt) => {
                 // Lower the initializer expression first
                 let init_value_operand = self.lower_expr(&let_stmt.expr);
-
-                // Handle the binding pattern
-                match let_stmt.binding.as_ref() {
-                    BindingNode::Ident(ident_binding) => {
-                        let binding_id = ident_binding.id;
-                        let name_hint = ident_binding.name;
-                        let var_type = self.get_type(binding_id);
-                        let yir_var = self.function.make_alloca(
-                            name_hint,
-                            var_type,
-                            Some(init_value_operand), // Pass the lowered initializer
-                        );
-
-                        // Map the AST binding ID to the new YIR variable (already in pointer context)
-                        self.var_map.insert(binding_id, yir_var);
-                    } // If other BindingNode variants existed, they would be handled here
-                      // e.g., BindingNode::StructPattern(...) => { /* Destructuring logic */ }
-                }
-
+                self.lower_binding(let_stmt.binding.as_ref(), init_value_operand);
                 StmtRes::Proceed
             }
             StmtNode::Atomic(expr) => {
@@ -357,14 +347,33 @@ impl<'a> TransientData<'a> {
                 let ty = self.get_type(match_stmt.scrutinee.node_id());
 
                 match ty {
-                    TypeInfo::Enum(_) => {
+                    TypeInfo::Enum(enum_ty) => {
                         let mut jump_targets = IndexMap::new();
-                        for (arm_idx, arm) in match_stmt.arms.iter().enumerate() {
+                        let enum_info = self.tr.resolve_enum(enum_ty.name).unwrap();
+                        for arm in match_stmt.arms.iter() {
+                            let enum_pattern = match arm.pattern.as_ref() {
+                                RefutablePatternNode::Enum(enum_pattern) => enum_pattern,
+                            };
+                            let variant_info =
+                                enum_info.variants.get(&enum_pattern.variant_name).unwrap();
                             let match_arm_block = self.function.add_block("match_arm".intern());
                             self.function.set_current_block(&match_arm_block);
+
+                            if let Some(variant_data_binding) = enum_pattern.binding.as_ref() {
+                                let variant_ptr = self.function.make_get_variant_data_ptr(
+                                    "variant_data".intern(),
+                                    lowered_match_expr,
+                                    variant_info,
+                                );
+                                self.lower_binding(
+                                    variant_data_binding,
+                                    Operand::Variable(variant_ptr),
+                                );
+                            }
+
                             self.lower_block_body(&arm.body);
                             self.function.make_jump_if_no_terminator(match_merge_block);
-                            jump_targets.insert(arm_idx as i64, match_arm_block);
+                            jump_targets.insert(variant_info.variant_idx, match_arm_block);
                         }
 
                         self.function.set_current_block(&match_header);
@@ -446,6 +455,10 @@ impl<'a> TransientData<'a> {
                     self.function.set_current_block(&else_body);
                     self.lower_block_body(else_block);
                     self.function.make_jump_if_no_terminator(merge_block);
+                } else {
+                    // If no else block, branch the false case of the last condition to merge
+                    self.function
+                        .make_branch_to_existing(prev_condition, prev_body, merge_block);
                 }
 
                 self.function.set_current_block(&merge_block);
@@ -485,6 +498,20 @@ impl<'a> TransientData<'a> {
                 self.function.make_jump_if_no_terminator(block_body);
                 self.lower_block_body(block_stmt);
                 StmtRes::Proceed
+            }
+        }
+    }
+
+    fn lower_binding(&mut self, binding: &BindingNode, init_value_operand: Operand) {
+        match binding {
+            BindingNode::Ident(ident_binding) => {
+                let binding_id = ident_binding.id;
+                let name_hint = ident_binding.name;
+                let var_type = self.get_type(binding_id);
+                let yir_var =
+                    self.function
+                        .make_alloca(name_hint, var_type, Some(init_value_operand));
+                self.var_map.insert(binding_id, yir_var);
             }
         }
     }

@@ -136,7 +136,7 @@ impl<'a> ControlFlowAnalyzer<'a> {
                 }
 
                 if let Some(else_block) = &if_stmt.else_block {
-                    let else_state = self.analyze_block(&else_block);
+                    let else_state = self.analyze_block(else_block);
                     then_state.combine(else_state)
                 } else {
                     // If no else, we could have the case that neither the if nor the else-if conditions are met, thus leading to "no return";
@@ -150,20 +150,20 @@ impl<'a> ControlFlowAnalyzer<'a> {
                 FlowState::CouldContinue
             }
 
-            StmtNode::Block(block_stmt) => self.analyze_block(&block_stmt),
+            StmtNode::Block(block_stmt) => self.analyze_block(block_stmt),
 
             StmtNode::Match(match_stmt) => {
                 // In match arms, we have to check that all return; just simple checking.. Exhaustiveness is already checked in type-inference.
-                let fstate = None;
+                let mut fstate = None;
                 for arm in &match_stmt.arms {
                     let arm_state = self.analyze_block(&arm.body);
-                    fstate.and_then(|mut fs: FlowState| Some(fs.combine(arm_state)));
+                    fstate.get_or_insert(arm_state).combine(arm_state);
                 }
 
                 // In the event that we have a default match arm, we need to account for that as well
                 if let Some(else_arm) = &match_stmt.default_case {
-                    let else_state = self.analyze_block(&else_arm);
-                    fstate.and_then(|mut fs: FlowState| Some(fs.combine(else_state)));
+                    let else_state = self.analyze_block(else_arm);
+                    fstate.get_or_insert(else_state).combine(else_state);
                 }
                 fstate.unwrap_or(FlowState::CouldContinue)
             }
@@ -187,7 +187,7 @@ impl<'a> ControlFlowAnalyzer<'a> {
                 .message(format!(
                     "Function '{}' may reach end without returning, but is declared to return '{}'",
                     func_name.as_str(),
-                    declared_return_type.to_string()
+                    declared_return_type
                 ))
                 .source(self.src_info.source.clone(), self.src_info.file_name.clone())
                 .span(

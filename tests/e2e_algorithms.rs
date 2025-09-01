@@ -11,22 +11,25 @@ fn test_fibonacci_recursive() {
             if n <= 1: return n .
             else: return fibonacci(n - 1) + fibonacci(n - 2) .
         end
-
         fn main() -> i64: return fibonacci(10) .
     "#;
 
-    let yir = run_to_yir(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
+    // let config = ron::ser::PrettyConfig::new();
+    // let ron_string =
+    //     ron::ser::to_string_pretty(&ast, config).expect("Failed to serialize AST to RON");
 
-    println!("{}", yir);
+    // let yir = run_to_yir(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
 
-    // let executable =
-    //     run_to_executable(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
+    // println!("{}", yir);
 
-    // let output =
-    //     run_executable_with_output(&executable, &[]).expect("Failed to run fibonacci test");
+    let executable =
+        run_to_executable(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
 
-    // // fib(10) = 55
-    // assert_eq!(output, 55);
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run fibonacci test");
+
+    // fib(10) = 55
+    assert_eq!(output, 55);
 }
 
 #[test]
@@ -60,7 +63,7 @@ fn test_factorial_iterative() {
                 result = result * i;
                 i = i + 1;
             end
-        return result .
+            return result .
         
         fn main() -> i64: return factorial_iter(5) .
     "#;

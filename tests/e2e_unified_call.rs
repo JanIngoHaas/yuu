@@ -7,11 +7,11 @@ use common::*;
 #[test]
 fn test_method_style_call() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
-        
+        end
+
         fn distance(p: Point) -> i64:
             return p.x * p.x + p.y * p.y .
         
@@ -33,11 +33,11 @@ fn test_method_style_call() {
 #[test]
 fn test_method_with_additional_params() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
-        
+        end
+
         fn translate(p: Point, dx: i64, dy: i64) -> Point:
             return Point { x: p.x + dx, y: p.y + dy } .
         
@@ -60,9 +60,9 @@ fn test_method_with_additional_params() {
 #[test]
 fn test_chained_method_calls() {
     let source = r#"
-        struct Number {
+        struct Number:
             value: i64,
-        }
+        end
         
         fn double(n: Number) -> Number:
             return Number { value: n.value * 2 } .
@@ -89,11 +89,11 @@ fn test_chained_method_calls() {
 #[test]
 fn test_mixed_call_styles() {
     let source = r#"
-        struct Vector {
+        struct Vector:
             x: i64,
             y: i64,
-        }
-        
+        end
+
         fn scale(v: Vector, factor: i64) -> Vector:
             return Vector { x: v.x * factor, y: v.y * factor } .
         
@@ -103,8 +103,7 @@ fn test_mixed_call_styles() {
         fn main() -> i64:
             let v1 = Vector { x: 2, y: 3 };
             let v2 = Vector { x: 4, y: 5 };
-            let scaled_v1 = v1.scale(2);
-            return dot_product(scaled_v1, v2) .
+            return v1.scale(2).dot_product(v2) .
     "#;
 
     let executable = run_to_executable(source, "test_mixed_calls.yuu")
@@ -120,9 +119,9 @@ fn test_mixed_call_styles() {
 #[test]
 fn test_long_method_chain() {
     let source = r#"
-        struct Calculator {
+        struct Calculator:
             value: i64,
-        }
+        end
         
         fn add(c: Calculator, n: i64) -> Calculator:
             return Calculator { value: c.value + n } .
@@ -152,10 +151,10 @@ fn test_long_method_chain() {
 #[test]
 fn test_method_call_with_complex_expression() {
     let source = r#"
-        struct Point {
+        struct Point:
             x: i64,
             y: i64,
-        }
+        end
         
         fn distance_to(p1: Point, p2: Point) -> i64:
             let dx = p1.x - p2.x;
@@ -181,10 +180,10 @@ fn test_method_call_with_complex_expression() {
 #[test]
 fn test_nested_method_calls() {
     let source = r#"
-        struct Transform {
+        struct Transform:
             scale: i64,
-        }
-        
+        end
+
         fn apply_to_point(t: Transform, x: i64, y: i64) -> i64:
             return (x + y) * t.scale .
         
@@ -209,10 +208,10 @@ fn test_nested_method_calls() {
 #[test]
 fn test_method_call_in_expression() {
     let source = r#"
-        struct Number {
+        struct Number:
             value: i64,
-        }
-        
+        end
+
         fn get_value(n: Number) -> i64:
             return n.value .
         

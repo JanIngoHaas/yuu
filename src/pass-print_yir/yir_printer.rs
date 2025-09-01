@@ -341,7 +341,7 @@ pub fn format_instruction(
                 f,
                 "{} := {}{}",
                 format_variable(target, do_color),
-                colorize("alloca", "operator", do_color),
+                colorize("ALLOCA", "keyword", do_color),
                 format_type(target.ty().deref_ptr(), do_color),
             )
         }
@@ -358,7 +358,7 @@ pub fn format_instruction(
                 f,
                 "{} := {} {}",
                 format_variable(target, do_color),
-                format_keyword("addr", do_color),
+                format_keyword("ADDR", do_color),
                 format_variable(source, do_color)
             )
         }
@@ -371,7 +371,7 @@ pub fn format_instruction(
                 f,
                 "{} := {} {} {}",
                 format_variable(target, do_color),
-                format_keyword("field_ptr", do_color),
+                format_keyword("FIELD_PTR", do_color),
                 format_operand(base, do_color),
                 colorize(&format!(".{}", field), "operator", do_color)
             )
@@ -381,7 +381,7 @@ pub fn format_instruction(
                 f,
                 "{} := {} {}",
                 format_variable(target, do_color),
-                format_keyword("load", do_color),
+                format_keyword("LOAD", do_color),
                 format_operand(source, do_color)
             )
         }
@@ -390,7 +390,7 @@ pub fn format_instruction(
                 f,
                 "{} <- {} {}",
                 format_operand(dest, do_color),
-                format_keyword("load", do_color),
+                format_keyword("LOAD", do_color),
                 format_operand(value, do_color)
             )
         }
@@ -426,7 +426,7 @@ pub fn format_instruction(
             if let Some(target) = target {
                 write!(f, "{} := ", format_variable(target, do_color))?;
             }
-            write!(f, "{} {}(", format_keyword("call", do_color), name)?;
+            write!(f, "{} {}(", format_keyword("CALL", do_color), name)?;
             for (i, arg) in args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -435,24 +435,33 @@ pub fn format_instruction(
             }
             writeln!(f, ")")
         }
-        Instruction::MakeEnum {
-            target,
-            variant_name,
-            variant_index,
-            data,
-        } => {
-            write!(
+        Instruction::StoreActiveVariantIdx { dest, value } => {
+            writeln!(
                 f,
-                "{} := {} {}#{}",
+                "{} := {} {}",
+                format_variable(dest, do_color),
+                format_keyword("STORE_VARIANT_IDX", do_color),
+                format_operand(value, do_color)
+            )
+        }
+        Instruction::LoadActiveVariantIdx { target, source } => {
+            writeln!(
+                f,
+                "{} := {} {}",
                 format_variable(target, do_color),
-                format_keyword("enum", do_color),
-                colorize(variant_name, "literal", do_color),
-                variant_index
-            )?;
-            if let Some(data_operand) = data {
-                write!(f, "({})", format_operand(data_operand, do_color))?;
-            }
-            writeln!(f)
+                format_keyword("LOAD_VARIANT_IDX", do_color),
+                format_operand(source, do_color)
+            )
+        }
+        Instruction::GetVariantDataPtr { target, base, variant } => {
+            writeln!(
+                f,
+                "{} := {} {} {}",
+                format_variable(target, do_color),
+                format_keyword("GET_VARIANT_PTR", do_color),
+                format_operand(base, do_color),
+                colorize(variant, "literal", do_color)
+            )
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,
@@ -485,7 +494,7 @@ pub fn format_control_flow(
             writeln!(
                 f,
                 "{} {}",
-                format_keyword("jump", do_color),
+                format_keyword("JUMP", do_color),
                 format_label(target, do_color)
             )
         }
@@ -497,14 +506,14 @@ pub fn format_control_flow(
             writeln!(
                 f,
                 "{} {} ? {}, {}",
-                format_keyword("branch", do_color),
+                format_keyword("BRANCH", do_color),
                 format_operand(condition, do_color),
                 format_label(if_true, do_color),
                 format_label(if_false, do_color)
             )
         }
         ControlFlow::Return(value) => {
-            write!(f, "{}", format_keyword("return", do_color))?;
+            write!(f, "{}", format_keyword("RETURN", do_color))?;
             if let Some(val) = value {
                 write!(f, " {}", format_operand(val, do_color))?;
             }
@@ -516,19 +525,19 @@ pub fn format_control_flow(
             jump_targets,
             default,
         } => {
-            write!(
-                f,
-                "jump_table {} {{",
-                format_operand(scrutinee, false)
-            )?;
+            write!(f, "{} {} {{", format_keyword("JUMP_TABLE", do_color), format_operand(scrutinee, do_color))?;
             writeln!(f)?;
 
             for (variant_name, label) in jump_targets {
-                writeln!(f, "    {} -> {}", variant_name, label.name())?;
+                writeln!(f, "    {} -> {}", 
+                    colorize(&variant_name.to_string(), "constant", do_color), 
+                    format_label(label, do_color))?;
             }
 
             if let Some(default_label) = default {
-                writeln!(f, "    default -> {}", default_label.name())?;
+                writeln!(f, "    {} -> {}", 
+                    colorize("DEFAULT", "keyword", do_color), 
+                    format_label(default_label, do_color))?;
             }
 
             writeln!(f, "}}")
@@ -547,7 +556,7 @@ pub fn format_yir(
     writeln!(
         f,
         "{} {}({}) -> {}",
-        format_keyword("fn", do_color),
+        format_keyword("FN", do_color),
         format_keyword(&function.name, do_color),
         function
             .params
@@ -555,7 +564,7 @@ pub fn format_yir(
             .map(|p| format!(
                 "{} := {}{}",
                 format_variable(p, do_color),
-                format_keyword("param", do_color),
+                format_keyword("PARAM", do_color),
                 format_type(p.ty(), do_color)
             ))
             .collect::<Vec<_>>()

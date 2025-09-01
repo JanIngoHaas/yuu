@@ -25,7 +25,7 @@ pub struct StructFieldInfo {
     pub binding_info: BindingInfo,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct EnumVariantInfo {
     pub variant_name: Ustr,
     pub variant_idx: u64,
@@ -48,6 +48,29 @@ pub struct EnumInfo {
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
+}
+
+/// Combined type for resolving either struct or enum information - this is just for convenience
+#[derive(Clone)]
+pub enum StructOrEnumInfo<'a> {
+    Struct(&'a StructInfo),
+    Enum(&'a EnumInfo),
+}
+
+impl<'a> StructOrEnumInfo<'a> {
+    pub fn ty(&self) -> &'static TypeInfo {
+        match self {
+            StructOrEnumInfo::Struct(info) => info.ty,
+            StructOrEnumInfo::Enum(info) => info.ty,
+        }
+    }
+
+    pub fn name(&self) -> Ustr {
+        match self {
+            StructOrEnumInfo::Struct(info) => info.name,
+            StructOrEnumInfo::Enum(info) => info.name,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -90,67 +113,67 @@ impl TypeRegistry {
 
         // F32 operations
         reg.register_binary_op(
-            "add".intern(),
+            "_add".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_f32(),
         );
         reg.register_binary_op(
-            "sub".intern(),
+            "_sub".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_f32(),
         );
         reg.register_binary_op(
-            "mul".intern(),
+            "_mul".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_f32(),
         );
         reg.register_binary_op(
-            "div".intern(),
+            "_div".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_f32(),
         );
         reg.register_binary_op(
-            "mod".intern(),
+            "_mod".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_f32(),
         );
         reg.register_binary_op(
-            "eq".intern(),
+            "_eq".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "lt".intern(),
+            "_lt".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "gt".intern(),
+            "_gt".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "le".intern(),
+            "_le".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ge".intern(),
+            "_ge".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ne".intern(),
+            "_ne".intern(),
             next(),
             &[primitive_f32(), primitive_f32()],
             primitive_bool(),
@@ -158,67 +181,67 @@ impl TypeRegistry {
 
         // I64 operations
         reg.register_binary_op(
-            "add".intern(),
+            "_add".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_i64(),
         );
         reg.register_binary_op(
-            "sub".intern(),
+            "_sub".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_i64(),
         );
         reg.register_binary_op(
-            "mul".intern(),
+            "_mul".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_i64(),
         );
         reg.register_binary_op(
-            "div".intern(),
+            "_div".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_i64(),
         );
         reg.register_binary_op(
-            "mod".intern(),
+            "_mod".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_i64(),
         );
         reg.register_binary_op(
-            "eq".intern(),
+            "_eq".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "lt".intern(),
+            "_lt".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "gt".intern(),
+            "_gt".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "le".intern(),
+            "_le".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ge".intern(),
+            "_ge".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ne".intern(),
+            "_ne".intern(),
             next(),
             &[primitive_i64(), primitive_i64()],
             primitive_bool(),
@@ -226,67 +249,67 @@ impl TypeRegistry {
 
         // U64 operations
         reg.register_binary_op(
-            "add".intern(),
+            "_add".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_u64(),
         );
         reg.register_binary_op(
-            "sub".intern(),
+            "_sub".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_u64(),
         );
         reg.register_binary_op(
-            "mul".intern(),
+            "_mul".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_u64(),
         );
         reg.register_binary_op(
-            "div".intern(),
+            "_div".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_u64(),
         );
         reg.register_binary_op(
-            "mod".intern(),
+            "_mod".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_u64(),
         );
         reg.register_binary_op(
-            "eq".intern(),
+            "_eq".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "lt".intern(),
+            "_lt".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "gt".intern(),
+            "_gt".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "le".intern(),
+            "_le".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ge".intern(),
+            "_ge".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ne".intern(),
+            "_ne".intern(),
             next(),
             &[primitive_u64(), primitive_u64()],
             primitive_bool(),
@@ -294,86 +317,86 @@ impl TypeRegistry {
 
         // F64 operations
         reg.register_binary_op(
-            "add".intern(),
+            "_add".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
         );
         reg.register_binary_op(
-            "sub".intern(),
+            "_sub".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
         );
         reg.register_binary_op(
-            "mul".intern(),
+            "_mul".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
         );
         reg.register_binary_op(
-            "div".intern(),
+            "_div".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
         );
         reg.register_binary_op(
-            "mod".intern(),
+            "_mod".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_f64(),
         );
         reg.register_binary_op(
-            "eq".intern(),
+            "_eq".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "lt".intern(),
+            "_lt".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "gt".intern(),
+            "_gt".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "le".intern(),
+            "_le".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ge".intern(),
+            "_ge".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
         reg.register_binary_op(
-            "ne".intern(),
+            "_ne".intern(),
             next(),
             &[primitive_f64(), primitive_f64()],
             primitive_bool(),
         );
 
         // Unary operations for i64
-        reg.register_unary_op("neg".intern(), next(), primitive_i64(), primitive_i64());
-        reg.register_unary_op("pos".intern(), next(), primitive_i64(), primitive_i64());
+        reg.register_unary_op("_neg".intern(), next(), primitive_i64(), primitive_i64());
+        reg.register_unary_op("_pos".intern(), next(), primitive_i64(), primitive_i64());
 
         // Unary operations for u64
-        reg.register_unary_op("pos".intern(), next(), primitive_u64(), primitive_u64());
+        reg.register_unary_op("_pos".intern(), next(), primitive_u64(), primitive_u64());
 
         // Unary operations for f32
-        reg.register_unary_op("neg".intern(), next(), primitive_f32(), primitive_f32());
-        reg.register_unary_op("pos".intern(), next(), primitive_f32(), primitive_f32());
+        reg.register_unary_op("_neg".intern(), next(), primitive_f32(), primitive_f32());
+        reg.register_unary_op("_pos".intern(), next(), primitive_f32(), primitive_f32());
 
         // Unary operations for f64
-        reg.register_unary_op("neg".intern(), next(), primitive_f64(), primitive_f64());
-        reg.register_unary_op("pos".intern(), next(), primitive_f64(), primitive_f64());
+        reg.register_unary_op("_neg".intern(), next(), primitive_f64(), primitive_f64());
+        reg.register_unary_op("_pos".intern(), next(), primitive_f64(), primitive_f64());
 
         reg
     }
@@ -500,11 +523,15 @@ impl TypeRegistry {
             .insert(info.binding_info.id, general_type)
             .is_none();
 
+        // TODO: Make this an actual error that gets printed to the user
+        debug_assert!(succ, "ID already exists in type table");
+
         let out = funcs
             .insert(arg_type.iter().map(|x| GiveMePtrHashes(*x)).collect(), info)
-            .is_none()
-            && succ;
-        debug_assert!(out);
+            .is_none();
+
+        debug_assert!(out, "Function overload already exists");
+
         out
     }
 
@@ -514,6 +541,17 @@ impl TypeRegistry {
 
     pub fn resolve_enum(&self, name: Ustr) -> Option<&EnumInfo> {
         self.enums.get(&name)
+    }
+
+    /// Resolves either a struct or enum type by name
+    pub fn resolve_struct_or_enum(&self, name: Ustr) -> Option<StructOrEnumInfo<'_>> {
+        if let Some(struct_info) = self.resolve_struct(name) {
+            Some(StructOrEnumInfo::Struct(struct_info))
+        } else if let Some(enum_info) = self.resolve_enum(name) {
+            Some(StructOrEnumInfo::Enum(enum_info))
+        } else {
+            None
+        }
     }
 
     pub fn get_similar_names_func(&self, name: Ustr, max_dst: usize) -> Vec<Ustr> {

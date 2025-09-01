@@ -64,30 +64,56 @@ fn infer_enum_pattern(
 
             // Get variant info from the type registry
             if let Some(variant_info) = enum_info.variants.get(&enum_pattern.variant_name) {
-                // If there's a binding, set its type to the variant's associated data type
-                if let Some(binding) = &enum_pattern.binding
-                    && let Some(associated_type) = variant_info.variant
-                {
-                    infer_binding(block, binding, associated_type, data);
-                } else {
-                    // This is a unit variant but the pattern has a binding
-                    let err_msg = YuuError::builder()
-                        .kind(ErrorKind::TypeMismatch)
-                        .message(format!(
-                            "Unit variant '{}::{}' cannot be destructured",
-                            enum_pattern.enum_name, enum_pattern.variant_name
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            enum_pattern.span.clone(),
-                            "unit variant cannot have binding",
-                        )
-                        .help("Remove the binding or use a variant with associated data")
-                        .build();
-                    data.errors.push(err_msg);
+                // Check pattern matching validity
+                match (&enum_pattern.binding, &variant_info.variant) {
+                    (Some(binding), Some(associated_type)) => {
+                        // Data variant with binding - valid
+                        infer_binding(block, binding, *associated_type, data);
+                    }
+                    (Some(_), None) => {
+                        // Unit variant with binding - invalid
+                        let err_msg = YuuError::builder()
+                            .kind(ErrorKind::TypeMismatch)
+                            .message(format!(
+                                "Unit variant '{}::{}' cannot be destructured",
+                                enum_pattern.enum_name, enum_pattern.variant_name
+                            ))
+                            .source(
+                                data.src_code.source.clone(),
+                                data.src_code.file_name.clone(),
+                            )
+                            .span(
+                                enum_pattern.span.clone(),
+                                "unit variant cannot have binding",
+                            )
+                            .help("Remove the binding or use a variant with associated data")
+                            .build();
+                        data.errors.push(err_msg);
+                    }
+                    (None, Some(_)) => {
+                        // Data variant without binding - invalid
+                        let err_msg = YuuError::builder()
+                            .kind(ErrorKind::TypeMismatch)
+                            .message(format!(
+                                "Data variant '{}::{}' must be destructured",
+                                enum_pattern.enum_name, enum_pattern.variant_name
+                            ))
+                            .source(
+                                data.src_code.source.clone(),
+                                data.src_code.file_name.clone(),
+                            )
+                            .span(
+                                enum_pattern.span.clone(),
+                                "data variant must have binding",
+                            )
+                            .help("Add a binding to destructure the associated data")
+                            .build();
+                        data.errors.push(err_msg);
+                    }
+                    (None, None) => {
+                        // Unit variant with no binding - valid
+                        // Nothing to do
+                    }
                 }
             } else {
                 let err_msg = YuuError::builder()
