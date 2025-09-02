@@ -36,5 +36,7 @@ pub fn run_parse_only(source: &str, filename: &str) -> Result<AST, Box<dyn std::
 /// Helper function to run executable and capture output
 pub fn run_executable_with_output(executable: &CExecutable, args: &[&str]) -> miette::Result<i32> {
     let output = executable.execute(args)?;
-    Ok(output.status.code().unwrap())
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: i32 = stdout.trim().parse().unwrap_or(0);
+    Ok(value)
 }
