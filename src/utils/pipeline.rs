@@ -16,7 +16,6 @@ use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
 use crate::pass_type_inference::{TypeInferenceErrors, TypeRegistry};
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
 use crate::pass_yir_lowering::{Module, RootBlock};
-use colored::control;
 use miette::{IntoDiagnostic, Result};
 
 #[derive(Default)]

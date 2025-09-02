@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::BuildHasherDefault;
-
 use colored::Colorize;
 use ustr::Ustr;
 
@@ -11,9 +8,7 @@ use crate::{
     pass_diagnostics::error::{ErrorKind, YuuError},
     pass_parse::SourceInfo,
     pass_type_dependencies::TypeDependencyGraph,
-    pass_type_inference::{
-        IndexUstrSet, StructOrEnumInfo, TypeInfo, TypeRegistry, UserDefinedTypeDiscriminant,
-    },
+    pass_type_inference::{IndexUstrSet, StructOrEnumInfo, TypeInfo, TypeRegistry},
 };
 
 pub struct TypeDependencyAnalysis;
@@ -23,7 +18,7 @@ impl TypeDependencyAnalysis {
         Self
     }
 
-    fn build_dependency_graph(&self, data: &mut TransientData, info: StructOrEnumInfo<'_>) {
+    fn build_dependency_graph(data: &mut TransientData, info: StructOrEnumInfo<'_>) {
         if data.dependency_graph.contains_key(&info.name()) {
             // Already processed
             return;
@@ -96,7 +91,7 @@ impl TypeDependencyAnalysis {
                             "Compiler Bug: Struct not found, but should be present at this point",
                         );
                         data.current_path.insert(field_ty_name);
-                        self.build_dependency_graph(data, StructOrEnumInfo::Struct(si));
+                        Self::build_dependency_graph(data, StructOrEnumInfo::Struct(si));
                         data.current_path.pop();
                     }
                     TypeInfo::Enum(_) => {
@@ -104,7 +99,7 @@ impl TypeDependencyAnalysis {
                             "Compiler Bug: Enum not found, but should be present at this point",
                         );
                         data.current_path.insert(field_ty_name);
-                        self.build_dependency_graph(data, StructOrEnumInfo::Enum(ei));
+                        Self::build_dependency_graph(data, StructOrEnumInfo::Enum(ei));
                         data.current_path.pop();
                     }
                     _ => continue,
@@ -124,13 +119,13 @@ impl TypeDependencyAnalysis {
         for (name, info) in type_registry.all_structs() {
             data.current_path.clear();
             data.current_path.insert(*name);
-            self.build_dependency_graph(&mut data, StructOrEnumInfo::Struct(info));
+            Self::build_dependency_graph(&mut data, StructOrEnumInfo::Struct(info));
         }
 
         for (name, info) in type_registry.all_enums() {
             data.current_path.clear();
             data.current_path.insert(*name);
-            self.build_dependency_graph(&mut data, StructOrEnumInfo::Enum(info));
+            Self::build_dependency_graph(&mut data, StructOrEnumInfo::Enum(info));
         }
 
         (TypeDependencyGraph(data.dependency_graph), data.errors)

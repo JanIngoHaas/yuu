@@ -1,10 +1,7 @@
-use crate::pass_control_flow_analysis::ControlFlowAnalysisErrors;
 use crate::pass_diagnostics::{YuuError, setup_error_formatter};
-use crate::pass_parse::pass_parse_impl::SyntaxErrors;
 use colored::*;
 use miette::{IntoDiagnostic, bail};
 
-use crate::pass_type_inference::TypeInferenceErrors;
 pub struct Diagnostics;
 
 impl Default for Diagnostics {
@@ -97,8 +94,8 @@ impl Diagnostics {
 
         // Print summary
         let total_errors = self.print_error_summary(
-            &syntax_errors,
-            &type_inference_errors,
+            syntax_errors,
+            type_inference_errors,
             sema_errors,
             //break_semantic_errors,
             //mutability_errors,

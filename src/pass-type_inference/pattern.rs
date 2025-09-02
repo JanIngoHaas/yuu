@@ -68,7 +68,7 @@ fn infer_enum_pattern(
                 match (&enum_pattern.binding, &variant_info.variant) {
                     (Some(binding), Some(associated_type)) => {
                         // Data variant with binding - valid
-                        infer_binding(block, binding, *associated_type, data);
+                        infer_binding(block, binding, associated_type, data);
                     }
                     (Some(_), None) => {
                         // Unit variant with binding - invalid

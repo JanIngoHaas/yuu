@@ -1,4 +1,3 @@
-use indexmap::map::MutableKeys;
 
 use crate::{
     pass_diagnostics::YuuError,
@@ -192,7 +191,7 @@ fn define_user_def_types(
                 }
             }
         }
-        _ => return,
+        _ => (),
     }
 }
 

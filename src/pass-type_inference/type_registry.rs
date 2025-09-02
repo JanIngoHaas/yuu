@@ -632,10 +632,8 @@ impl TypeRegistry {
     pub fn resolve_struct_or_enum(&self, name: Ustr) -> Option<StructOrEnumInfo<'_>> {
         if let Some(struct_info) = self.resolve_struct(name) {
             Some(StructOrEnumInfo::Struct(struct_info))
-        } else if let Some(enum_info) = self.resolve_enum(name) {
-            Some(StructOrEnumInfo::Enum(enum_info))
         } else {
-            None
+            self.resolve_enum(name).map(StructOrEnumInfo::Enum)
         }
     }
 

@@ -2,7 +2,6 @@ use crate::pass_type_dependencies::TypeDependencyGraph;
 // YIR to C lowering pass - transforms the YIR intermediate representation to C code
 use crate::pass_type_inference::{
     EnumInfo, PrimitiveType, StructInfo, StructOrEnumInfo, TypeInfo, TypeRegistry,
-    UserDefinedTypeDiscriminant,
 };
 use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
@@ -10,7 +9,6 @@ use crate::pass_yir_lowering::{
 };
 use miette::IntoDiagnostic;
 use std::fmt::Write;
-use ustr::Ustr;
 
 const PREFIX_LABEL: &str = "lbl_";
 const PREFIX_FUNCTION: &str = "fn_";
@@ -432,8 +430,8 @@ impl CLowering {
                 .resolve_struct_or_enum(name)
                 .expect("Compiler Bug: Type not found, but should be present at this point");
             match soe {
-                StructOrEnumInfo::Enum(ei) => self.def_enum(data, &ei)?,
-                StructOrEnumInfo::Struct(si) => self.def_struct(data, &si)?,
+                StructOrEnumInfo::Enum(ei) => self.def_enum(data, ei)?,
+                StructOrEnumInfo::Struct(si) => self.def_struct(data, si)?,
             }
         }
 

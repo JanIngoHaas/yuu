@@ -1,9 +1,8 @@
 use ustr::Ustr;
 
-use crate::pass_diagnostics::error::{ErrorKind, YuuError};
-use crate::pass_type_inference::{IndexUstrMap, IndexUstrSet, UserDefinedTypeDiscriminant};
+use crate::pass_diagnostics::error::YuuError;
+use crate::pass_type_inference::{IndexUstrMap, IndexUstrSet};
 
-use std::collections::HashMap;
 
 pub use self::pass_type_dependencies_impl::TypeDependencyAnalysis;
 

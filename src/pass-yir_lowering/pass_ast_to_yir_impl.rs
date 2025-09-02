@@ -271,14 +271,14 @@ impl<'a> TransientData<'a> {
 
                 // Store the active variant index
                 self.function
-                    .make_store_active_variant_idx(enum_var, &variant_info);
+                    .make_store_active_variant_idx(enum_var, variant_info);
 
                 // Store the associated data if present
                 if let Some(data_operand) = data_operand {
                     let variant_ptr = self.function.make_get_variant_data_ptr(
                         "variant_ptr".intern(),
                         Operand::Variable(enum_var),
-                        &variant_info,
+                        variant_info,
                     );
                     self.function.make_store(variant_ptr, data_operand);
                 }
@@ -351,9 +351,7 @@ impl<'a> TransientData<'a> {
                         let mut jump_targets = IndexMap::new();
                         let enum_info = self.tr.resolve_enum(enum_ty.name).unwrap();
                         for arm in match_stmt.arms.iter() {
-                            let enum_pattern = match arm.pattern.as_ref() {
-                                RefutablePatternNode::Enum(enum_pattern) => enum_pattern,
-                            };
+                            let RefutablePatternNode::Enum(enum_pattern) = arm.pattern.as_ref();
                             let variant_info =
                                 enum_info.variants.get(&enum_pattern.variant_name).unwrap();
                             let match_arm_block = self.function.add_block("match_arm".intern());
