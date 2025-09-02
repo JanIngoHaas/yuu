@@ -181,3 +181,53 @@ fn test_multiple_errors_in_source() {
         "Expected compilation to fail due to multiple errors"
     );
 }
+
+#[test]
+fn test_recursive_type_error() {
+    let source = r#"
+        struct Node:
+            value: i64,
+            next: Node,
+        end
+        
+        fn main() -> i64:
+            return 0 .
+    "#; // Node contains itself directly, causing infinite size
+
+    // This should fail to compile
+    let result = run_to_executable(source, "test_recursive_type.yuu");
+    assert!(
+        result.is_err(),
+        "Expected compilation to fail due to recursive type definition"
+    );
+}
+
+#[test]
+fn test_indirect_recursive_type_error() {
+    let source = r#"
+        struct A:
+            value: i64,
+            b_ref: B,
+        end
+        
+        struct B:
+            data: i64,
+            c_ref: C,
+        end
+        
+        struct C:
+            info: i64,
+            a_ref: A,
+        end
+        
+        fn main() -> i64:
+            return 0 .
+    "#; // A -> B -> C -> A creates a three-layer cycle
+
+    // This should fail to compile
+    let result = run_to_executable(source, "test_indirect_recursive.yuu");
+    assert!(
+        result.is_err(),
+        "Expected compilation to fail due to indirect recursive types"
+    );
+}

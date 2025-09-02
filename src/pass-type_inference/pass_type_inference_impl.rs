@@ -1,10 +1,12 @@
+use indexmap::map::MutableKeys;
+
 use crate::{
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode},
     pass_type_inference::{
         EnumVariantInfo,
         binding_info::BindingInfo,
-        inactive_type,
+        error_type, inactive_type,
         type_info::TypeInfo,
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
@@ -53,7 +55,67 @@ impl TypeInference {
     }
 }
 
-fn collect_structural(structural: &StructuralNode, data: &mut TransientData, block: &mut Block) {
+fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData) {
+    match structural {
+        StructuralNode::StructDef(struct_def) => {
+            let mut struct_defs = FieldsMap::default();
+
+            for field in &struct_def.fields {
+                let ty = inactive_type(); //later: infer_type(&field.ty, data); See below for reason
+                let sfi = StructFieldInfo {
+                    name: field.name,
+                    ty,
+                    binding_info: BindingInfo {
+                        id: field.id,
+                        src_location: Some(field.span.clone()),
+                    },
+                };
+                struct_defs.insert(field.name, sfi);
+            }
+
+            data.type_registry.add_struct(
+                struct_defs,
+                struct_def.decl.name,
+                BindingInfo {
+                    id: struct_def.id,
+                    src_location: Some(struct_def.span.clone()),
+                },
+            );
+        }
+        StructuralNode::EnumDef(ed) => {
+            let mut enum_variant_defs = FieldsMap::default();
+
+            for (idx, variant) in ed.variants.iter().enumerate() {
+                let evi = EnumVariantInfo {
+                    variant_name: variant.name,
+                    variant_idx: idx as u64,
+                    binding_info: BindingInfo {
+                        id: variant.id,
+                        src_location: Some(variant.span.clone()),
+                    },
+                    variant: variant.data_type.as_ref().map(|_x| error_type()), // For collecting, we have to first declare everything as error_type, as we don't have all type info right now - later then: variant.data_type.as_ref().map(|x| infer_type(x, data)),
+                };
+                enum_variant_defs.insert(variant.name, evi);
+            }
+
+            data.type_registry.add_enum(
+                ed.decl.name,
+                enum_variant_defs,
+                BindingInfo {
+                    id: ed.id,
+                    src_location: Some(ed.span.clone()),
+                },
+            );
+        }
+        _ => (),
+    };
+}
+
+fn declare_and_define_functions(
+    structural: &StructuralNode,
+    data: &mut TransientData,
+    block: &mut Block,
+) {
     match structural {
         StructuralNode::FuncDecl(decl) => {
             declare_function(
@@ -80,57 +142,58 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 .type_info_table
                 .insert(def.body.id, ret_type);
         }
-        StructuralNode::Error(_) => (),
-        StructuralNode::StructDecl(_struct_decl) => {
-            unimplemented!("StructDecls are not supported");
-        }
-        StructuralNode::StructDef(struct_def) => {
-            let mut struct_defs = FieldsMap::default();
-
-            for field in &struct_def.fields {
-                let ty = infer_type(&field.ty, data);
-                let sfi = StructFieldInfo {
-                    name: field.name,
-                    ty,
-                    binding_info: BindingInfo {
-                        id: field.id,
-                        src_location: Some(field.span.clone()),
-                    },
-                };
-                struct_defs.insert(field.name, sfi);
-            }
-
-            data.type_registry.add_struct(
-                struct_defs,
-                struct_def.decl.name,
-                BindingInfo {
-                    id: struct_def.id,
-                    src_location: Some(struct_def.span.clone()),
-                },
-            );
-        }
-        StructuralNode::EnumDef(ed) => {
-            let mut enum_defs = FieldsMap::default();
-
-            for (idx, variant) in ed.variants.iter().enumerate() {
-                let evi = EnumVariantInfo {
-                    variant_name: variant.name,
-                    variant_idx: idx as u64,
-                    variant: variant.data_type.as_ref().map(|x| infer_type(x, data)),
-                };
-                enum_defs.insert(variant.name, evi);
-            }
-
-            data.type_registry.add_enum(
-                ed.decl.name,
-                enum_defs,
-                BindingInfo {
-                    id: ed.id,
-                    src_location: Some(ed.span.clone()),
-                },
-            );
-        }
+        _ => (),
     };
+}
+
+fn define_user_def_types(
+    structural: &StructuralNode,
+    data: &mut TransientData,
+    helper_vec: &mut Vec<&'static TypeInfo>,
+) {
+    helper_vec.clear();
+    match structural {
+        StructuralNode::StructDef(struct_def_structural) => {
+            for field in &struct_def_structural.fields {
+                let ty = infer_type(&field.ty, data);
+                helper_vec.push(ty);
+            }
+
+            // Then, get the mutable reference and update the types
+            let sfi = data
+                .type_registry
+                .resolve_struct_mut(struct_def_structural.decl.name)
+                .unwrap();
+
+            for (ty, (_sfi_field_name, sfi_info)) in helper_vec.iter().zip(sfi.fields.iter_mut()) {
+                sfi_info.ty = *ty;
+            }
+        }
+        StructuralNode::EnumDef(enum_def_structural) => {
+            for variant in &enum_def_structural.variants {
+                let ty = variant.data_type.as_ref().map(|ty| infer_type(ty, data));
+                helper_vec.push(ty.unwrap_or_else(|| error_type())); // Use error_type as placeholder for None
+            }
+
+            // Then, get the mutable reference and update the types
+            let evi = data
+                .type_registry
+                .resolve_enum_mut(enum_def_structural.decl.name)
+                .unwrap();
+
+            for ((variant, ty), (_evi_variant_name, evi_info)) in enum_def_structural
+                .variants
+                .iter()
+                .zip(helper_vec.iter())
+                .zip(evi.variants.iter_mut())
+            {
+                if variant.data_type.is_some() {
+                    evi_info.variant = Some(*ty);
+                }
+            }
+        }
+        _ => return,
+    }
 }
 
 impl TypeInference {
@@ -143,11 +206,24 @@ impl TypeInference {
         let mut type_registry = TypeRegistry::new();
         let errors = {
             let mut data = TransientData::new(&mut type_registry, ast, src_code);
+            let mut helper_vec = Vec::<&'static TypeInfo>::new();
 
+            // First pass: declare user-defined types (structs and enums)
             for node in &ast.structurals {
-                collect_structural(node, &mut data, root_block.root_mut());
+                declare_user_def_types(node, &mut data);
             }
 
+            // Second pass: define user-defined types right after declaration
+            for node in &ast.structurals {
+                define_user_def_types(node, &mut data, &mut helper_vec);
+            }
+
+            // Third pass: declare and define functions (can be done together since functions signatures don't reference each other)
+            for node in &ast.structurals {
+                declare_and_define_functions(node, &mut data, root_block.root_mut());
+            }
+
+            // Fourth pass: infer the structural elements
             for node in &ast.structurals {
                 infer_structural(node, root_block.root_mut(), &mut data);
             }

@@ -1,5 +1,9 @@
+use crate::pass_type_dependencies::TypeDependencyGraph;
 // YIR to C lowering pass - transforms the YIR intermediate representation to C code
-use crate::pass_type_inference::{PrimitiveType, TypeInfo, TypeRegistry};
+use crate::pass_type_inference::{
+    EnumInfo, PrimitiveType, StructInfo, StructOrEnumInfo, TypeInfo, TypeRegistry,
+    UserDefinedTypeDiscriminant,
+};
 use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
     Operand, UnaryOp, Variable,
@@ -15,6 +19,7 @@ struct TransientData<'a> {
     module: &'a Module,
     tr: &'a TypeRegistry,
     output: String,
+    type_dependency_order: &'a TypeDependencyGraph,
 }
 
 pub struct CLowering;
@@ -127,11 +132,11 @@ impl CLowering {
     ) -> Result<(), std::fmt::Error> {
         let ty = var.ty();
         Self::gen_type(data, ty.deref_ptr())?;
-        write!(data.output, " mem_{}_{}; ", var.name(), var.id())?;
+        write!(data.output, " mem_{}_{};", var.name(), var.id())?;
         Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
-        write!(data.output, " = &mem_{}_{}; ", var.name(), var.id())
+        write!(data.output, "=&mem_{}_{}; ", var.name(), var.id())
     }
 
     fn gen_simple_var_decl(
@@ -149,27 +154,25 @@ impl CLowering {
         instruction: &Instruction,
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
-        write!(data.output, "    ")?;
-
         match instruction {
             Instruction::Alloca { target } => {
                 self.gen_variable_decl(data, target)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::StoreImmediate { target, value } => {
                 write!(data.output, "*")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, " = ")?;
+                write!(data.output, "=")?;
                 self.gen_operand(data, value)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::TakeAddress { target, source } => {
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, " = &")?;
+                write!(data.output, "=&")?;
                 Self::write_var_name(source, &mut data.output)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::GetFieldPtr {
                 target,
@@ -177,26 +180,24 @@ impl CLowering {
                 field,
             } => {
                 self.gen_variable_decl(data, target)?;
-                writeln!(data.output, ";")?;
-                write!(data.output, "    ")?;
+                write!(data.output, ";")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, " = &(")?;
+                write!(data.output, "=&(")?;
                 self.gen_operand(data, base)?;
-                write!(data.output, "->{}", field)?;
-                writeln!(data.output, ");")?;
+                write!(data.output, "->{});", field)?;
             }
             Instruction::Load { target, source } => {
                 self.gen_simple_var_decl(data, target)?;
-                write!(data.output, " = *")?;
+                write!(data.output, "=*")?;
                 self.gen_operand(data, source)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::Store { dest, value } => {
                 write!(data.output, "*")?;
                 self.gen_operand(data, dest)?;
-                write!(data.output, " = *")?;
+                write!(data.output, "=*")?;
                 self.gen_operand(data, value)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::Binary {
                 target,
@@ -205,23 +206,23 @@ impl CLowering {
                 rhs,
             } => {
                 self.gen_simple_var_decl(data, target)?;
-                write!(data.output, " = ")?;
+                write!(data.output, "=")?;
                 self.gen_operand(data, lhs)?;
                 match op {
-                    BinOp::Add => write!(data.output, " + "),
-                    BinOp::Sub => write!(data.output, " - "),
-                    BinOp::Mul => write!(data.output, " * "),
-                    BinOp::Div => write!(data.output, " / "),
-                    BinOp::Mod => write!(data.output, " % "),
-                    BinOp::Eq => write!(data.output, " == "),
-                    BinOp::NotEq => write!(data.output, " != "),
-                    BinOp::LessThan => write!(data.output, " < "),
-                    BinOp::LessThanEq => write!(data.output, " <= "),
-                    BinOp::GreaterThan => write!(data.output, " > "),
-                    BinOp::GreaterThanEq => write!(data.output, " >= "),
+                    BinOp::Add => write!(data.output, "+"),
+                    BinOp::Sub => write!(data.output, "-"),
+                    BinOp::Mul => write!(data.output, "*"),
+                    BinOp::Div => write!(data.output, "/"),
+                    BinOp::Mod => write!(data.output, "%"),
+                    BinOp::Eq => write!(data.output, "=="),
+                    BinOp::NotEq => write!(data.output, "!="),
+                    BinOp::LessThan => write!(data.output, "<"),
+                    BinOp::LessThanEq => write!(data.output, "<="),
+                    BinOp::GreaterThan => write!(data.output, ">"),
+                    BinOp::GreaterThanEq => write!(data.output, ">="),
                 }?;
                 self.gen_operand(data, rhs)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::Unary {
                 target,
@@ -229,41 +230,39 @@ impl CLowering {
                 operand,
             } => {
                 self.gen_simple_var_decl(data, target)?;
-                write!(data.output, " = ")?;
+                write!(data.output, "=")?;
                 match op {
                     UnaryOp::Neg => write!(data.output, "-"),
                 }?;
                 self.gen_operand(data, operand)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::Call { target, name, args } => {
                 if let Some(target) = target {
                     self.gen_simple_var_decl(data, target)?;
-                    write!(data.output, " = ")?;
+                    write!(data.output, "=")?;
                 }
                 Self::write_function_name(name, &mut data.output)?;
                 write!(data.output, "(")?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
-                        write!(data.output, ", ")?;
+                        write!(data.output, ",")?;
                     }
                     self.gen_operand(data, arg)?;
                 }
-                write!(data.output, ")")?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ");")?;
             }
             Instruction::StoreActiveVariantIdx { dest, value } => {
-                write!(data.output, "    ")?;
                 Self::write_var_name(dest, &mut data.output)?;
-                write!(data.output, "->tag = ")?;
+                write!(data.output, "->tag=")?;
                 self.gen_operand(data, value)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             Instruction::LoadActiveVariantIdx { target, source } => {
                 self.gen_simple_var_decl(data, target)?;
-                write!(data.output, " = ")?;
+                write!(data.output, "=")?;
                 self.gen_operand(data, source)?;
-                writeln!(data.output, "->tag;")?;
+                write!(data.output, "->tag;")?;
             }
             Instruction::GetVariantDataPtr {
                 target,
@@ -271,13 +270,11 @@ impl CLowering {
                 variant,
             } => {
                 self.gen_variable_decl(data, target)?;
-                writeln!(data.output, ";")?;
-                write!(data.output, "    ")?;
+                write!(data.output, ";")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, " = &(")?;
+                write!(data.output, "=&(")?;
                 self.gen_operand(data, base)?;
-                write!(data.output, "->data.{}_data)", variant)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, "->data.{}_data);", variant)?;
             }
         }
         Ok(())
@@ -289,7 +286,7 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         Self::write_label(&block.label, &mut data.output)?;
-        writeln!(data.output, ":;")?;
+        write!(data.output, ":;")?;
 
         for instruction in &block.instructions {
             self.gen_instruction(instruction, data)?;
@@ -297,63 +294,58 @@ impl CLowering {
 
         match &block.terminator {
             ControlFlow::Jump { target } => {
-                write!(data.output, "    goto ")?;
+                write!(data.output, "goto ")?;
                 Self::write_label(target, &mut data.output)?;
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             ControlFlow::Branch {
                 condition,
                 if_true,
                 if_false,
             } => {
-                write!(data.output, "    if (")?;
+                write!(data.output, "if(")?;
                 self.gen_operand(data, condition)?;
-                writeln!(data.output, ") {{")?;
-                write!(data.output, "        goto ")?;
+                write!(data.output, "){{goto ")?;
                 Self::write_label(if_true, &mut data.output)?;
-                writeln!(data.output, ";")?;
-                writeln!(data.output, "    }} else {{")?;
-                write!(data.output, "        goto ")?;
+                write!(data.output, ";}}else{{goto ")?;
                 Self::write_label(if_false, &mut data.output)?;
-                writeln!(data.output, ";")?;
-                writeln!(data.output, "    }}")?;
+                write!(data.output, ";}}")?;
             }
             ControlFlow::Return(value) => {
-                write!(data.output, "    return")?;
+                write!(data.output, "return")?;
                 if let Some(val) = value {
                     write!(data.output, " ")?;
                     self.gen_operand(data, val)?;
                 }
-                writeln!(data.output, ";")?;
+                write!(data.output, ";")?;
             }
             ControlFlow::Unterminated => {
-                writeln!(data.output, "    // UNTERMINATED BLOCK")?;
+                write!(data.output, "/*UNTERMINATED*/")?;
             }
             ControlFlow::JumpTable {
                 scrutinee,
                 jump_targets,
                 default,
             } => {
-                writeln!(data.output, "    switch (")?;
+                write!(data.output, "switch(")?;
                 self.gen_operand(data, scrutinee)?;
-                writeln!(data.output, ") {{")?;
+                write!(data.output, "){{")?;
 
                 for (variant_name, label) in jump_targets {
-                    write!(data.output, "        case {}: goto ", variant_name)?;
+                    write!(data.output, "case {}:goto ", variant_name)?;
                     Self::write_label(label, &mut data.output)?;
-                    writeln!(data.output, ";")?;
+                    write!(data.output, ";")?;
                 }
 
                 if let Some(default_label) = default {
-                    write!(data.output, "        default: goto ")?;
+                    write!(data.output, "default:goto ")?;
                     Self::write_label(default_label, &mut data.output)?;
-                    writeln!(data.output, ";")?;
+                    write!(data.output, ";")?;
                 }
 
-                writeln!(data.output, "    }}")?;
+                write!(data.output, "}}")?;
             }
         }
-        writeln!(data.output)?;
         Ok(())
     }
 
@@ -380,7 +372,7 @@ impl CLowering {
         write!(data.output, "(")?;
         for (i, param) in func.params.iter().enumerate() {
             if i > 0 {
-                write!(data.output, ", ")?;
+                write!(data.output, ",")?;
             }
             Self::gen_type(data, param.ty())?;
             write!(data.output, " ")?;
@@ -392,80 +384,57 @@ impl CLowering {
     fn def_struct(
         &self,
         data: &mut TransientData,
-        struct_name: Ustr,
+        sinfo: &StructInfo,
     ) -> Result<(), std::fmt::Error> {
-        let sinfo = data
-            .tr
-            .resolve_struct(struct_name)
-            .expect("Compiler Bug: Struct not found when lowering to C");
-
-        writeln!(data.output, "struct {} {{", sinfo.name)?;
+        write!(data.output, "struct {}{{", sinfo.name)?;
         for (fname, finfo) in &sinfo.fields {
-            write!(data.output, "    ")?;
             Self::gen_type(data, finfo.ty)?;
-            writeln!(data.output, " {};", fname)?;
+            write!(data.output, " {};", fname)?;
         }
-        writeln!(data.output, "}};")?;
+        write!(data.output, "}};")?;
         Ok(())
     }
 
-    fn def_enum(&self, data: &mut TransientData, enum_name: Ustr) -> Result<(), std::fmt::Error> {
-        let einfo = data
-            .tr
-            .resolve_enum(enum_name)
-            .expect("Compiler Bug: Enum not found when lowering to C");
-
-        writeln!(data.output, "struct {} {{", einfo.name)?;
-
-        // Anonymous enum for variant tags
-        write!(data.output, "    enum {{ ")?;
+    fn def_enum(&self, data: &mut TransientData, einfo: &EnumInfo) -> Result<(), std::fmt::Error> {
+        write!(data.output, "struct {}{{enum{{", einfo.name)?;
         let mut first = true;
         for (variant_name, variant_info) in &einfo.variants {
             if !first {
-                write!(data.output, ", ")?;
+                write!(data.output, ",")?;
             }
-            write!(
-                data.output,
-                "{} = {}",
-                variant_name, variant_info.variant_idx
-            )?;
+            write!(data.output, "{}={}", variant_name, variant_info.variant_idx)?;
             first = false;
         }
-        writeln!(data.output, " }} tag;")?;
+        write!(data.output, "}}tag;")?;
 
-        // Union for data fields (only if there are variants with data)
         let has_data_variants = einfo.variants.values().any(|v| v.variant.is_some());
         if has_data_variants {
-            writeln!(data.output, "    union {{")?;
+            write!(data.output, "union{{")?;
             for (variant_name, variant_info) in &einfo.variants {
                 if let Some(variant_type) = variant_info.variant {
-                    write!(data.output, "        ")?;
                     Self::gen_type(data, variant_type)?;
-                    writeln!(data.output, " {}_data;", variant_name)?;
+                    write!(data.output, " {}_data;", variant_name)?;
                 }
             }
-            writeln!(data.output, "    }} data;")?;
+            write!(data.output, "}}data;")?;
         }
 
-        writeln!(data.output, "}};")?;
+        write!(data.output, "}};")?;
         Ok(())
     }
 
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
-        writeln!(data.output, "#include <stdint.h>")?;
-        writeln!(data.output, "#include <stdbool.h>")?;
-        writeln!(data.output)?;
-        for sname in &data.module.structs {
-            self.def_struct(data, *sname)?;
-        }
-        if !data.module.structs.is_empty() {
-            writeln!(data.output)?;
-        }
-        for ename in &data.module.enums {
-            self.def_enum(data, *ename)?;
-        }
-        if !data.module.enums.is_empty() {
-            writeln!(data.output)?;
+        write!(data.output, "#include<stdint.h>\n#include<stdbool.h>\n")?;
+
+        for name in data.type_dependency_order.create_topological_order() {
+            let soe = data
+                .tr
+                .resolve_struct_or_enum(name)
+                .expect("Compiler Bug: Type not found, but should be present at this point");
+            match soe {
+                StructOrEnumInfo::Enum(ei) => self.def_enum(data, &ei)?,
+                StructOrEnumInfo::Struct(si) => self.def_struct(data, &si)?,
+            }
         }
 
         for function_state in data.module.functions.values() {
@@ -473,20 +442,18 @@ impl CLowering {
                 FunctionDeclarationState::Declared(func)
                 | FunctionDeclarationState::Defined(func) => {
                     self.gen_func_decl(func, data)?;
-                    writeln!(data.output, ";")?;
+                    write!(data.output, ";")?;
                 }
             }
         }
-        writeln!(data.output)?;
 
         for function_state in data.module.functions.values() {
             match function_state {
                 FunctionDeclarationState::Defined(func) => {
                     self.gen_func_decl(func, data)?;
-                    writeln!(data.output, " {{")?;
+                    write!(data.output, "{{")?;
                     self.gen_function(func, data)?;
-                    writeln!(data.output, "}}")?;
-                    writeln!(data.output)?;
+                    write!(data.output, "}}")?;
                 }
                 FunctionDeclarationState::Declared(_) => {}
             }
@@ -500,11 +467,13 @@ impl CLowering {
         &self,
         module: &Module,
         type_registry: &TypeRegistry,
+        type_dependency_order: &TypeDependencyGraph,
     ) -> miette::Result<CSourceCode> {
         let mut data = TransientData {
             module,
             output: String::new(),
             tr: type_registry,
+            type_dependency_order,
         };
 
         self.gen_module(&mut data).into_diagnostic()?;

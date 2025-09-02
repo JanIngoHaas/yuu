@@ -52,9 +52,9 @@ impl Diagnostics {
         &self,
         syntax_errors: &[YuuError],
         type_errors: &[YuuError],
-        control_flow_errors: &[YuuError],
+        sema_errors: &[YuuError],
     ) -> u64 {
-        let total_errors = syntax_errors.len() + type_errors.len() + control_flow_errors.len();
+        let total_errors = syntax_errors.len() + type_errors.len() + sema_errors.len();
 
         let summary = if total_errors > 0 {
             "Summary: Compilation failed!".bold().red()
@@ -75,7 +75,7 @@ impl Diagnostics {
             .unwrap();
         self.print_colored_count(type_errors.len(), "type error")
             .unwrap();
-        self.print_colored_count(control_flow_errors.len(), "control flow error")
+        self.print_colored_count(sema_errors.len(), "semantic error")
             .unwrap();
 
         println!();
@@ -86,9 +86,9 @@ impl Diagnostics {
 impl Diagnostics {
     pub fn run(
         &self,
-        syntax_errors: &SyntaxErrors,
-        type_inference_errors: &TypeInferenceErrors,
-        control_flow_errors: &ControlFlowAnalysisErrors,
+        syntax_errors: &[YuuError],
+        type_inference_errors: &[YuuError],
+        sema_errors: &[YuuError],
         //break_semantic_errors: &BreakSemanticAnalysisErrors,
         //mutability_errors: &MutabilityAnalysisErrors,
     ) -> miette::Result<()> {
@@ -97,9 +97,9 @@ impl Diagnostics {
 
         // Print summary
         let total_errors = self.print_error_summary(
-            &syntax_errors.0,
-            &type_inference_errors.0,
-            &control_flow_errors.0,
+            &syntax_errors,
+            &type_inference_errors,
+            sema_errors,
             //break_semantic_errors,
             //mutability_errors,
         );
@@ -108,10 +108,10 @@ impl Diagnostics {
         }
 
         // Print syntax errors
-        if !syntax_errors.0.is_empty() {
+        if !syntax_errors.is_empty() {
             self.print_colored_header("Syntax Errors\n")
                 .into_diagnostic()?;
-            for (idx, error) in syntax_errors.0.iter().enumerate() {
+            for (idx, error) in syntax_errors.iter().enumerate() {
                 let error: miette::Report = error.clone().into();
                 self.print_colored_subheader(format!("Syntax Error {}:", idx + 1).as_str())
                     .into_diagnostic()?;
@@ -120,10 +120,10 @@ impl Diagnostics {
         }
 
         // Print type inference errors
-        if !type_inference_errors.0.is_empty() {
+        if !type_inference_errors.is_empty() {
             self.print_colored_header("Type Errors\n")
                 .into_diagnostic()?;
-            for (idx, error) in type_inference_errors.0.iter().enumerate() {
+            for (idx, error) in type_inference_errors.iter().enumerate() {
                 let error: miette::Report = error.clone().into();
                 self.print_colored_subheader(format!("Type Error {}:", idx + 1).as_str())
                     .into_diagnostic()?;
@@ -132,13 +132,12 @@ impl Diagnostics {
         }
 
         // Print control flow errors (including break statement errors)
-        let all_control_flow_errors: Vec<_> = control_flow_errors.0.iter().collect(); // TODO: Add Break stmts checking here as well.
-        if !all_control_flow_errors.is_empty() {
-            self.print_colored_header("Control Flow Errors\n")
+        if !sema_errors.is_empty() {
+            self.print_colored_header("Semantic Analysis Errors\n")
                 .into_diagnostic()?;
-            for (idx, error) in all_control_flow_errors.iter().enumerate() {
+            for (idx, error) in sema_errors.iter().enumerate() {
                 let error: miette::Report = (*error).clone().into();
-                self.print_colored_subheader(format!("Control Flow Error {}:", idx + 1).as_str())
+                self.print_colored_subheader(format!("Semantic Error {}:", idx + 1).as_str())
                     .into_diagnostic()?;
                 println!("{:?}", error);
             }

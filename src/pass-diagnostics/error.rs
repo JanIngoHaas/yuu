@@ -22,6 +22,7 @@ pub enum ErrorKind {
     ReferencedUndeclaredField,
     ReferencedUndefinedEnum,
     ReferencedUndeclaredVariant,
+    InfinitelySizedType,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -39,6 +40,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::ReferencedUndeclaredField => write!(f, "Referenced undeclared field"),
             ErrorKind::ReferencedUndefinedEnum => write!(f, "Referenced undeclared enum"),
             ErrorKind::ReferencedUndeclaredVariant => write!(f, "Referenced undeclared variant"),
+            ErrorKind::InfinitelySizedType => write!(f, "Infinitely sized type"),
         }
     }
 }

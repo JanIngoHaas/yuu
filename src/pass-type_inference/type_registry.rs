@@ -1,6 +1,6 @@
 use std::hash::BuildHasherDefault;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use logos::Span;
 use ustr::{IdentityHasher, Ustr};
 
@@ -25,14 +25,17 @@ pub struct StructFieldInfo {
     pub binding_info: BindingInfo,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct EnumVariantInfo {
     pub variant_name: Ustr,
     pub variant_idx: u64,
     pub variant: Option<&'static TypeInfo>,
+    pub binding_info: BindingInfo,
 }
 
 pub type FieldsMap<V> = IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
+pub type IndexUstrSet = IndexSet<Ustr, BuildHasherDefault<IdentityHasher>>;
+pub type IndexUstrMap<V> = FieldsMap<V>;
 
 #[derive(Clone)]
 pub struct StructInfo {
@@ -50,14 +53,36 @@ pub struct EnumInfo {
     pub binding_info: BindingInfo,
 }
 
-/// Combined type for resolving either struct or enum information - this is just for convenience
-#[derive(Clone)]
+/// Combined type for resolving either struct or enum information - this is just for convenience -> Represents the Discriminant
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserDefinedTypeDiscriminant {
+    Struct,
+    Enum,
+}
+
+impl UserDefinedTypeDiscriminant {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UserDefinedTypeDiscriminant::Struct => "struct",
+            UserDefinedTypeDiscriminant::Enum => "enum",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum StructOrEnumInfo<'a> {
     Struct(&'a StructInfo),
     Enum(&'a EnumInfo),
 }
 
 impl<'a> StructOrEnumInfo<'a> {
+    pub fn discriminant(&self) -> UserDefinedTypeDiscriminant {
+        match self {
+            StructOrEnumInfo::Struct(_) => UserDefinedTypeDiscriminant::Struct,
+            StructOrEnumInfo::Enum(_) => UserDefinedTypeDiscriminant::Enum,
+        }
+    }
+
     pub fn ty(&self) -> &'static TypeInfo {
         match self {
             StructOrEnumInfo::Struct(info) => info.ty,
@@ -70,6 +95,50 @@ impl<'a> StructOrEnumInfo<'a> {
             StructOrEnumInfo::Struct(info) => info.name,
             StructOrEnumInfo::Enum(info) => info.name,
         }
+    }
+
+    pub fn iterate(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            Ustr,
+            &'static TypeInfo,
+            BindingInfo,
+            UserDefinedTypeDiscriminant,
+        ),
+    > {
+        let out: Box<
+            dyn Iterator<
+                Item = (
+                    Ustr,
+                    &'static TypeInfo,
+                    BindingInfo,
+                    UserDefinedTypeDiscriminant,
+                ),
+            >,
+        > = match self {
+            StructOrEnumInfo::Struct(info) => Box::new(info.fields.iter().map(|(n, i)| {
+                (
+                    *n,
+                    i.ty,
+                    i.binding_info.clone(),
+                    UserDefinedTypeDiscriminant::Struct,
+                )
+            })),
+            StructOrEnumInfo::Enum(info) => {
+                Box::new(info.variants.iter().filter_map(|(n, evi)| {
+                    evi.variant.map(|v| {
+                        (
+                            *n,
+                            v,
+                            evi.binding_info.clone(),
+                            UserDefinedTypeDiscriminant::Enum,
+                        )
+                    })
+                }))
+            }
+        };
+        out
     }
 }
 
@@ -452,6 +521,14 @@ impl TypeRegistry {
         self.type_info_table.types.insert(id, ty);
     }
 
+    pub fn all_structs(&self) -> &FieldsMap<StructInfo> {
+        &self.structs
+    }
+
+    pub fn all_enums(&self) -> &FieldsMap<EnumInfo> {
+        &self.enums
+    }
+
     pub fn add_struct(
         &mut self,
         fields: FieldsMap<StructFieldInfo>,
@@ -539,8 +616,16 @@ impl TypeRegistry {
         self.structs.get(&name)
     }
 
+    pub fn resolve_struct_mut(&mut self, name: Ustr) -> Option<&mut StructInfo> {
+        self.structs.get_mut(&name)
+    }
+
     pub fn resolve_enum(&self, name: Ustr) -> Option<&EnumInfo> {
         self.enums.get(&name)
+    }
+
+    pub fn resolve_enum_mut(&mut self, name: Ustr) -> Option<&mut EnumInfo> {
+        self.enums.get_mut(&name)
     }
 
     /// Resolves either a struct or enum type by name

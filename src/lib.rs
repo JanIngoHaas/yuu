@@ -13,6 +13,8 @@ pub mod pass_diagnostics;
 pub mod pass_parse;
 #[path = "pass-print_yir/mod.rs"]
 pub mod pass_print_yir;
+#[path = "pass-type_dependencies/mod.rs"]
+pub mod pass_type_dependencies;
 #[path = "pass-type_inference/mod.rs"]
 pub mod pass_type_inference;
 #[path = "pass-yir_lowering/mod.rs"]

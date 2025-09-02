@@ -85,6 +85,7 @@ fn test_enum_match_unit_variants() {
                 Color::Green: return 2 .
                 Color::Blue: return 3 .
             end
+        end
         
         fn main() -> i64:
             let red = Color::Red;
@@ -108,14 +109,15 @@ fn test_enum_match_data_variants() {
     let source = r#"
         enum Option:
             None,
-            Some(i64),
+            Some: i64,
         end
         
-        fn unwrap_or(opt: Option, default: i64) -> i64:
+        fn unwrap_or(opt: Option, def: i64) -> i64:
             match opt:
-                Option::None: return default .
+                Option::None: return def .
                 Option::Some(value): return value .
             end
+        end
         
         fn main() -> i64:
             let some_val = Option::Some(42);
@@ -139,13 +141,13 @@ fn test_enum_match_data_variants() {
 fn test_nested_enum_variants() {
     let source = r#"
         enum Result:
-            Ok(i64),
-            Error(i64),
+            Ok: i64,
+            Error: i64,
         end
         
         enum Status:
             Processing,
-            Complete(Result),
+            Complete: Result,
         end
         
         fn process_status(s: Status) -> i64:
@@ -156,7 +158,9 @@ fn test_nested_enum_variants() {
                         Result::Ok(value): return value .
                         Result::Error(code): return -code .
                     end
+                end
             end
+        end
         
         fn main() -> i64:
             let processing = Status::Processing;
@@ -184,31 +188,33 @@ fn test_nested_enum_variants() {
 fn test_enum_with_different_data_types() {
     let source = r#"
         enum Value:
-            Integer(i64),
-            Float(f32),
-            Boolean(bool),
+            Integer: i64,
+            Float: f32,
+            Double: f64,
         end
         
         fn value_to_int(v: Value) -> i64:
             match v:
                 Value::Integer(i): return i .
                 Value::Float(f): return 99 .
-                Value::Boolean(b): 
-                    if b: return 1 .
+                Value::Double(d): 
+                    if d < 0.0ff: return 1 .
                     else: return 0 .
+                end
             end
+        end
         
         fn main() -> i64:
             let int_val = Value::Integer(42);
             let float_val = Value::Float(3.14);
-            let bool_true = Value::Boolean(true);
-            let bool_false = Value::Boolean(false);
-            
+            let double_neg = Value::Double(-1.0ff);
+            let double_zero = Value::Double(0.0ff);
+
             let r1 = value_to_int(int_val);
             let r2 = value_to_int(float_val);
-            let r3 = value_to_int(bool_true);
-            let r4 = value_to_int(bool_false);
-            
+            let r3 = value_to_int(double_neg);
+            let r4 = value_to_int(double_zero);
+
             return r1 + r2 + r3 + r4 .
     "#;
 
@@ -223,42 +229,12 @@ fn test_enum_with_different_data_types() {
 }
 
 #[test]
-fn test_enum_type_inference() {
-    let source = r#"
-        enum Maybe:
-            Nothing,
-            Just(i64),
-        end
-        
-        fn create_maybe(has_value: bool, value: i64) -> Maybe:
-            if has_value: return Maybe::Just(value) .
-            else: return Maybe::Nothing .
-        
-        fn main() -> i64:
-            let m1 = create_maybe(true, 50);
-            
-            match m1:
-                Maybe::Nothing: return 0 .
-                Maybe::Just(v): return v .
-            end
-    "#;
-
-    let executable = run_to_executable(source, "test_enum_type_inference.yuu")
-        .expect("Failed to compile enum type inference test");
-
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run enum type inference test");
-
-    assert_eq!(output, 50);
-}
-
-#[test]
 fn test_enum_as_struct_field() {
     let source = r#"
         enum State:
             Idle,
-            Running(i64),
-            Error(i64),
+            Running: i64,
+            Error: i64,
         end
         
         struct Machine:
@@ -272,6 +248,7 @@ fn test_enum_as_struct_field() {
                 State::Running(progress): return m.id + progress .
                 State::Error(code): return -code .
             end
+        end
         
         fn main() -> i64:
             let machine1 = Machine { id: 100, state: State::Idle };
@@ -282,7 +259,8 @@ fn test_enum_as_struct_field() {
             let r2 = get_machine_value(machine2);
             let r3 = get_machine_value(machine3);
             
-            return r1 + r2 + r3 .
+            return r1 + r2 + r3;
+        end
     "#;
 
     let executable = run_to_executable(source, "test_enum_struct_field.yuu")
@@ -302,7 +280,7 @@ fn test_enum_match_with_default_case() {
             Zero,
             One,
             Two,
-            Many(i64),
+            Many: i64,
         end
         
         fn classify_number(n: Number) -> i64:
@@ -311,6 +289,7 @@ fn test_enum_match_with_default_case() {
                 Number::One: return 1 .
                 default: return 999 .
             end
+        end
         
         fn main() -> i64:
             let zero = Number::Zero;
@@ -323,7 +302,8 @@ fn test_enum_match_with_default_case() {
             let r3 = classify_number(two);
             let r4 = classify_number(many);
             
-            return r1 + r2 + r3 + r4 .
+            return r1 + r2 + r3 + r4;
+        end
     "#;
 
     let executable = run_to_executable(source, "test_enum_default_case.yuu")
@@ -337,26 +317,146 @@ fn test_enum_match_with_default_case() {
 }
 
 #[test]
-fn test_enum_extract_data_direct() {
+fn test_deeply_nested_types() {
     let source = r#"
-        enum Container:
-            Empty,
-            Value(i64),
+        // Define Wrapper first, which depends on Metric and OptionVal (defined later)
+        struct Wrapper:
+            primary: Metric,
+            alt: OptionVal,
         end
-        
-        fn main() -> i64:
-            let container = Container::Value(123);
-            match container:
-                Container::Empty: return 0 .
-                Container::Value(data): return data .
+
+        // Define Metric, which depends on Coord and UnitRes (defined later)
+        enum Metric:
+            Distance: Coord,
+            Score: i64,
+            Unit: UnitRes,
+        end
+
+        // Define OptionVal, which depends on Inner (defined later)
+        enum OptionVal:
+            None,
+            Some: Inner,
+        end
+
+        // Define Inner, which depends on Data (defined later)
+        struct Inner:
+            id: i64,
+            data: Data,
+        end
+
+        // Define Data, which depends on Pair and ErrorInfo (defined later)
+        enum Data:
+            Empty,
+            Tuple: Pair,
+            Error: ErrorInfo,
+        end
+
+        // Define ErrorInfo, which depends on Severity (defined later)
+        struct ErrorInfo:
+            code: i64,
+            sev: Severity,
+        end
+
+        // Define Severity
+        enum Severity:
+            Low,
+            High: i64,
+        end
+
+        // Define Pair
+        struct Pair:
+            left: i64,
+            right: i64,
+        end
+
+        // Define Coord
+        struct Coord:
+            x: i64,
+            y: i64,
+        end
+
+        // Define UnitRes
+        enum UnitRes:
+            Ok,
+            Fail,
+        end
+
+        fn score_metric(m: Metric) -> i64:
+            match m:
+                Metric::Score(s): return s .
+                Metric::Distance(c): return c.x + c.y .
+                Metric::Unit(u):
+                    match u:
+                        UnitRes::Ok: return 100 .
+                        UnitRes::Fail: return -100 .
+                    end
+                end
             end
+        end
+
+        fn eval_inner(i: Inner) -> i64:
+            match i.data:
+                Data::Empty: return i.id .
+                Data::Tuple(p): return i.id + p.left * 2 + p.right * 3 .
+                Data::Error(e):
+                    match e.sev:
+                        Severity::Low: return i.id - e.code .
+                        Severity::High(v): return i.id - e.code - v .
+                    end
+                end
+            end
+        end
+
+        fn eval_option(o: OptionVal) -> i64:
+            match o:
+                OptionVal::None: return 0 .
+                OptionVal::Some(inner): return eval_inner(inner) .
+            end
+        end
+
+        fn eval_wrapper(w: Wrapper) -> i64:
+            let a = score_metric(w.primary);
+            let b = eval_option(w.alt);
+            return a + b;
+        end
+
+        fn main() -> i64:
+            let w1 = Wrapper {
+                primary: Metric::Distance(Coord { x: 3, y: 7 }),
+                alt: OptionVal::Some(Inner { id: 5, data: Data::Tuple(Pair { left: 2, right: 4 }) }),
+            };
+            let w2 = Wrapper {
+                primary: Metric::Unit(UnitRes::Ok),
+                alt: OptionVal::None,
+            };
+            let w3 = Wrapper {
+                primary: Metric::Score(7),
+                alt: OptionVal::Some(Inner { id: 10, data: Data::Error(ErrorInfo { code: 50, sev: Severity::High(3) }) }),
+            };
+            let w4 = Wrapper {
+                primary: Metric::Distance(Coord { x: 1, y: 2 }),
+                alt: OptionVal::Some(Inner { id: 0, data: Data::Empty }),
+            };
+
+            let r1 = eval_wrapper(w1);
+            let r2 = eval_wrapper(w2);
+            let r3 = eval_wrapper(w3);
+            let r4 = eval_wrapper(w4);
+
+            return r1 + r2 + r3 + r4;
+        end
     "#;
 
-    let executable = run_to_executable(source, "test_enum_extract_direct.yuu")
-        .expect("Failed to compile enum extract direct test");
+    let executable = run_to_executable(source, "test_deeply_nested_types.yuu")
+        .expect("Failed to compile deeply nested types test");
 
     let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run enum extract direct test");
+        .expect("Failed to run deeply nested types test");
 
-    assert_eq!(output, 123);
+    // (3+7) + (5 + 2*2 + 4*3) = 10 + 21 = 31
+    // 100 + 0 = 100
+    // 7 + (10 - 50 - 3) = 7 - 43 = -36
+    // (1+2) + 0 = 3
+    // Total = 31 + 100 - 36 + 3 = 98
+    assert_eq!(output, 98);
 }

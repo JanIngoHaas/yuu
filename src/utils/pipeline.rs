@@ -9,10 +9,14 @@ use crate::pass_parse::{AST, SourceInfo};
 use crate::pass_print_yir::pass_print_yir_impl::{
     YirTextualRepresentation, YirToColoredString, YirToString,
 };
+use crate::pass_type_dependencies::{
+    TypeDependencyAnalysis, TypeDependencyAnalysisErrors, TypeDependencyGraph,
+};
 use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
 use crate::pass_type_inference::{TypeInferenceErrors, TypeRegistry};
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
 use crate::pass_yir_lowering::{Module, RootBlock};
+use colored::control;
 use miette::{IntoDiagnostic, Result};
 
 #[derive(Default)]
@@ -23,7 +27,13 @@ pub struct Pipeline {
     type_registry: Option<TypeRegistry>,
     root_block: Option<Box<RootBlock>>,
     type_errors: Option<TypeInferenceErrors>,
+
+    sema_done: bool,
     control_flow_errors: Option<ControlFlowAnalysisErrors>,
+
+    type_dependency_errors: Option<TypeDependencyAnalysisErrors>,
+    type_dependency_order: Option<TypeDependencyGraph>,
+
     //break_semantic_errors: Option<BreakSemanticAnalysisErrors>,
     //mutability_errors: Option<MutabilityAnalysisErrors>,
     module: Option<Module>,
@@ -47,7 +57,10 @@ impl Pipeline {
             type_registry: None,
             root_block: None,
             type_errors: None,
+            sema_done: false,
             control_flow_errors: None,
+            type_dependency_errors: None,
+            type_dependency_order: None,
             //break_semantic_errors: None,
             //mutability_errors: None,
             module: None,
@@ -75,10 +88,7 @@ impl Pipeline {
 
     pub fn semantic_analysis(mut self) -> Result<Self> {
         // If already computed, return as-is
-        if self.control_flow_errors.is_some()
-        //&& self.break_semantic_errors.is_some()
-        //&& self.mutability_errors.is_some()
-        {
+        if self.sema_done {
             return Ok(self);
         }
 
@@ -93,6 +103,17 @@ impl Pipeline {
 
         self.control_flow_errors =
             Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
+
+        let (type_dependency_order, type_dependency_errors) = TypeDependencyAnalysis.run(
+            self.type_registry.as_ref().unwrap(),
+            self.source_info.as_ref().unwrap(),
+        );
+
+        self.type_dependency_errors = Some(type_dependency_errors);
+        self.type_dependency_order = Some(type_dependency_order);
+
+        self.sema_done = true;
+
         Ok(self)
     }
 
@@ -129,8 +150,9 @@ impl Pipeline {
 
         let module = self.module.as_ref().unwrap();
         let type_registry = self.type_registry.as_ref().unwrap();
+        let type_dependency_order = self.type_dependency_order.as_ref().unwrap();
 
-        let c_code = CLowering::new().run(module, type_registry)?;
+        let c_code = CLowering::new().run(module, type_registry, type_dependency_order)?;
         self.c_code = Some(c_code);
 
         Ok(self)
@@ -144,14 +166,24 @@ impl Pipeline {
 
         let syntax_errors = self.syntax_errors.as_ref().unwrap();
         let type_inference_errors = self.type_errors.as_ref().unwrap();
-        let control_flow_errors = self.control_flow_errors.as_ref().unwrap();
+
+        let cf_errors = self.control_flow_errors.as_mut().unwrap();
+        let type_dependency_errors = self.type_dependency_errors.as_ref().unwrap();
+
+        let sema_errors = cf_errors
+            .0
+            .iter()
+            .chain(type_dependency_errors.0.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
         //let break_semantic_errors = self.break_semantic_errors.as_ref().unwrap();
         //let mutability_errors = self.mutability_errors.as_ref().unwrap();
 
-        Diagnostics::new().run(
-            syntax_errors,
-            type_inference_errors,
-            control_flow_errors,
+        Diagnostics.run(
+            &syntax_errors.0,
+            &type_inference_errors.0,
+            &sema_errors,
             //break_semantic_errors,
             // mutability_errors,
         )?;
