@@ -49,11 +49,9 @@ impl CLowering {
         name: &str,
         f: &mut impl std::fmt::Write,
     ) -> Result<(), std::fmt::Error> {
-        if name == "main" {
-            write!(f, "main")
-        } else {
-            write!(f, "{}{}", PREFIX_FUNCTION, name)
-        }
+    // Always prefix generated function names to avoid emitting a raw C `main`
+    // implementation that returns large integers via the process exit code.
+    write!(f, "{}{}", PREFIX_FUNCTION, name)
     }
 
     fn gen_type(data: &mut TransientData, ty: &'static TypeInfo) -> Result<(), std::fmt::Error> {
@@ -422,7 +420,7 @@ impl CLowering {
     }
 
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
-        write!(data.output, "#include<stdint.h>\n#include<stdbool.h>\n")?;
+    write!(data.output, "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n")?;
 
         for name in data.type_dependency_order.create_topological_order() {
             let soe = data
@@ -455,6 +453,16 @@ impl CLowering {
                 }
                 FunctionDeclarationState::Declared(_) => {}
             }
+        }
+
+        // If the module defines a function named "main" in the source language,
+        // the lowering above emitted it as `fn_main` (prefixed). Emit a small C
+        // wrapper `main` that calls the generated function, prints its result to
+        // stdout and returns 0. This avoids relying on the process exit code to
+        // transport arbitrary integers (which get truncated to 8 bits on Unix).
+    if data.module.functions.keys().any(|k| k.as_str() == "main") {
+            // C wrapper: call the prefixed function and print as long long
+            write!(data.output, "int main(int argc, char** argv){{int64_t __r = {}main(); printf(\"%lld\\n\", (long long)__r); return 0;}}", PREFIX_FUNCTION)?;
         }
         Ok(())
     }
