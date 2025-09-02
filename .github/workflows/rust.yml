@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Install Clang
+      uses: egor-tensin/setup-clang@v1.4
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
