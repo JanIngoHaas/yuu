@@ -8,19 +8,19 @@ name = "yuu"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.98"
-indexmap = { version = "2.9.0", features = ["serde"] }
+clap = { version = "4.5.0", features = ["derive"] }
+indexmap = { version = "2.10.0", features = ["serde"] }
 logos = "0.15.0"
-petgraph = "0.8.2"
-rayon = "1.10.0"
 scc = "2.3.4"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
 miette = { version = "7.6.0", features = ["fancy", "syntect-highlighter"] }
-thiserror = "2.0.12"
+thiserror = "2.0.16"
 syntect = "5.2.0"
 ustr = { version = "1.1.0", features = ["serde"] }
 termcolor = "1.4.1"
-bumpalo = { version = "3.18.1", features = ["collections"] }
 colored = "3.0.0"
-ron = "0.10.1"
+#tempfile = "3.10.1"
+ron = "0.11.0"
+
+[dev-dependencies]
+assert_cmd = "2.0.14"

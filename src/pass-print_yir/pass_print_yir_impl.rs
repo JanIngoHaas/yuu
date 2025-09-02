@@ -1,77 +1,47 @@
-use crate::{
-    pass_yir_lowering::yir::Module,
-    scheduling::context::Context,
-    scheduling::scheduler::{Pass, ResourceId, ResourceName},
-};
+use crate::pass_yir_lowering::yir::Module;
+use miette::IntoDiagnostic;
 
-pub struct PassYirToString;
+pub struct YirToString;
 
-impl Default for PassYirToString {
+impl Default for YirToString {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassYirToString {
+impl YirToString {
     pub fn new() -> Self {
         Self
     }
 }
 
-pub struct PassYirToColoredString;
+pub struct YirToColoredString;
 
-impl Default for PassYirToColoredString {
+impl Default for YirToColoredString {
     fn default() -> Self {
         Self
     }
 }
 
-impl Pass for PassYirToColoredString {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.get_resource::<Module>(self);
-        let module = module.lock().unwrap();
-        let mut f = String::new();
-        module.format_yir(true, &mut f)?;
-        context.add_pass_data(YirTextualRepresentation(f));
-        Ok(())
+impl YirToColoredString {
+    pub fn new() -> Self {
+        Self
     }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.requires_resource_read::<Module>(&self);
-        schedule.produces_resource::<YirTextualRepresentation>(&self);
-        schedule.add_pass(self);
-    }
+}
 
-    fn get_name(&self) -> &'static str {
-        "YirToColoredString"
+impl YirToColoredString {
+    pub fn run(&self, module: &Module) -> miette::Result<YirTextualRepresentation> {
+        let mut f = String::new();
+        module.format_yir(true, &mut f).into_diagnostic()?;
+        Ok(YirTextualRepresentation(f))
     }
 }
 
 pub struct YirTextualRepresentation(pub String);
 
-impl ResourceId for YirTextualRepresentation {
-    fn resource_name() -> ResourceName {
-        "YirTextualRepresentation"
-    }
-}
-
-impl Pass for PassYirToString {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-        let module = context.get_resource::<Module>(self);
-        let module = module.lock().unwrap();
+impl YirToString {
+    pub fn run(&self, module: &Module) -> miette::Result<YirTextualRepresentation> {
         let ir_string = format!("{}", module);
-        context.add_pass_data(YirTextualRepresentation(ir_string));
-        Ok(())
-    }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule) {
-        schedule.requires_resource_read::<Module>(&self);
-        schedule.produces_resource::<YirTextualRepresentation>(&self);
-        schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
-        "YirToString"
+        Ok(YirTextualRepresentation(ir_string))
     }
 }

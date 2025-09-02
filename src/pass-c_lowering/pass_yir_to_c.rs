@@ -1,501 +1,481 @@
-// use ustr::Ustr;
-// use yuu_shared::{
-//     context::Context,
-//     scheduler::{Pass, ResourceId},
-//     type_info::{PrimitiveType, StructType, TypeInfo, struct_type},
-//     type_registry::TypeRegistry,
-//     yir::{
-//         BasicBlock, ControlFlow, Function, FunctionDeclarationState, Instruction, Module, Operand,
-//         Variable,
-//     },
-// };
+use crate::pass_type_dependencies::TypeDependencyGraph;
+// YIR to C lowering pass - transforms the YIR intermediate representation to C code
+use crate::pass_type_inference::{
+    EnumInfo, PrimitiveType, StructInfo, StructOrEnumInfo, TypeInfo, TypeRegistry,
+};
+use crate::pass_yir_lowering::{
+    BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
+    Operand, UnaryOp, Variable,
+};
+use miette::IntoDiagnostic;
+use std::fmt::Write;
 
-// use std::fmt::Write;
+const PREFIX_LABEL: &str = "lbl_";
+const PREFIX_FUNCTION: &str = "fn_";
 
-// const PREFIX_VAR: &str = "reg_";
-// const PREFIX_MEMORY: &str = "mem_";
-// const PREFIX_LABEL: &str = "lbl_";
-// const PREFIX_FUNCTION: &str = "fn_";
+struct TransientData<'a> {
+    module: &'a Module,
+    tr: &'a TypeRegistry,
+    output: String,
+    type_dependency_order: &'a TypeDependencyGraph,
+}
 
-// struct TransientData<'a> {
-//     module: &'a Module,
-//     tr: &'a TypeRegistry,
-//     output: String,
-// }
+pub struct CLowering;
 
-// impl PassYirToC {
-//     fn write_var_name(reg: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
-//         write!(f, "{}{}_{}", PREFIX_VAR, reg.name(), reg.id())
-//     }
+impl Default for CLowering {
+    fn default() -> Self {
+        Self
+    }
+}
 
-//     fn write_memory_name(
-//         reg: &Variable,
-//         f: &mut impl std::fmt::Write,
-//     ) -> Result<(), std::fmt::Error> {
-//         write!(f, "{}{}_{}", PREFIX_MEMORY, reg.name(), reg.id())
-//     }
+impl CLowering {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
-//     fn write_label_name(label: &str, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
-//         write!(f, "{}{}", PREFIX_LABEL, label)
-//     }
+pub struct CSourceCode(pub String);
 
-//     fn write_function_name(
-//         name: &str,
-//         f: &mut impl std::fmt::Write,
-//     ) -> Result<(), std::fmt::Error> {
-//         write!(f, "{}{}", PREFIX_FUNCTION, name)
-//     }
+impl CLowering {
+    fn write_var_name(var: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        write!(f, "{}_{}", var.name(), var.id())
+    }
 
-//     fn def_struct(
-//         &self,
-//         data: &mut TransientData,
-//         struct_name: Ustr,
-//     ) -> Result<(), std::fmt::Error> {
-//         let sinfo = data
-//             .tr
-//             .resolve_struct(struct_name)
-//             .expect("Compiler Bug: Struct not found when lowering to C");
-//         /*
-//         typedef struct struct_name {
-//             type1 field1;
-//             type2 field2;
-//             ...
-//         } struct_name;
-//         */
-//         write!(data.output, "struct {}{{", sinfo.name.as_str())?;
+    fn write_label(label: &Label, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}_{}", PREFIX_LABEL, label.name(), label.id())
+    }
 
-//         for (fname, finfo) in sinfo.fields.iter() {
-//             self.gen_type(data, finfo.ty)?;
-//             write!(data.output, " {};", fname.as_str())?;
-//         }
+    fn write_function_name(
+        name: &str,
+        f: &mut impl std::fmt::Write,
+    ) -> Result<(), std::fmt::Error> {
+        if name == "main" {
+            write!(f, "main")
+        } else {
+            write!(f, "{}{}", PREFIX_FUNCTION, name)
+        }
+    }
 
-//         write!(data.output, "}} {};", sinfo.name.as_str())?;
-//         Ok(())
-//     }
+    fn gen_type(data: &mut TransientData, ty: &'static TypeInfo) -> Result<(), std::fmt::Error> {
+        match ty {
+            TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
+                PrimitiveType::Bool => write!(data.output, "bool"),
+                PrimitiveType::F64 => write!(data.output, "double"),
+                PrimitiveType::F32 => write!(data.output, "float"),
+                PrimitiveType::I64 => write!(data.output, "int64_t"),
+                PrimitiveType::U64 => write!(data.output, "uint64_t"),
+                PrimitiveType::Nil => write!(data.output, "void"),
+            },
+            TypeInfo::Function(_function_type) => {
+                write!(data.output, "void*")
+            }
+            TypeInfo::Pointer(type_info) => {
+                Self::gen_type(data, type_info)?;
+                write!(data.output, "*")
+            }
+            TypeInfo::Inactive => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"
+            ),
+            TypeInfo::Error => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
+            ),
+            TypeInfo::Struct(struct_type) => {
+                write!(data.output, "struct {}", struct_type.name)
+            }
+            TypeInfo::Enum(enum_type) => {
+                // Reference the struct definition
+                write!(data.output, "struct {}", enum_type.name)
+            }
+        }
+    }
 
-//     fn gen_type(
-//         &self,
-//         data: &mut TransientData,
-//         ty: &'static TypeInfo,
-//     ) -> Result<(), std::fmt::Error> {
-//         match ty {
-//             TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
-//                 PrimitiveType::Bool => write!(data.output, "bool"),
-//                 PrimitiveType::F64 => write!(data.output, "double"),
-//                 PrimitiveType::F32 => write!(data.output, "float"),
-//                 PrimitiveType::I64 => write!(data.output, "int64_t"),
-//                 PrimitiveType::Nil => write!(data.output, "void"),
-//             },
-//             TypeInfo::Function(_function_type) => {
-//                 todo!()
-//             }
-//             TypeInfo::Pointer(type_info) => {
-//                 self.gen_type(data, type_info)?;
-//                 write!(data.output, "*")
-//             }
-//             TypeInfo::Inactive => panic!(
-//                 "Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"
-//             ),
-//             TypeInfo::Error => panic!(
-//                 "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
-//             ),
-//             TypeInfo::Struct(struct_type) => {
-//                 write!(data.output, "{}", struct_type.name)
-//             }
-//         }
-//     }
+    fn gen_operand(
+        &self,
+        data: &mut TransientData,
+        operand: &Operand,
+    ) -> Result<(), std::fmt::Error> {
+        match operand {
+            Operand::I64Const(c) => {
+                if *c >= 0 {
+                    write!(data.output, "INT64_C({})", c)
+                } else {
+                    write!(data.output, "INT64_C(({}))", c)
+                }
+            }
+            Operand::U64Const(c) => write!(data.output, "UINT64_C({})", c),
+            Operand::F32Const(c) => {
+                if c.fract() == 0.0 {
+                    write!(data.output, "{:.1}f", c)
+                } else {
+                    write!(data.output, "{}f", c)
+                }
+            }
+            Operand::F64Const(c) => {
+                if c.fract() == 0.0 {
+                    write!(data.output, "{:.1}", c)
+                } else {
+                    write!(data.output, "{}", c)
+                }
+            }
+            Operand::BoolConst(c) => write!(data.output, "{}", if *c { "1" } else { "0" }),
+            Operand::Variable(variable) => Self::write_var_name(variable, &mut data.output),
+            Operand::NoOp => write!(data.output, "((void)0)"),
+        }
+    }
 
-//     fn gen_operand(
-//         &self,
-//         data: &mut TransientData,
-//         operand: &Operand,
-//     ) -> Result<(), std::fmt::Error> {
-//         match operand {
-//             Operand::I64Const(c) => write!(data.output, "((int64_t)INT64_C({}))", c),
-//             Operand::F32Const(c) => write!(data.output, "({}f)", c),
-//             Operand::F64Const(c) => write!(data.output, "({}d)", c),
-//             Operand::BoolConst(c) => write!(data.output, "((bool){})", c),
-//             Operand::Variable(variable) => Self::write_var_name(variable, &mut data.output),
-//             Operand::NoOp => Ok(()),
-//         }
-//     }
+    fn gen_variable_decl(
+        &self,
+        data: &mut TransientData,
+        var: &Variable,
+    ) -> Result<(), std::fmt::Error> {
+        let ty = var.ty();
+        Self::gen_type(data, ty.deref_ptr())?;
+        write!(data.output, " mem_{}_{};", var.name(), var.id())?;
+        Self::gen_type(data, ty)?;
+        write!(data.output, " ")?;
+        Self::write_var_name(var, &mut data.output)?;
+        write!(data.output, "=&mem_{}_{}; ", var.name(), var.id())
+    }
 
-//     fn gen_variable(
-//         &self,
-//         data: &mut TransientData,
-//         reg: &Variable,
-//     ) -> Result<(), std::fmt::Error> {
-//         self.gen_type(data, reg.ty())?;
-//         write!(data.output, " ")?;
-//         Self::write_var_name(reg, &mut data.output)
-//     }
+    fn gen_simple_var_decl(
+        &self,
+        data: &mut TransientData,
+        var: &Variable,
+    ) -> Result<(), std::fmt::Error> {
+        Self::gen_type(data, var.ty())?;
+        write!(data.output, " ")?;
+        Self::write_var_name(var, &mut data.output)
+    }
 
-//     fn gen_instruction(
-//         &self,
-//         instruction: &Instruction,
-//         data: &mut TransientData,
-//     ) -> anyhow::Result<()> {
-//         match instruction {
-//             Instruction::BitwiseCopy { target, value } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=")?;
-//                 self.gen_operand(data, value)?;
-//             }
-//             Instruction::Binary {
-//                 target,
-//                 op,
-//                 lhs,
-//                 rhs,
-//             } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=")?;
-//                 self.gen_operand(data, lhs)?;
-//                 match op {
-//                     yuu_shared::yir::BinOp::Add => write!(data.output, "+"),
-//                     yuu_shared::yir::BinOp::Sub => write!(data.output, "-"),
-//                     yuu_shared::yir::BinOp::Mul => write!(data.output, "*"),
-//                     yuu_shared::yir::BinOp::Div => write!(data.output, "/"),
-//                     yuu_shared::yir::BinOp::Eq => write!(data.output, "=="),
-//                     yuu_shared::yir::BinOp::NotEq => write!(data.output, "!="),
-//                     yuu_shared::yir::BinOp::LessThan => write!(data.output, "<"),
-//                     yuu_shared::yir::BinOp::LessThanEq => write!(data.output, "<="),
-//                     yuu_shared::yir::BinOp::GreaterThan => write!(data.output, ">"),
-//                     yuu_shared::yir::BinOp::GreaterThanEq => write!(data.output, ">="),
-//                 }?;
-//                 self.gen_operand(data, rhs)?;
-//             }
-//             Instruction::Unary {
-//                 target,
-//                 op,
-//                 operand,
-//             } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=")?;
-//                 match op {
-//                     yuu_shared::yir::UnaryOp::Neg => write!(data.output, "-"),
-//                 }?;
-//                 self.gen_operand(data, operand)?;
-//             }
-//             Instruction::Call { target, name, args } => {
-//                 if let Some(target) = target {
-//                     self.gen_type(data, target.ty())?;
-//                     write!(data.output, " ")?;
-//                     Self::write_var_name(target, &mut data.output)?;
-//                     write!(data.output, "=")?;
-//                 }
-//                 Self::write_function_name(name, &mut data.output)?;
-//                 write!(data.output, "(")?;
-//                 for (i, arg) in args.iter().enumerate() {
-//                     if i > 0 {
-//                         write!(data.output, ", ")?;
-//                     }
-//                     self.gen_operand(data, arg)?;
-//                 }
-//                 write!(data.output, ")")?;
-//             }
-//             Instruction::Omega {
-//                 target,
-//                 writable_blocks,
-//             } => {
-//                 // If no one writes to this block, we skip emitting it
-//                 // TODO: Separate pass?
-//                 if writable_blocks.lock().unwrap().is_empty() {
-//                     return Ok(());
-//                 }
-//                 self.gen_variable(data, target)?;
-//             }
-//             Instruction::GetFieldPtr {
-//                 target,
-//                 base,
-//                 field,
-//             } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=&(")?;
-//                 self.gen_operand(data, base)?;
-//                 write!(data.output, ".{})", field.as_str())?;
-//             }
-//             Instruction::TakeAddress { target, value } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=&")?;
-//                 self.gen_operand(data, value)?;
-//             }
-//             Instruction::Store { dest, src } => {
-//                 write!(data.output, "*{}=", dest.name())?;
-//                 self.gen_operand(data, src)?;
-//             }
-//             Instruction::Assign { target, value } => {
-//                 self.gen_variable(data, target)?;
-//                 write!(data.output, "=")?;
-//                 self.gen_operand(data, value)?;
-//             }
-//             Instruction::Alloca { target } => {
-//                 // Just declare the variable, no need to do anything else
-//                 self.gen_variable(data, target)?;
-//             }
-//         }
-//         write!(data.output, ";")?;
-//         Ok(())
-//     }
+    fn gen_instruction(
+        &self,
+        instruction: &Instruction,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
+        match instruction {
+            Instruction::Alloca { target } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::StoreImmediate { target, value } => {
+                write!(data.output, "*")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, value)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::TakeAddress { target, source } => {
+                Self::gen_type(data, target.ty())?;
+                write!(data.output, " ")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=&")?;
+                Self::write_var_name(source, &mut data.output)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::GetFieldPtr {
+                target,
+                base,
+                field,
+            } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=&(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, "->{});", field)?;
+            }
+            Instruction::Load { target, source } => {
+                self.gen_simple_var_decl(data, target)?;
+                write!(data.output, "=*")?;
+                self.gen_operand(data, source)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::Store { dest, value } => {
+                write!(data.output, "*")?;
+                self.gen_operand(data, dest)?;
+                write!(data.output, "=*")?;
+                self.gen_operand(data, value)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::Binary {
+                target,
+                op,
+                lhs,
+                rhs,
+            } => {
+                self.gen_simple_var_decl(data, target)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, lhs)?;
+                match op {
+                    BinOp::Add => write!(data.output, "+"),
+                    BinOp::Sub => write!(data.output, "-"),
+                    BinOp::Mul => write!(data.output, "*"),
+                    BinOp::Div => write!(data.output, "/"),
+                    BinOp::Mod => write!(data.output, "%"),
+                    BinOp::Eq => write!(data.output, "=="),
+                    BinOp::NotEq => write!(data.output, "!="),
+                    BinOp::LessThan => write!(data.output, "<"),
+                    BinOp::LessThanEq => write!(data.output, "<="),
+                    BinOp::GreaterThan => write!(data.output, ">"),
+                    BinOp::GreaterThanEq => write!(data.output, ">="),
+                }?;
+                self.gen_operand(data, rhs)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::Unary {
+                target,
+                op,
+                operand,
+            } => {
+                self.gen_simple_var_decl(data, target)?;
+                write!(data.output, "=")?;
+                match op {
+                    UnaryOp::Neg => write!(data.output, "-"),
+                }?;
+                self.gen_operand(data, operand)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::Call { target, name, args } => {
+                if let Some(target) = target {
+                    self.gen_simple_var_decl(data, target)?;
+                    write!(data.output, "=")?;
+                }
+                Self::write_function_name(name, &mut data.output)?;
+                write!(data.output, "(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(data.output, ",")?;
+                    }
+                    self.gen_operand(data, arg)?;
+                }
+                write!(data.output, ");")?;
+            }
+            Instruction::StoreActiveVariantIdx { dest, value } => {
+                Self::write_var_name(dest, &mut data.output)?;
+                write!(data.output, "->tag=")?;
+                self.gen_operand(data, value)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::LoadActiveVariantIdx { target, source } => {
+                self.gen_simple_var_decl(data, target)?;
+                write!(data.output, "=")?;
+                self.gen_operand(data, source)?;
+                write!(data.output, "->tag;")?;
+            }
+            Instruction::GetVariantDataPtr {
+                target,
+                base,
+                variant,
+            } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=&(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, "->data.{}_data);", variant)?;
+            }
+        }
+        Ok(())
+    }
 
-//     fn gen_block(&self, block: &BasicBlock, data: &mut TransientData) -> anyhow::Result<()> {
-//         Self::write_label_name(block.label.name(), &mut data.output)?;
-//         writeln!(data.output, ":;")?;
+    fn gen_block(
+        &self,
+        block: &BasicBlock,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
+        Self::write_label(&block.label, &mut data.output)?;
+        write!(data.output, ":;")?;
 
-//         // Generate instructions
-//         for instruction in block.instructions.iter() {
-//             self.gen_instruction(instruction, data)?;
-//             writeln!(data.output)?;
-//         }
+        for instruction in &block.instructions {
+            self.gen_instruction(instruction, data)?;
+        }
 
-//         // Generate terminator
-//         match &block.terminator {
-//             ControlFlow::Jump { target, writes } => {
-//                 // Generate Omikron writes
-//                 for (reg, value) in writes {
-//                     write!(data.output, "    ")?;
-//                     Self::write_var_name(reg, &mut data.output)?;
-//                     write!(data.output, "=")?;
-//                     self.gen_operand(data, value)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//                 write!(data.output, "    goto ")?;
-//                 Self::write_label_name(target.name(), &mut data.output)?;
-//                 writeln!(data.output, ";")?;
-//             }
-//             ControlFlow::Branch {
-//                 condition,
-//                 if_true: (true_label, true_writes),
-//                 if_false: (false_label, false_writes),
-//             } => {
-//                 write!(data.output, "    if (")?;
-//                 self.gen_operand(data, condition)?;
-//                 writeln!(data.output, ") {{")?;
+        match &block.terminator {
+            ControlFlow::Jump { target } => {
+                write!(data.output, "goto ")?;
+                Self::write_label(target, &mut data.output)?;
+                write!(data.output, ";")?;
+            }
+            ControlFlow::Branch {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                write!(data.output, "if(")?;
+                self.gen_operand(data, condition)?;
+                write!(data.output, "){{goto ")?;
+                Self::write_label(if_true, &mut data.output)?;
+                write!(data.output, ";}}else{{goto ")?;
+                Self::write_label(if_false, &mut data.output)?;
+                write!(data.output, ";}}")?;
+            }
+            ControlFlow::Return(value) => {
+                write!(data.output, "return")?;
+                if let Some(val) = value {
+                    write!(data.output, " ")?;
+                    self.gen_operand(data, val)?;
+                }
+                write!(data.output, ";")?;
+            }
+            ControlFlow::Unterminated => {
+                write!(data.output, "/*UNTERMINATED*/")?;
+            }
+            ControlFlow::JumpTable {
+                scrutinee,
+                jump_targets,
+                default,
+            } => {
+                write!(data.output, "switch(")?;
+                self.gen_operand(data, scrutinee)?;
+                write!(data.output, "){{")?;
 
-//                 // Generate true branch writes
-//                 for (reg, value) in true_writes {
-//                     write!(data.output, "    ")?;
-//                     Self::write_var_name(reg, &mut data.output)?;
-//                     write!(data.output, "=")?;
-//                     self.gen_operand(data, value)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//                 write!(data.output, "    goto ")?;
-//                 Self::write_label_name(true_label.name(), &mut data.output)?;
-//                 writeln!(data.output, ";}}")?;
+                for (variant_name, label) in jump_targets {
+                    write!(data.output, "case {}:goto ", variant_name)?;
+                    Self::write_label(label, &mut data.output)?;
+                    write!(data.output, ";")?;
+                }
 
-//                 writeln!(data.output, "else{{")?;
-//                 // Generate false branch writes
-//                 for (reg, value) in false_writes {
-//                     write!(data.output, "    ")?;
-//                     Self::write_var_name(reg, &mut data.output)?;
-//                     write!(data.output, "=")?;
-//                     self.gen_operand(data, value)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//                 write!(data.output, "    goto ")?;
-//                 Self::write_label_name(false_label.name(), &mut data.output)?;
-//                 writeln!(data.output, ";}}")?;
-//             }
-//             ControlFlow::Return(value) => {
-//                 write!(data.output, "    return ")?;
-//                 if let Some(val) = value {
-//                     self.gen_operand(data, val)?;
-//                 }
-//                 writeln!(data.output, ";")?;
-//             }
-//             ControlFlow::Fallthrough(writes) => {
-//                 // Generate Omikron writes
-//                 for (reg, value) in writes {
-//                     write!(data.output, "    ")?;
-//                     Self::write_var_name(reg, &mut data.output)?;
-//                     write!(data.output, "=")?;
-//                     self.gen_operand(data, value)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//                 // We just fall-through to the next block... Nothing to do here
-//             }
-//         }
-//         Ok(())
-//     }
+                if let Some(default_label) = default {
+                    write!(data.output, "default:goto ")?;
+                    Self::write_label(default_label, &mut data.output)?;
+                    write!(data.output, ";")?;
+                }
 
-//     fn gen_function(&self, func: &Function, data: &mut TransientData) -> anyhow::Result<()> {
-//         // Ascending order of block IDs
-//         let mut blocks: Vec<&BasicBlock> = func.blocks.iter().map(|(_, block)| block).collect();
-//         blocks.sort_by_key(|block| block.label.id());
+                write!(data.output, "}}")?;
+            }
+        }
+        Ok(())
+    }
 
-//         for block in blocks {
-//             self.gen_block(block, data)?;
-//         }
-//         Ok(())
-//     }
+    fn gen_function(
+        &self,
+        func: &Function,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
+        for block in func.blocks.values() {
+            self.gen_block(block, data)?;
+        }
 
-//     fn gen_func_decl(
-//         &self,
-//         func: &Function,
-//         data: &mut TransientData,
-//     ) -> Result<(), std::fmt::Error> {
-//         self.gen_type(data, func.return_type)?;
-//         write!(data.output, " ")?;
-//         Self::write_function_name(&func.name, &mut data.output)?;
-//         write!(data.output, "(")?;
-//         for (i, reg) in func.params.iter().enumerate() {
-//             if i > 0 {
-//                 write!(data.output, ", ")?;
-//             }
-//             self.gen_variable(data, reg)?;
-//         }
-//         write!(data.output, ")")?;
-//         Ok(())
-//     }
+        Ok(())
+    }
 
-//     fn gen_module(&self, data: &mut TransientData) -> anyhow::Result<()> {
-//         // Add standard includes
-//         writeln!(data.output, "#include <stdint.h>\n")?;
-//         writeln!(data.output, "#include <stdbool.h>\n")?;
+    fn gen_func_decl(
+        &self,
+        func: &Function,
+        data: &mut TransientData,
+    ) -> Result<(), std::fmt::Error> {
+        Self::gen_type(data, func.return_type)?;
+        write!(data.output, " ")?;
+        Self::write_function_name(&func.name, &mut data.output)?;
+        write!(data.output, "(")?;
+        for (i, param) in func.params.iter().enumerate() {
+            if i > 0 {
+                write!(data.output, ",")?;
+            }
+            Self::gen_type(data, param.ty())?;
+            write!(data.output, " ")?;
+            Self::write_var_name(param, &mut data.output)?;
+        }
+        write!(data.output, ")")
+    }
 
-//         // Generate struct defs
-//         // TODO: this needs to properly sorted first according to dependency analysis, but for now it's okay
-//         for sname in data.module.structs.iter() {
-//             self.def_struct(data, *sname)?;
-//         }
+    fn def_struct(
+        &self,
+        data: &mut TransientData,
+        sinfo: &StructInfo,
+    ) -> Result<(), std::fmt::Error> {
+        write!(data.output, "struct {}{{", sinfo.name)?;
+        for (fname, finfo) in &sinfo.fields {
+            Self::gen_type(data, finfo.ty)?;
+            write!(data.output, " {};", fname)?;
+        }
+        write!(data.output, "}};")?;
+        Ok(())
+    }
 
-//         for function_state in data.module.functions.values() {
-//             match function_state {
-//                 // Predeclare all functions
-//                 FunctionDeclarationState::Declared(func) => {
-//                     self.gen_func_decl(func, data)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//                 FunctionDeclarationState::Defined(func) => {
-//                     self.gen_func_decl(func, data)?;
-//                     writeln!(data.output, ";")?;
-//                 }
-//             }
-//         }
+    fn def_enum(&self, data: &mut TransientData, einfo: &EnumInfo) -> Result<(), std::fmt::Error> {
+        write!(data.output, "struct {}{{enum{{", einfo.name)?;
+        let mut first = true;
+        for (variant_name, variant_info) in &einfo.variants {
+            if !first {
+                write!(data.output, ",")?;
+            }
+            write!(data.output, "{}={}", variant_name, variant_info.variant_idx)?;
+            first = false;
+        }
+        write!(data.output, "}}tag;")?;
 
-//         // Generate function definitions
-//         for function_state in data.module.functions.values() {
-//             match function_state {
-//                 // Define all functions
-//                 FunctionDeclarationState::Defined(func) => {
-//                     self.gen_func_decl(func, data)?;
-//                     write!(data.output, "{{")?;
-//                     self.gen_function(func, data)?;
-//                     write!(data.output, "}}")?;
-//                 }
-//                 FunctionDeclarationState::Declared(_) => {
-//                     // Do nothing, we already declared it above
-//                 }
-//             }
-//         }
-//         Ok(())
-//     }
-// }
+        let has_data_variants = einfo.variants.values().any(|v| v.variant.is_some());
+        if has_data_variants {
+            write!(data.output, "union{{")?;
+            for (variant_name, variant_info) in &einfo.variants {
+                if let Some(variant_type) = variant_info.variant {
+                    Self::gen_type(data, variant_type)?;
+                    write!(data.output, " {}_data;", variant_name)?;
+                }
+            }
+            write!(data.output, "}}data;")?;
+        }
 
-// pub struct PassYirToC;
+        write!(data.output, "}};")?;
+        Ok(())
+    }
 
-// impl Default for PassYirToC {
-//     fn default() -> Self {
-//         Self
-//     }
-// }
+    fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
+        write!(data.output, "#include<stdint.h>\n#include<stdbool.h>\n")?;
 
-// pub struct CSourceCode(pub String);
+        for name in data.type_dependency_order.create_topological_order() {
+            let soe = data
+                .tr
+                .resolve_struct_or_enum(name)
+                .expect("Compiler Bug: Type not found, but should be present at this point");
+            match soe {
+                StructOrEnumInfo::Enum(ei) => self.def_enum(data, ei)?,
+                StructOrEnumInfo::Struct(si) => self.def_struct(data, si)?,
+            }
+        }
 
-// impl ResourceId for CSourceCode {
-//     fn resource_name() -> &'static str {
-//         "CSourceCode"
-//     }
-// }
+        for function_state in data.module.functions.values() {
+            match function_state {
+                FunctionDeclarationState::Declared(func)
+                | FunctionDeclarationState::Defined(func) => {
+                    self.gen_func_decl(func, data)?;
+                    write!(data.output, ";")?;
+                }
+            }
+        }
 
-// impl Pass for PassYirToC {
-//     fn run(&self, context: &mut Context) -> anyhow::Result<()> {
-//         let module = context.get_resource::<Module>(self);
-//         let module = module.lock().unwrap();
+        for function_state in data.module.functions.values() {
+            match function_state {
+                FunctionDeclarationState::Defined(func) => {
+                    self.gen_func_decl(func, data)?;
+                    write!(data.output, "{{")?;
+                    self.gen_function(func, data)?;
+                    write!(data.output, "}}")?;
+                }
+                FunctionDeclarationState::Declared(_) => {}
+            }
+        }
+        Ok(())
+    }
+}
 
-//         let tr = context.get_resource::<TypeRegistry>(self);
-//         let tr = tr.lock().unwrap();
+impl CLowering {
+    pub fn run(
+        &self,
+        module: &Module,
+        type_registry: &TypeRegistry,
+        type_dependency_order: &TypeDependencyGraph,
+    ) -> miette::Result<CSourceCode> {
+        let mut data = TransientData {
+            module,
+            output: String::new(),
+            tr: type_registry,
+            type_dependency_order,
+        };
 
-//         let mut data = TransientData {
-//             module: &module,
-//             output: String::new(),
-//             tr: &tr,
-//         };
+        self.gen_module(&mut data).into_diagnostic()?;
 
-//         // Generate code for each function
-//         self.gen_module(&mut data)?;
-
-//         // Add the generated code to the context
-//         context.add_pass_data(CSourceCode(data.output));
-//         Ok(())
-//     }
-
-//     fn install(self, schedule: &mut yuu_shared::scheduler::Schedule)
-//     where
-//         Self: Sized,
-//     {
-//         schedule.requires_resource_read::<Module>(&self);
-//         schedule.requires_resource_read::<TypeRegistry>(&self);
-//         schedule.produces_resource::<CSourceCode>(&self);
-//         schedule.add_pass(self);
-//     }
-
-//     fn get_name(&self) -> &'static str {
-//         "YIRToC"
-//     }
-// }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use std::sync::Arc;
-//     use yuu_parse::pass_parse::PassParse;
-//     use yuu_shared::{
-//         ast::SourceInfo,
-//         scheduler::{Schedule, Scheduler},
-//     };
-//     use yuu_transform::{pass_ast_to_yir::PassAstToYir, type_inference::PassTypeInference};
-
-//     #[test]
-//     fn test_fac_to_c() {
-//         // Create the factorial function code
-//         let code_info = SourceInfo {
-//             source: Arc::from(
-//                 r#"fn fac(n: i64) -> i64 {
-//                 break if n == 0 {
-//                     break 1;
-//                 }
-//                 else {
-//                     let n_out = n * fac(n - 1);
-//                     return n_out;
-//                 };
-//             }"#,
-//             ),
-//             file_name: Arc::from("test.yuu"),
-//         };
-
-//         // Create a new context and add the code info
-//         let mut context = Context::new();
-//         context.add_pass_data(code_info);
-
-//         // Create and configure the schedule
-//         let mut schedule = Schedule::new();
-
-//         // Add passes in the correct order
-//         PassParse.install(&mut schedule);
-//         PassTypeInference.install(&mut schedule);
-//         PassAstToYir.install(&mut schedule);
-//         PassYirToC.install(&mut schedule);
-
-//         // Run the schedule
-//         let scheduler = Scheduler::new();
-//         let context = scheduler
-//             .run(schedule, context)
-//             .expect("Failed to run schedule");
-
-//         // Get and print the generated C code
-//         let c_code = context.get_resource::<CSourceCode>(&PassYirToC);
-//         let c_code = c_code.lock().unwrap();
-//         println!("Generated C code:\n\n```C\n{}\n```", c_code.0);
-//     }
-// }
+        Ok(CSourceCode(data.output))
+    }
+}

@@ -14,6 +14,7 @@ pub type ParseError = YuuError;
 pub enum CatchIn {
     Statement,
     FunctionDecl,
+    BlockTerminator,
 }
 
 // Result type for parser functions
@@ -134,6 +135,14 @@ impl Lexer {
             Err(self.synchronize())
         }
     }
+
+    pub fn expect_colon(&mut self, errors: &mut Vec<ParseError>) -> ParseResult<Token> {
+        self.expect(&[TokenKind::Colon], errors)
+    }
+
+    // pub fn expect_fat_arrow(&mut self, _errors: &mut Vec<ParseError>) {
+    //     todo!()
+    // }
 
     pub fn expect_tag(
         &mut self,
@@ -262,6 +271,7 @@ impl Lexer {
         while let Some(token) = self.peek_maybe() {
             match token.kind {
                 TokenKind::Semicolon => return CatchIn::Statement,
+                TokenKind::BlockTerminator => return CatchIn::BlockTerminator,
                 TokenKind::FnKw => return CatchIn::FunctionDecl,
                 _ => {
                     self.eat();
@@ -278,5 +288,14 @@ impl Lexer {
             }
             self.eat();
         }
+    }
+
+    // Convenience method for syncing to block or structural boundaries
+    pub fn unstuck_parser(&mut self) {
+        self.sync_to(&[
+            TokenKind::BlockTerminator,
+            TokenKind::FnKw,
+            TokenKind::StructKw,
+        ]);
     }
 }

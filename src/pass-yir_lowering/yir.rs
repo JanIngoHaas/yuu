@@ -1,10 +1,10 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::StructFieldInfo;
+use crate::pass_type_inference::{EnumVariantInfo, StructFieldInfo};
 use crate::pass_type_inference::{
     TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+    primitive_u64,
 };
-use crate::scheduling::scheduler::{ResourceId, ResourceName};
 use indexmap::IndexMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -15,7 +15,7 @@ use ustr::{Ustr, UstrMap};
 Coloring and pretty printing of YIR mostly implemented by Claude Sonnet 3.5 /
 */
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Variable {
     name: Ustr,
     id: i64,
@@ -75,6 +75,10 @@ impl Label {
         Self { name, id }
     }
 
+    pub fn write_unique_name(&self, out: &mut impl fmt::Write) -> fmt::Result {
+        write!(out, "{}_{}", self.name, self.id)
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -84,9 +88,10 @@ impl Label {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Operand {
     I64Const(i64),
+    U64Const(u64),
     F32Const(f32),
     F64Const(f64),
     BoolConst(bool),
@@ -98,6 +103,7 @@ impl Operand {
     pub fn ty(&self) -> &'static TypeInfo {
         match self {
             Operand::I64Const(_) => primitive_i64(),
+            Operand::U64Const(_) => primitive_u64(),
             Operand::F32Const(_) => primitive_f32(),
             Operand::F64Const(_) => primitive_f64(),
             Operand::BoolConst(_) => primitive_bool(),
@@ -113,6 +119,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Eq,
     NotEq,
     LessThan,
@@ -185,12 +192,23 @@ pub enum Instruction {
         name: Ustr,               // Function name
         args: Vec<Operand>,       // Arguments
     },
-    // Create a struct directly with values (not pointers)
-    // MakeStruct {
-    //     target: Variable,             // Variable to hold the struct
-    //     type_ident: Ustr,             // Name of struct type
-    //     fields: Vec<(Ustr, Operand)>, // Field name and value pairs
-    // },
+
+    // Enum specific
+    GetVariantDataPtr {
+        target: Variable, // result pointer Variable to the data of the enum.
+        base: Operand,    // base operand (must be an enum)
+        variant: Ustr,    // variant name
+    },
+
+    LoadActiveVariantIdx {
+        target: Variable, // Variable to hold the active variant index
+        source: Operand,  // Base operand (must be an enum ptr)
+    },
+
+    StoreActiveVariantIdx {
+        dest: Variable, // Destination pointer operand (the enum itself, not the data ptr!)
+        value: Operand, // Must be of type u64
+    },
 }
 
 #[derive(Clone)]
@@ -204,6 +222,11 @@ pub enum ControlFlow {
         condition: Operand,
         if_true: Label,
         if_false: Label,
+    },
+    JumpTable {
+        scrutinee: Operand,                 // The enum variable being matched
+        jump_targets: IndexMap<u64, Label>, // Maps variant index -> label
+        default: Option<Label>,             // Default jump target if no variant matches
     },
     // Return from function
     Return(Option<Operand>),
@@ -219,6 +242,30 @@ pub struct BasicBlock {
     pub terminator: ControlFlow,
 }
 
+impl BasicBlock {
+    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
+        self.instructions.iter().filter_map(|instr| {
+            match instr {
+                Instruction::Alloca { target } => {
+                    return Some(target);
+                }
+                Instruction::StoreImmediate { .. } => {}
+                Instruction::TakeAddress { .. } => {}
+                Instruction::GetFieldPtr { .. } => {}
+                Instruction::Load { .. } => {}
+                Instruction::Store { .. } => {}
+                Instruction::Binary { .. } => {}
+                Instruction::Unary { .. } => {}
+                Instruction::Call { .. } => {}
+                Instruction::LoadActiveVariantIdx { .. } => {}
+                Instruction::GetVariantDataPtr { .. } => {}
+                Instruction::StoreActiveVariantIdx { .. } => {}
+            };
+            None
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct Function {
     pub name: Ustr,
@@ -226,12 +273,19 @@ pub struct Function {
     pub return_type: &'static TypeInfo,
     pub blocks: IndexMap<i64, BasicBlock>,
     pub entry_block: i64,
+    pub follow_c_abi: bool,
     current_block: i64,
-    next_reg_id: i64,
+    next_reg_id: UstrMap<i64>,
     next_label_id: i64,
 }
 
 impl Function {
+    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
+        self.blocks
+            .values()
+            .flat_map(|block| block.calculate_var_decls())
+    }
+
     pub fn new(name: Ustr, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
             name,
@@ -239,8 +293,9 @@ impl Function {
             return_type,
             blocks: IndexMap::new(),
             entry_block: 0,
+            follow_c_abi: true,
             current_block: 0,
-            next_reg_id: 0,
+            next_reg_id: UstrMap::default(),
             next_label_id: 0,
         };
         f.add_block("entry".intern());
@@ -248,15 +303,16 @@ impl Function {
     }
 
     pub fn add_param(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let param = self.fresh_variable(name, ty.ptr_to());
+        let param = self.fresh_variable(name, ty);
         self.params.push(param);
         param
     }
 
     fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let id = self.next_reg_id;
-        self.next_reg_id += 1;
-        Variable::new(name, id, ty)
+        let id = self.next_reg_id.entry(name).or_insert(0);
+        let var = Variable::new(name, *id, ty);
+        *id += 1;
+        var
     }
 
     pub fn get_block_mut(&mut self, id: i64) -> Option<&mut BasicBlock> {
@@ -328,6 +384,31 @@ impl Function {
         }
     }
 
+    pub fn make_store_active_variant_idx(&mut self, dest: Variable, variant_info: &EnumVariantInfo) {
+        let value = Operand::U64Const(variant_info.variant_idx);
+        let instr = Instruction::StoreActiveVariantIdx { dest, value };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    pub fn make_load_active_variant_idx(&mut self, name_hint: Ustr, source: Operand) -> Variable {
+        let target = self.fresh_variable(name_hint, primitive_u64());
+        let instr = Instruction::LoadActiveVariantIdx { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    pub fn make_get_variant_data_ptr(&mut self, name_hint: Ustr, base: Operand, variant_info: &EnumVariantInfo) -> Variable {
+        let target_type = variant_info.variant.expect("Variant must have data type").ptr_to();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::GetVariantDataPtr { 
+            target, 
+            base, 
+            variant: variant_info.variant_name 
+        };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
     // Builder method for DeclareVar
     pub fn make_alloca(
         &mut self,
@@ -345,7 +426,52 @@ impl Function {
         };
 
         target
-    } // Builder method for Assign
+    }
+
+    // Helper function to allocate only for valid types (not Inactive or pointers to Inactive)
+    pub fn make_alloca_if_valid_type(
+        &mut self,
+        name_hint: Ustr,
+        ty: &'static TypeInfo,
+        init_value: Option<Operand>,
+    ) -> Option<Variable> {
+        // Don't allocate for inactive types following the same pattern as make_store
+        if matches!(
+            ty,
+            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+        ) {
+            return None;
+        }
+
+        Some(self.make_alloca(name_hint, ty, init_value))
+    }
+
+    // Helper function to store only for valid types (not Inactive or pointers to Inactive)
+    pub fn make_store_if_valid_type(&mut self, target: Variable, value: Operand) -> bool {
+        // Check if the value's type is valid using the same pattern as existing debug assertions
+        let value_type = value.ty();
+        if matches!(
+            value_type,
+            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+        ) {
+            return false;
+        }
+
+        self.make_store(target, value);
+        true
+    }
+
+    // Helper function to store only if the target variable exists (reducing if-let boilerplate)
+    pub fn make_store_if_exists(&mut self, target: Option<Variable>, value: Operand) -> bool {
+        if let Some(var) = target {
+            self.make_store(var, value);
+            true
+        } else {
+            false
+        }
+    }
+
+    // Builder method for Assign
 
     // Use make_store instead of make_assign
     // pub fn make_assign(&mut self, target: Variable, value: Operand) -> Variable {
@@ -396,11 +522,7 @@ impl Function {
         current_block.instructions.push(instr);
 
         // If we have a return value, wrap it in pointer context
-        if let Some(result_var) = target {
-            Some(self.make_take_address("call_result_ptr".intern(), result_var))
-        } else {
-            None
-        }
+        target.map(|result_var| self.make_take_address("call_result_ptr".intern(), result_var))
     } // Builder method for TakeAddress
     pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
         // Case c) - NO loading! We expect a value here, not a pointer context
@@ -417,7 +539,22 @@ impl Function {
         field_info: &StructFieldInfo,
     ) -> Variable {
         // Case d) - base needs to be a pointer, but here, DONT load it.
-        // TODO: Add validation for checking that base is a pointer to a struct type
+        // Validate that base is a pointer to a struct type
+        let base_type = base.ty();
+        debug_assert!(
+            matches!(base_type, TypeInfo::Pointer(_)),
+            "make_get_field_ptr: base operand must be a pointer type, got {:?}",
+            base_type
+        );
+
+        if let TypeInfo::Pointer(inner_type) = base_type {
+            debug_assert!(
+                matches!(inner_type, TypeInfo::Struct(_)),
+                "make_get_field_ptr: base must be pointer to struct, got pointer to {:?}",
+                inner_type
+            );
+        }
+
         let target_type = field_info.ty.ptr_to();
         let target = self.fresh_variable(name_hint, target_type);
         let instr = Instruction::GetFieldPtr {
@@ -459,6 +596,7 @@ impl Function {
         // If we have a Immediate value, we can just store it directly
         let value_ptr = match value {
             Operand::I64Const(_)
+            | Operand::U64Const(_)
             | Operand::F32Const(_)
             | Operand::F64Const(_)
             | Operand::BoolConst(_) => {
@@ -538,6 +676,31 @@ impl Function {
         self.make_take_address(name_hint.intern(), target)
     }
 
+    // pub fn make_enum(
+    //     &mut self,
+    //     name_hint: Ustr,
+    //     enum_type: &'static TypeInfo,
+    //     variant_name: Ustr,
+    //     variant_index: u64,
+    //     data: Option<Operand>,
+    // ) -> Variable {
+    //     // Load data operand if it's a pointer (similar to other make_* methods)
+    //     let loaded_data = data.map(|d| self.load_if_pointer(d, "enum_data".intern()));
+
+    //     let target = self.fresh_variable(name_hint, enum_type);
+    //     let target_variant_idx = self.fresh_variable(name_hint, primitive_u64());
+    //     let instr = Instruction::MakeUnion {
+    //         target,
+    //         variant_name,
+    //         variant_index,
+    //         data: loaded_data,
+    //     };
+    //     self.get_current_block_mut().instructions.push(instr);
+
+    //     // Return a pointer to stay in "pointer context"
+    //     self.make_take_address(name_hint, target)
+    // }
+
     pub fn make_jump(&mut self, target: Label) {
         self.set_terminator(ControlFlow::Jump { target });
     }
@@ -576,7 +739,45 @@ impl Function {
             if_false: else_label,
         });
     }
-    pub fn make_branch(&mut self, condition: Operand) -> (Label, Label) {
+
+    pub fn make_jump_table(
+        &mut self,
+        scrutinee: Operand,
+        jump_targets: IndexMap<u64, Label>,
+        default: Option<Label>,
+    ) {
+        //let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
+        
+        let loaded_scrutinee = match scrutinee.ty() {
+            TypeInfo::Pointer(TypeInfo::Enum(_et)) => {
+                // Load only the active variant index for this operation...
+                Operand::Variable(self.make_load_active_variant_idx("variant_idx".intern(), scrutinee)) 
+            },
+            _ => {
+                self.load_if_pointer(scrutinee, "enum_scrutinee".intern())
+            }
+        };
+        
+        debug_assert_eq!(
+            loaded_scrutinee.ty(),
+            primitive_u64(),
+            "Jump table scrutinee must be u64, got {}",
+            loaded_scrutinee.ty()
+        );
+
+        self.set_terminator(ControlFlow::JumpTable {
+            scrutinee: loaded_scrutinee,
+            jump_targets,
+            default,
+        });
+    }
+
+    pub fn make_branch(
+        &mut self,
+        condition: Operand,
+        name_then: Option<Ustr>,
+        name_else: Option<Ustr>,
+    ) -> (Label, Label) {
         // Case j) - Yes, load the condition first
         let loaded_condition = self.load_if_pointer(condition, "branch_condition".intern());
 
@@ -587,8 +788,8 @@ impl Function {
             loaded_condition.ty()
         );
 
-        let true_label = self.add_block("then".intern());
-        let false_label = self.add_block("else".intern());
+        let true_label = self.add_block(name_then.unwrap_or_else(|| "then".intern()));
+        let false_label = self.add_block(name_else.unwrap_or_else(|| "else".intern()));
 
         self.set_terminator(ControlFlow::Branch {
             condition: loaded_condition,
@@ -607,11 +808,16 @@ impl Function {
         yir_printer::format_yir(self, do_color, f)
     }
 
+    pub fn sort_blocks_by_id(&mut self) {
+        self.blocks.sort_unstable_by(|a, _, b, _| a.cmp(b));
+    }
+
     // Helper function to load a value from pointer context if needed
     fn load_if_pointer(&mut self, operand: Operand, name_hint: Ustr) -> Operand {
         match operand {
             // Constants don't need loading
             Operand::I64Const(_)
+            | Operand::U64Const(_)
             | Operand::F32Const(_)
             | Operand::F64Const(_)
             | Operand::BoolConst(_)
@@ -643,14 +849,8 @@ impl Function {
 pub struct Module {
     pub functions: UstrMap<FunctionDeclarationState>,
     pub structs: Vec<Ustr>, // Just the names... NOthing else is really needed for
+    pub enums: Vec<Ustr>,   // Enum names for C generation
 }
-
-impl ResourceId for Module {
-    fn resource_name() -> ResourceName {
-        "Module"
-    }
-}
-
 impl Default for Module {
     fn default() -> Self {
         Self::new()
@@ -662,11 +862,16 @@ impl Module {
         Self {
             functions: UstrMap::default(),
             structs: Vec::new(),
+            enums: Vec::new(),
         }
     }
 
     pub fn define_struct(&mut self, name: Ustr) {
         self.structs.push(name);
+    }
+
+    pub fn define_enum(&mut self, name: Ustr) {
+        self.enums.push(name);
     }
 
     pub fn declare_function(&mut self, func: Function) {

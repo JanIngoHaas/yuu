@@ -1,20 +1,16 @@
 use crate::pass_diagnostics::{YuuError, setup_error_formatter};
-use crate::pass_parse::pass_parse_impl::SyntaxErrors;
-use anyhow::bail;
 use colored::*;
+use miette::{IntoDiagnostic, bail};
 
-use crate::{scheduling::context::Context, scheduling::scheduler::Pass};
+pub struct Diagnostics;
 
-use crate::pass_type_inference::TypeInferenceErrors;
-pub struct PassDiagnostics;
-
-impl Default for PassDiagnostics {
+impl Default for Diagnostics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassDiagnostics {
+impl Diagnostics {
     pub fn new() -> Self {
         Self {}
     }
@@ -53,13 +49,14 @@ impl PassDiagnostics {
         &self,
         syntax_errors: &[YuuError],
         type_errors: &[YuuError],
-    ) -> std::io::Result<()> {
-        let total_errors = syntax_errors.len() + type_errors.len();
+        sema_errors: &[YuuError],
+    ) -> u64 {
+        let total_errors = syntax_errors.len() + type_errors.len() + sema_errors.len();
 
-        let summary = if !syntax_errors.is_empty() || !type_errors.is_empty() {
+        let summary = if total_errors > 0 {
             "Summary: Compilation failed!".bold().red()
         } else {
-            "Summary: Semantic Analysis successful!".bold().green()
+            return total_errors as u64;
         };
 
         println!("\n{}", summary);
@@ -71,72 +68,95 @@ impl PassDiagnostics {
             format!("error{}", if total_errors == 1 { "" } else { "s" }).bold()
         );
 
-        self.print_colored_count(syntax_errors.len(), "syntax error")?;
-        self.print_colored_count(type_errors.len(), "type error")?;
+        self.print_colored_count(syntax_errors.len(), "syntax error")
+            .unwrap();
+        self.print_colored_count(type_errors.len(), "type error")
+            .unwrap();
+        self.print_colored_count(sema_errors.len(), "semantic error")
+            .unwrap();
 
         println!();
-        Ok(())
+        total_errors as u64
     }
 }
 
-impl Pass for PassDiagnostics {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+impl Diagnostics {
+    pub fn run(
+        &self,
+        syntax_errors: &[YuuError],
+        type_inference_errors: &[YuuError],
+        sema_errors: &[YuuError],
+        //break_semantic_errors: &BreakSemanticAnalysisErrors,
+        //mutability_errors: &MutabilityAnalysisErrors,
+    ) -> miette::Result<()> {
         // Set up proper error formatting with syntax highlighting
-        setup_error_formatter(Some("WarmEmber"), true).unwrap();
+        setup_error_formatter(Some("WarmEmber"), true)?;
 
-        // Gather errors from different passes
-        let syntax_errors = context.get_resource::<SyntaxErrors>(self);
-        let type_inference_errors = context.get_resource::<TypeInferenceErrors>(self);
-
-        let syntax_errors = &mut syntax_errors.lock().unwrap().0;
-
-        let type_inference_errors = &mut type_inference_errors.lock().unwrap().0;
-
-        let total_errors = syntax_errors.len() + type_inference_errors.len();
-
+        // Print summary
+        let total_errors = self.print_error_summary(
+            syntax_errors,
+            type_inference_errors,
+            sema_errors,
+            //break_semantic_errors,
+            //mutability_errors,
+        );
         if total_errors == 0 {
-            // No errors found, exit without printing anything
             return Ok(());
         }
 
-        // Print summary
-        self.print_error_summary(syntax_errors, type_inference_errors)?;
-
         // Print syntax errors
         if !syntax_errors.is_empty() {
-            self.print_colored_header("Syntax Errors\n")?;
+            self.print_colored_header("Syntax Errors\n")
+                .into_diagnostic()?;
             for (idx, error) in syntax_errors.iter().enumerate() {
                 let error: miette::Report = error.clone().into();
-                self.print_colored_subheader(format!("Syntax Error {}:", idx + 1).as_str())?;
+                self.print_colored_subheader(format!("Syntax Error {}:", idx + 1).as_str())
+                    .into_diagnostic()?;
                 println!("{:?}", error);
             }
         }
 
         // Print type inference errors
         if !type_inference_errors.is_empty() {
-            self.print_colored_header("Type Errors\n")?;
+            self.print_colored_header("Type Errors\n")
+                .into_diagnostic()?;
             for (idx, error) in type_inference_errors.iter().enumerate() {
                 let error: miette::Report = error.clone().into();
-                self.print_colored_subheader(format!("Type Error {}:", idx + 1).as_str())?;
+                self.print_colored_subheader(format!("Type Error {}:", idx + 1).as_str())
+                    .into_diagnostic()?;
                 println!("{:?}", error);
             }
         }
 
+        // Print control flow errors (including break statement errors)
+        if !sema_errors.is_empty() {
+            self.print_colored_header("Semantic Analysis Errors\n")
+                .into_diagnostic()?;
+            for (idx, error) in sema_errors.iter().enumerate() {
+                let error: miette::Report = (*error).clone().into();
+                self.print_colored_subheader(format!("Semantic Error {}:", idx + 1).as_str())
+                    .into_diagnostic()?;
+                println!("{:?}", error);
+            }
+        }
+
+        // Print mutability errors
+        // if !mutability_errors.is_empty() {
+        //     self.print_colored_header("Mutability Errors\n")
+        //         .into_diagnostic()?;
+        //     for (idx, error) in mutability_errors.iter().enumerate() {
+        //         let error: miette::Report = error.clone().into();
+        //         self.print_colored_subheader(format!("Mutability Error {}:", idx + 1).as_str())
+        //             .into_diagnostic()?;
+        //         println!("{:?}", error);
+        //     }
+        // }
+
         // Return an error to indicate compilation failure
-        if !type_inference_errors.is_empty() || !syntax_errors.is_empty() {
-            bail!("Compilation failed due to errors");
+        if total_errors > 0 {
+            bail!("Compilation failed with {} errors", total_errors);
         } else {
             Ok(())
         }
-    }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.requires_resource_write::<SyntaxErrors>(&self);
-        schedule.requires_resource_write::<TypeInferenceErrors>(&self);
-        schedule.add_pass(self);
-    }    fn get_name(&self) -> &'static str {
-        "PassPrintErrors"
     }
 }

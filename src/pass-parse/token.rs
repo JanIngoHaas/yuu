@@ -30,18 +30,35 @@ pub enum Integer {
     // Idx(isize),
 }
 
-#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Clone, Copy)]
 #[logos(skip r"\s+")] // Skip whitespace
 #[logos(skip r"//.*")]
 #[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
 // This syntax should also be a comment: ^----- or ^-- or ^------ text until newline
 #[logos(skip r"\^-[-]+.*")]
+#[logos(skip r"<--[-]+.*")]
 pub enum TokenKind {
+    #[token("end")]
+    #[regex(r"\s+[.]")]
+    BlockTerminator,
+
     #[token("break")]
-    Break,
+    BreakKw,
+
+    #[token("case")]
+    CaseKw,
+
+    #[token("default")]
+    DefaultKw,
 
     #[token("while")]
     WhileKw,
+
+    #[token("enum")]
+    EnumKw,
+
+    #[token("match")]
+    MatchKw,
 
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
@@ -88,6 +105,9 @@ pub enum TokenKind {
 
     #[token("->")]
     Arrow,
+
+    #[token("=>")]
+    FatArrow,
 
     #[token("return")]
     Return,
@@ -146,6 +166,8 @@ pub enum TokenKind {
     Asterix,
     #[token("/")]
     Slash,
+    #[token("%")]
+    Percent,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -157,6 +179,9 @@ pub enum TokenKind {
     #[token(".")]
     Dot,
 
+    #[token("@")]
+    At,
+
     #[token("#")]
     Hash,
 
@@ -167,7 +192,7 @@ impl TokenKind {
     pub fn from_keyword(keyword: &str) -> Option<TokenKind> {
         match keyword {
             "return" => Some(TokenKind::Return),
-            "break" => Some(TokenKind::Break),
+            "break" => Some(TokenKind::BreakKw),
             _ => None,
         }
     }
@@ -176,7 +201,7 @@ impl TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenKind::Break => "'break'".fmt(f),
+            TokenKind::BreakKw => "'break'".fmt(f),
             TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
             TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
@@ -190,6 +215,7 @@ impl Display for TokenKind {
             TokenKind::MutKw => "'mut'".fmt(f),
             TokenKind::FnKw => "'fn'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
+            TokenKind::FatArrow => "'=>'".fmt(f),
             TokenKind::Return => "'return'".fmt(f),
             TokenKind::Colon => "':'".fmt(f),
             TokenKind::DoubleColon => "'::'".fmt(f),
@@ -208,6 +234,7 @@ impl Display for TokenKind {
             TokenKind::Minus => "'-'".fmt(f),
             TokenKind::Asterix => "'*'".fmt(f),
             TokenKind::Slash => "'/'".fmt(f),
+            TokenKind::Percent => "'%'".fmt(f),
             TokenKind::LParen => "'('".fmt(f),
             TokenKind::RParen => "')'".fmt(f),
             TokenKind::LBrace => "'{'".fmt(f),
@@ -217,7 +244,13 @@ impl Display for TokenKind {
             TokenKind::Hash => "'#'".fmt(f),
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
+            TokenKind::EnumKw => "'enum'".fmt(f),
+            TokenKind::MatchKw => "'match'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
+            TokenKind::At => "'@'".fmt(f),
+            TokenKind::BlockTerminator => ".".fmt(f),
+            TokenKind::CaseKw => "'case'".fmt(f),
+            TokenKind::DefaultKw => "'default'".fmt(f),
         }
     }
 }

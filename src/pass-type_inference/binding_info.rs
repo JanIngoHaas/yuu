@@ -1,5 +1,3 @@
-// Here, we define the built-in functions etc. that are already present in the language.
-
 use logos::Span;
 
 use crate::pass_parse::ast::NodeId;

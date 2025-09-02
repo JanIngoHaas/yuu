@@ -2,7 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::{pass_parse::token::Token, scheduling::scheduler::ResourceId};
+use crate::pass_parse::token::Token;
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -15,12 +15,6 @@ pub struct SourceInfo {
     pub file_name: Arc<str>,
 }
 
-impl ResourceId for SourceInfo {
-    fn resource_name() -> &'static str {
-        "SourceInfo"
-    }
-}
-
 /// Binary operators for arithmetic expressions
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub enum BinOp {
@@ -28,6 +22,7 @@ pub enum BinOp {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     Eq,
     NotEq,
     Lt,
@@ -43,6 +38,7 @@ impl Display for BinOp {
             BinOp::Subtract => write!(f, "-"),
             BinOp::Multiply => write!(f, "*"),
             BinOp::Divide => write!(f, "/"),
+            BinOp::Modulo => write!(f, "%"),
             BinOp::Eq => write!(f, "=="),
             BinOp::NotEq => write!(f, "!="),
             BinOp::Lt => write!(f, "<"),
@@ -56,16 +52,17 @@ impl Display for BinOp {
 impl BinOp {
     pub fn static_name(&self) -> Ustr {
         match self {
-            BinOp::Add => "add",
-            BinOp::Subtract => "sub",
-            BinOp::Multiply => "mul",
-            BinOp::Divide => "div",
-            BinOp::Eq => "eq",
-            BinOp::NotEq => "ne",
-            BinOp::Lt => "lt",
-            BinOp::LtEq => "le",
-            BinOp::Gt => "gt",
-            BinOp::GtEq => "ge",
+            BinOp::Add => "_add",
+            BinOp::Subtract => "_sub",
+            BinOp::Multiply => "_mul",
+            BinOp::Divide => "_div",
+            BinOp::Modulo => "_mod",
+            BinOp::Eq => "_eq",
+            BinOp::NotEq => "_ne",
+            BinOp::Lt => "_lt",
+            BinOp::LtEq => "_le",
+            BinOp::Gt => "_gt",
+            BinOp::GtEq => "_ge",
         }
         .intern()
     }
@@ -81,8 +78,8 @@ pub enum UnaryOp {
 impl UnaryOp {
     pub fn static_name(&self) -> Ustr {
         match self {
-            UnaryOp::Pos => "pos",
-            UnaryOp::Negate => "neg",
+            UnaryOp::Pos => "_pos",
+            UnaryOp::Negate => "_neg",
         }
         .intern()
     }
@@ -107,24 +104,31 @@ pub struct LiteralExpr {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ConditionWithBody {
     pub condition: Box<ExprNode>,
-    pub body: BlockExpr,
+    pub body: BlockStmt,
 }
 
-/// Represents an if expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
-pub struct IfExpr {
+pub struct IfStmt {
     pub id: NodeId,
     pub span: Span,
     pub if_block: ConditionWithBody,
     pub else_if_blocks: Vec<ConditionWithBody>,
-    pub else_block: Option<BlockExpr>,
+    pub else_block: Option<BlockStmt>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct WhileExpr {
+pub struct WhileStmt {
     pub id: NodeId,
     pub span: Span,
     pub condition_block: ConditionWithBody,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BlockStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub body: Vec<StmtNode>,
+    pub label: Option<Ustr>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -170,7 +174,7 @@ pub struct IdentExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AssignmentExpr {
-    pub lhs: Box<ExprNode>, // Changed from Box<BindingNode>
+    pub lhs: Box<ExprNode>,
     pub rhs: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
@@ -184,6 +188,51 @@ pub struct MemberAccessExpr {
     pub id: NodeId,
 }
 
+// Unified enum pattern
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumPattern {
+    pub enum_name: Ustr,
+    pub variant_name: Ustr,
+    pub span: Span,
+    pub id: NodeId,
+    pub binding: Option<Box<BindingNode>>, // None for unit patterns, Some for data patterns
+}
+
+/// Refutable patterns...
+#[derive(Serialize, Deserialize, Clone)]
+pub enum RefutablePatternNode {
+    Enum(EnumPattern),
+}
+
+/// Match arm in a match expression
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MatchArm {
+    pub pattern: Box<RefutablePatternNode>,
+    pub body: BlockStmt,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+/// Match expression
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MatchStmt {
+    pub id: NodeId,
+    pub span: Span,
+    pub scrutinee: Box<ExprNode>, // The expression being matched
+    pub arms: Vec<MatchArm>,
+    pub default_case: Option<BlockStmt>, // Optional default case
+}
+
+/// Enum variant instantiation (Color::Red or Color::Blue(value))
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumInstantiationExpr {
+    pub id: NodeId,
+    pub span: Span,
+    pub enum_name: Ustr,
+    pub variant_name: Ustr,
+    pub data: Option<Box<ExprNode>>, // None for unit variants
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
 pub enum ExprNode {
@@ -191,12 +240,10 @@ pub enum ExprNode {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
     Ident(IdentExpr),
-    Block(BlockExpr),
     FuncCall(FuncCallExpr),
-    If(IfExpr), // TODO: Need a pass that checks if we have a if-else block - only "if" is not enough (often).
-    While(WhileExpr),
     Assignment(AssignmentExpr),
     StructInstantiation(StructInstantiationExpr),
+    EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
     //Error,
 }
@@ -241,7 +288,7 @@ impl BindingNode {
 impl Display for BindingNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BindingNode::Ident(ident) => write!(f, "{}", ident.name),
+            BindingNode::Ident(ident) => write!(f, "{}(id: {})", ident.name, ident.id),
         }
     }
 }
@@ -304,14 +351,6 @@ pub struct FuncDeclStructural {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BlockExpr {
-    pub id: NodeId,
-    pub span: Span,
-    pub body: Vec<StmtNode>,
-    pub label: Option<Ustr>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct FuncCallExpr {
     pub id: NodeId,
     pub span: Span,
@@ -323,7 +362,7 @@ pub struct FuncCallExpr {
 pub struct FuncDefStructural {
     pub id: NodeId,
     pub decl: FuncDeclStructural,
-    pub body: BlockExpr,
+    pub body: BlockStmt,
     pub span: Span,
 }
 
@@ -343,19 +382,48 @@ pub struct StructDefStructural {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct EnumVariant {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ustr,
+    pub data_type: Option<TypeNode>, // None for unit variants, Some(T) for data variants
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumDeclStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ustr,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EnumDefStructural {
+    pub id: NodeId,
+    pub span: Span,
+    pub decl: EnumDeclStructural,
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StructuralNode {
     FuncDecl(FuncDeclStructural),
     FuncDef(FuncDefStructural),
     StructDecl(StructDeclStructural),
     StructDef(StructDefStructural),
+    EnumDef(EnumDefStructural),
     Error(NodeId),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BreakStmt {
     pub span: Span,
-    pub expr: Box<ExprNode>,  // Optional for => ; case
-    pub target: Option<Ustr>, // None for break expr, Some(label) for break label expr
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ReturnStmt {
+    pub span: Span,
+    pub expr: Option<Box<ExprNode>>,
     pub id: NodeId,
 }
 
@@ -364,7 +432,12 @@ pub enum StmtNode {
     Let(LetStmt),
     Atomic(ExprNode),
     //Return(ReturnStmt),
-    Break(BreakStmt), // new variant
+    Break(BreakStmt),
+    Return(ReturnStmt),
+    Match(MatchStmt),
+    If(IfStmt),
+    While(WhileStmt),
+    Block(BlockStmt),
     Error(NodeId),
 }
 
@@ -378,14 +451,9 @@ pub enum Node {
     Binding(BindingNode),
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AST {
     pub structurals: Vec<Box<StructuralNode>>,
-}
-
-impl ResourceId for AST {
-    fn resource_name() -> &'static str {
-        "AST"
-    }
 }
 
 // impl Display for Node {
@@ -419,14 +487,14 @@ impl Spanned for ExprNode {
             ExprNode::Binary(bin) => bin.span.clone(),
             ExprNode::Unary(un) => un.span.clone(),
             ExprNode::Ident(id) => id.span.clone(),
-            ExprNode::Block(block_expr) => block_expr.span.clone(),
             ExprNode::FuncCall(func_call_expr) => func_call_expr.span.clone(),
-            ExprNode::If(if_expr) => if_expr.span.clone(),
             ExprNode::Assignment(assign) => assign.span.clone(),
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
                 struct_instantiation_expr.span.clone()
             }
-            ExprNode::While(while_expr) => while_expr.span.clone(),
+            ExprNode::EnumInstantiation(enum_instantiation_expr) => {
+                enum_instantiation_expr.span.clone()
+            }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
         }
     }
@@ -439,6 +507,11 @@ impl Spanned for StmtNode {
             StmtNode::Atomic(expr_node) => expr_node.span(),
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
+            StmtNode::Return(return_stmt) => return_stmt.span.clone(),
+            StmtNode::If(if_stmt) => if_stmt.span.clone(),
+            StmtNode::While(while_stmt) => while_stmt.span.clone(),
+            StmtNode::Block(block_stmt) => block_stmt.span.clone(),
+            StmtNode::Match(match_stmt) => match_stmt.span.clone(),
             StmtNode::Error(_) => 0..0,
         }
     }
@@ -463,6 +536,7 @@ impl Spanned for StructuralNode {
                 struct_decl_structural.span.clone()
             }
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.span.clone(),
+            StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.span.clone(),
         }
     }
 }

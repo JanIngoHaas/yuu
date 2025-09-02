@@ -2,23 +2,20 @@ use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
 use crate::{
     pass_parse::ast::{
-        AssignmentExpr, BinaryExpr, BlockExpr, ExprNode, FuncCallExpr, IdentExpr, IfExpr,
-        LiteralExpr, Spanned, UnaryExpr,
+        AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
+        IdentExpr, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     },
-    pass_type_inference::binding_info::BindingInfo,
     pass_type_inference::type_info::{
-        TypeInfo, error_type, inactive_type, primitive_bool, primitive_f32, primitive_f64,
-        primitive_i64, primitive_nil,
+        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64,
     },
     pass_yir_lowering::block::Block,
 };
-
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
 use super::pass_type_inference_impl::TransientData;
 
-fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
+fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
         crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
             crate::pass_parse::token::Integer::I64(_) => primitive_i64(),
@@ -31,7 +28,7 @@ fn infer_literal(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeIn
     out
 }
 
-fn infer_binary(
+fn infer_binary_expr(
     binary_expr: &BinaryExpr,
     block: &mut Block,
     data: &mut TransientData,
@@ -70,7 +67,7 @@ fn infer_binary(
     resolution.ty.ret
 }
 
-fn infer_unary(
+fn infer_unary_expr(
     unary_expr: &UnaryExpr,
     block: &mut Block,
     data: &mut TransientData,
@@ -107,7 +104,7 @@ fn infer_unary(
     resolution.ty.ret
 }
 
-fn infer_ident(
+fn infer_ident_expr(
     ident_expr: &IdentExpr,
     block: &mut Block,
     data: &mut TransientData,
@@ -162,107 +159,7 @@ fn infer_ident(
     error_type()
 }
 
-pub fn infer_block_no_child_creation(
-    block_expr: &BlockExpr,
-    root_func_block: &mut Block,
-    data: &mut TransientData,
-) -> &'static TypeInfo {
-    let mut span_break_ty = None;
-
-    for stmt in &block_expr.body {
-        let out = super::infer_stmt(stmt, root_func_block, data);
-        // This is for when we break OUT of the current block!
-        if let super::ExitKind::Break = out {
-            // Store break type but keep processing
-            span_break_ty = Some((stmt.span(), inactive_type()));
-        }
-    }
-
-    let (span, block_ty) = match span_break_ty {
-        Some((span, ty)) => (Some(span), ty),
-        None => (None, primitive_nil()),
-    };
-
-    // Unify with any existing type from breaks TO this block
-
-    (match data
-        .type_registry
-        .type_info_table
-        .unify_and_insert(block_expr.id, block_ty)
-    {
-        Ok(ty) => ty,
-        Err(err) => {
-            let mut err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
-                .message(format!(
-                    "Block has inconsistent return types: '{}' and '{}'",
-                    err.left, err.right
-                ))
-                .source(
-                    data.src_code.source.clone(),
-                    data.src_code.file_name.clone(),
-                )
-                .span(
-                    block_expr.span.clone(),
-                    "block with inconsistent return types",
-                );
-
-            if let Some(span) = span {
-                err_msg = err_msg.label(span, format!("block returns '{}' here", block_ty));
-            }
-
-            let err_msg = err_msg
-                .help("All branches of a block must evaluate to compatible types")
-                .build();
-
-            // Add label for break statement if found
-            // let err_msg = if let Some(span) = break_with_value {
-            //     err_msg.label(span, format!("break with value of type {}", err.left))
-            //         .label(
-            //             block_expr.last_expr.as_ref().map_or(
-            //                 block_expr.span.clone(),
-            //                 |expr| expr.span().clone()
-            //             ),
-            //             format!("block yields {}", err.right)
-            //         )
-            //         .help("Break statements with values must match the block's return type")
-            // } else {
-            //     err_msg.help(
-            //         "This can happen if you have a break statement returning a value that doesn't match the block's yield type"
-            //     )
-            // }.build();
-
-            data.errors.push(err_msg);
-            error_type()
-        }
-    }) as _
-}
-
-pub fn infer_block(
-    block_expr: &BlockExpr,
-    parent_block: &mut Block,
-    data: &mut TransientData,
-) -> &'static TypeInfo {
-    let child_block = if let Some(label) = &block_expr.label {
-        let binding = BindingInfo {
-            id: block_expr.id,
-            src_location: Some(block_expr.span.clone()),
-        };
-        parent_block.make_child((Some(*label), binding))
-    } else {
-        parent_block.make_child((
-            None,
-            BindingInfo {
-                id: block_expr.id,
-                src_location: Some(block_expr.span.clone()),
-            },
-        ))
-    };
-
-    infer_block_no_child_creation(block_expr, child_block, data)
-}
-
-fn infer_func_call(
+fn infer_func_call_expr(
     func_call_expr: &FuncCallExpr,
     block: &mut Block,
     data: &mut TransientData,
@@ -309,7 +206,7 @@ fn infer_func_call(
             error_type()
         }
         TypeInfo::Inactive => {
-            // This is a compiler bug, so keep the panic
+            // This is a compiler bug - kinda weird...
             panic!("Compiler bug: Inactive type as return type of function")
         }
         TypeInfo::Struct(_struct_type) => {
@@ -326,6 +223,23 @@ fn infer_func_call(
             error_type()
         }
         TypeInfo::Error => error_type(),
+        TypeInfo::Enum(e) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Cannot call enum type '{}' as a function",
+                    e.name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), "enum type")
+                .help("Enums cannot be called as functions. Use enum variant syntax like 'EnumName::Variant' instead")
+                .build();
+            data.errors.push(err);
+            error_type()
+        }
     };
 
     data.type_registry
@@ -431,140 +345,338 @@ fn infer_assignment(
     }) as _
 }
 
-fn infer_if_expr(expr: &IfExpr, block: &mut Block, data: &mut TransientData) -> &'static TypeInfo {
-    // Check condition
-    let src_code = data.src_code.clone();
+fn infer_struct_instantiation(
+    struct_instantiation_expr: &StructInstantiationExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    for (_, expr_node) in &struct_instantiation_expr.fields {
+        infer_expr(expr_node, block, data, None);
+    }
 
-    let cond_ty = infer_expr(&expr.if_block.condition, block, data, None);
-    if let Err(err) = cond_ty.unify(primitive_bool()) {
-        let err_msg = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
+    let struct_name = struct_instantiation_expr.struct_name;
+    let struct_opt = data.type_registry.resolve_struct(struct_name);
+
+    if struct_opt.is_none() {
+        let err = YuuError::builder()
+            .kind(ErrorKind::ReferencedUndefinedStruct)
             .message(format!(
-                "If condition must be of type bool, got {}",
-                err.left
+                "Cannot instantiate struct '{}' because it has not been defined",
+                struct_name
             ))
             .source(
                 data.src_code.source.clone(),
                 data.src_code.file_name.clone(),
             )
             .span(
-                expr.if_block.condition.span().clone(),
-                format!("has type {}", err.left),
+                struct_instantiation_expr.span.clone(),
+                "attempted to instantiate undefined struct",
             )
-            .help("Conditions must evaluate to a boolean type")
+            .help("Define this struct before using it")
             .build();
-        data.errors.push(err_msg);
-        // Continue execution but mark as error
+        data.errors.push(err);
         data.type_registry
             .type_info_table
-            .insert(expr.id, error_type());
+            .insert(struct_instantiation_expr.id, error_type());
         return error_type();
     }
 
-    let then_ty = infer_block(&expr.if_block.body, block, data);
+    let sinfo = struct_opt.unwrap();
+    let struct_type = sinfo.ty;
 
-    let if_types = expr.else_if_blocks.iter().map(|x| {
-        // Check if the else-if condition is a boolean
-        let else_if_cond_ty = infer_expr(&x.condition, block, data, None);
-        if let Err(err) = else_if_cond_ty.unify(primitive_bool()) {
-            let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+    for (field, expr_node) in &struct_instantiation_expr.fields {
+        let expr_type = data
+            .type_registry
+            .type_info_table
+            .get(expr_node.node_id())
+            .expect("Compiler bug: expression type should be in registry");
+
+        if let Some(field_info) = sinfo.fields.get(&field.name) {
+            match expr_type.unify(field_info.ty) {
+                Ok(_) => {}
+                Err(err) => {
+                    let err_msg = YuuError::builder()
+                        .kind(ErrorKind::TypeMismatch)
+                        .message(format!(
+                            "Cannot assign {} to field '{}' of type {}",
+                            err.left, field.name, err.right
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(expr_node.span().clone(), format!("has type {}", err.left))
+                        .label(field.span.clone(), format!("expected type {}", err.right))
+                        .help("The types must be compatible for assignment")
+                        .build();
+                    data.errors.push(err_msg);
+                }
+            }
+        } else {
+            let err = YuuError::builder()
+                .kind(ErrorKind::ReferencedUndeclaredField)
                 .message(format!(
-                    "Else-if condition must be of type 'bool', got '{}'",
-                    err.left
+                    "Cannot assign to undeclared field '{}' of struct '{}'",
+                    field.name, struct_name
                 ))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
                 .span(
-                    x.condition.span().clone(),
-                    format!("has type '{}'", err.left),
+                    field.span.clone(),
+                    "attempted to assign to undeclared field",
                 )
-                .help("Conditions must evaluate to a boolean type")
+                .help("Define this field in the struct before using it")
                 .build();
-            data.errors.push(err_msg);
-
-            // We mark as error type.
-            data.type_registry
-                .type_info_table
-                .insert(x.condition.node_id(), error_type());
-
-            return error_type();
+            data.errors.push(err);
         }
+    }
 
-        infer_block(&x.body, block, data)
-    });
+    data.type_registry
+        .type_info_table
+        .insert(struct_instantiation_expr.id, struct_type);
 
-    let (out_ty, errors) = if_types.into_iter().enumerate().fold(
-        (then_ty, Vec::new()),
-        move |(acc, mut errors), (block_index, ty)| {
-            if matches!(acc, TypeInfo::Inactive) {
-                return (ty, errors);
-            }
+    struct_type
+}
 
-            // Unify the types and use the unified type
-            match acc.unify(ty) {
-                Ok(unified) => (unified, errors),
-                Err(_) => {
-                    let err_msg = YuuError::builder()
-                        .kind(ErrorKind::TypeMismatch)
-                        .message("If expression branches have incompatible types".to_string())
-                        .source(src_code.source.clone(), src_code.file_name.clone())
-                        .span(expr.span.clone(), "if with incompatible branch types")
-                        .label(
-                            expr.if_block.body.span.clone(),
-                            format!("this branch returns {}", acc),
+fn infer_member_access(
+    member_access_expr: &MemberAccessExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
+
+    match lhs_ty {
+        TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
+            let si = data
+                .type_registry
+                .resolve_struct(s.name)
+                .expect("Compiler bug: Struct type should be resolved here.");
+
+            let field = si.fields.get(&member_access_expr.field.name).cloned();
+
+            match field {
+                Some(field_info) => {
+                    data.type_registry
+                        .type_info_table
+                        .insert(member_access_expr.id, field_info.ty);
+
+                    field_info.ty
+                }
+                None => {
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndeclaredField)
+                        .message(format!(
+                            "Struct '{}' has no field named '{}'",
+                            s.name, member_access_expr.field.name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(
+                            member_access_expr.field.span.clone(),
+                            "attempted to access undefined field",
                         )
                         .label(
-                            expr.else_if_blocks[block_index].body.span.clone(),
-                            format!("this branch returns {}", ty),
+                            member_access_expr.lhs.span().clone(),
+                            format!("this expression has type '{}'", s.name),
                         )
-                        .help("All branches of an if expression must evaluate to compatible types")
+                        .help(format!(
+                            "Available fields for struct '{}': {}",
+                            s.name,
+                            if si.fields.is_empty() {
+                                "none".to_string()
+                            } else {
+                                si.fields
+                                    .keys()
+                                    .map(|k| k.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
                         .build();
-                    errors.push(err_msg);
-                    (error_type(), errors)
+                    data.errors.push(err);
+
+                    data.type_registry
+                        .type_info_table
+                        .insert(member_access_expr.id, error_type());
+                    error_type()
                 }
             }
-        },
-    );
+        }
+        _ => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Cannot access field '{}' on value of type '{}'",
+                    member_access_expr.field.name, lhs_ty
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(
+                    member_access_expr.span.clone(),
+                    "attempted member access on non-struct type",
+                )
+                .label(
+                    member_access_expr.lhs.span().clone(),
+                    format!("this expression has type '{}'", lhs_ty),
+                )
+                .label(
+                    member_access_expr.field.span.clone(),
+                    "field access attempted here",
+                )
+                .help("Member access is only supported on struct types")
+                .build();
+            data.errors.push(err);
 
-    data.errors.extend(errors);
+            data.type_registry
+                .type_info_table
+                .insert(member_access_expr.id, error_type());
+            error_type()
+        }
+    }
+}
 
-    if let Some(else_body) = expr.else_block.as_ref() {
-        let else_ty = infer_block(else_body, block, data);
-        match out_ty.unify(else_ty) {
-            Ok(unified) => {
-                data.type_registry.type_info_table.insert(expr.id, unified);
-                unified
-            }
-            Err(_) => {
-                let err_msg = YuuError::builder()
-                    .kind(ErrorKind::TypeMismatch)
-                    .message("If expression branches have incompatible types")
-                    .source(
-                        data.src_code.source.clone(),
-                        data.src_code.file_name.clone(),
-                    )
-                    .span(expr.span.clone(), "if with incompatible branch types")
-                    .label(
-                        expr.if_block.body.span.clone(),
-                        format!("if branch returns {}", out_ty),
-                    )
-                    .label(
-                        else_body.span.clone(),
-                        format!("else branch returns {}", else_ty),
-                    )
-                    .help("All branches of an if expression must evaluate to compatible types")
-                    .build();
-                data.errors.push(err_msg);
-                error_type()
+fn infer_enum_instantiation(
+    ei: &EnumInstantiationExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+    function_args: Option<&[&'static TypeInfo]>,
+) -> &'static TypeInfo {
+    let enum_type = data.type_registry.resolve_enum(ei.enum_name);
+    let inferred_ty = match enum_type {
+        Some(enum_info) => {
+            let variant_info_registered = enum_info.variants.get(&ei.variant_name);
+            match variant_info_registered {
+                Some(variant) => {
+                    let ty = enum_info.ty;
+                    // Left: Maybe data associated with the enum instantiation, i.e. Option::Some(x) where x would be the data (syntactical), Right: Semantic type information about the enum variant, i.e. data type that the variant is associated and registered with
+                    match (&ei.data, variant.variant) {
+                        // Yes, we have both
+                        (Some(dexpr), Some(reg_ty)) => {
+                            // Calculate type (semantic) from associated data (syntactical)
+                            let ty = infer_expr(dexpr, block, data, function_args);
+                            // See if the types match
+                            if let Err(err) = ty.unify(reg_ty) {
+                                let err_msg = YuuError::builder()
+                                    .kind(ErrorKind::TypeMismatch)
+                                    .message(format!(
+                                        "Cannot assign '{}' to enum variant '{}::{}' which expects '{}'",
+                                        err.left, ei.enum_name, ei.variant_name, err.right
+                                    ))
+                                    .source(
+                                        data.src_code.source.clone(),
+                                        data.src_code.file_name.clone(),
+                                    )
+                                    .span(dexpr.span().clone(), format!("has type '{}'", err.left))
+                                    .label(ei.span.clone(), format!("expected type '{}'", err.right))
+                                    .help("The types must be compatible for enum variant instantiation")
+                                    .build();
+                                data.errors.push(err_msg);
+                            }
+                        }
+                        // Unit Variant, good!
+                        (None, None) => {
+                            // Nothing to do here...
+                        }
+
+                        // Left: Syntactically, we have data (user made an error and mistakingly provided data), Right: No data was expected
+                        (Some(dexpr), None) => {
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::InvalidExpression)
+                                .message(format!(
+                                    "Enum variant '{}::{}' does not accept data, but data was provided",
+                                    ei.enum_name, ei.variant_name
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(dexpr.span().clone(), "unexpected data provided here")
+                                .label(ei.span.clone(), "for this unit variant")
+                                .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
+                                .build();
+                            data.errors.push(err);
+                        }
+
+                        // Left: No data was provided, Right: But there is associated data registered => User error
+                        (None, Some(expected_ty)) => {
+                            let err = YuuError::builder()
+                                .kind(ErrorKind::InvalidExpression)
+                                .message(format!(
+                                    "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
+                                    ei.enum_name, ei.variant_name, expected_ty
+                                ))
+                                .source(
+                                    data.src_code.source.clone(),
+                                    data.src_code.file_name.clone(),
+                                )
+                                .span(ei.span.clone(), "missing required data")
+                                .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
+                                .build();
+                            data.errors.push(err);
+                        }
+                    }
+                    ty
+                }
+                None => {
+                    let err = YuuError::builder()
+                        .kind(ErrorKind::ReferencedUndeclaredVariant)
+                        .message(format!(
+                            "Enum '{}' has no variant named '{}'",
+                            ei.enum_name, ei.variant_name
+                        ))
+                        .source(
+                            data.src_code.source.clone(),
+                            data.src_code.file_name.clone(),
+                        )
+                        .span(ei.span.clone(), "attempted to use undefined variant")
+                        .help(format!(
+                            "Available variants for enum '{}': {}",
+                            ei.enum_name,
+                            if enum_info.variants.is_empty() {
+                                "none".to_string()
+                            } else {
+                                enum_info
+                                    .variants
+                                    .keys()
+                                    .map(|k| k.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
+                        .build();
+                    data.errors.push(err);
+                    error_type()
+                }
             }
         }
-    } else {
-        data.type_registry.type_info_table.insert(expr.id, out_ty);
-        out_ty
-    }
+        None => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::ReferencedUndefinedEnum)
+                .message(format!(
+                    "Cannot instantiate enum '{}' because it has not been defined",
+                    ei.enum_name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(ei.span.clone(), "attempted to instantiate undefined enum")
+                .help("Define this enum before using it")
+                .build();
+            data.errors.push(err);
+            error_type()
+        }
+    };
+    data.type_registry
+        .type_info_table
+        .insert(ei.id, inferred_ty);
+    inferred_ty
 }
 
 pub fn infer_expr(
@@ -574,270 +686,20 @@ pub fn infer_expr(
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     match expr {
-        ExprNode::Literal(lit) => infer_literal(lit, data),
-        ExprNode::Binary(binary) => infer_binary(binary, block, data),
-        ExprNode::Unary(unary) => infer_unary(unary, block, data),
-        ExprNode::Ident(ident) => infer_ident(ident, block, data, function_args),
-        ExprNode::Block(block_expr) => infer_block(block_expr, block, data),
-        ExprNode::FuncCall(func_call) => infer_func_call(func_call, block, data),
-        ExprNode::If(if_expr) => infer_if_expr(if_expr, block, data),
+        ExprNode::Literal(lit) => infer_literal_expr(lit, data),
+        ExprNode::Binary(binary) => infer_binary_expr(binary, block, data),
+        ExprNode::Unary(unary) => infer_unary_expr(unary, block, data),
+        ExprNode::Ident(ident) => infer_ident_expr(ident, block, data, function_args),
+        ExprNode::FuncCall(func_call) => infer_func_call_expr(func_call, block, data),
         ExprNode::Assignment(assignment) => infer_assignment(assignment, block, data),
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
-            for (_, expr_node) in &struct_instantiation_expr.fields {
-                infer_expr(expr_node, block, data, None);
-            }
-
-            let struct_name = struct_instantiation_expr.struct_name;
-            let struct_opt = data.type_registry.resolve_struct(struct_name);
-
-            if struct_opt.is_none() {
-                let err = YuuError::builder()
-                    .kind(ErrorKind::ReferencedUndefinedStruct)
-                    .message(format!(
-                        "Cannot instantiate struct '{}' because it has not been defined",
-                        struct_name
-                    ))
-                    .source(
-                        data.src_code.source.clone(),
-                        data.src_code.file_name.clone(),
-                    )
-                    .span(
-                        struct_instantiation_expr.span.clone(),
-                        "attempted to instantiate undefined struct",
-                    )
-                    .help("Define this struct before using it")
-                    .build();
-                data.errors.push(err);
-                data.type_registry
-                    .type_info_table
-                    .insert(struct_instantiation_expr.id, error_type());
-                return error_type();
-            }
-
-            let sinfo = struct_opt.unwrap();
-            let struct_type = sinfo.ty;
-
-            for (field, expr_node) in &struct_instantiation_expr.fields {
-                // Get the already inferred expression type from the registry
-                let expr_type = data
-                    .type_registry
-                    .type_info_table
-                    .get(expr_node.node_id())
-                    .expect("Compiler bug: expression type should be in registry");
-
-                if let Some(field_info) = sinfo.fields.get(&field.name) {
-                    match expr_type.unify(field_info.ty) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            let err_msg = YuuError::builder()
-                                .kind(ErrorKind::TypeMismatch)
-                                .message(format!(
-                                    "Cannot assign {} to field '{}' of type {}",
-                                    err.left, field.name, err.right
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(expr_node.span().clone(), format!("has type {}", err.left))
-                                .label(field.span.clone(), format!("expected type {}", err.right))
-                                .help("The types must be compatible for assignment")
-                                .build();
-                            data.errors.push(err_msg);
-                        }
-                    }
-                } else {
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndeclaredField)
-                        .message(format!(
-                            "Cannot assign to undeclared field '{}' of struct '{}'",
-                            field.name, struct_name
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            field.span.clone(),
-                            "attempted to assign to undeclared field",
-                        )
-                        .help("Define this field in the struct before using it")
-                        .build();
-                    data.errors.push(err);
-                }
-            }
-
-            // Register the type for the struct instantiation expression
-            data.type_registry
-                .type_info_table
-                .insert(struct_instantiation_expr.id, struct_type);
-
-            struct_type
+            infer_struct_instantiation(struct_instantiation_expr, block, data)
         }
-        ExprNode::While(while_expr) => {
-            let cond_ty = infer_expr(&while_expr.condition_block.condition, block, data, None);
-            let while_expr_ty = infer_block(&while_expr.condition_block.body, block, data);
 
-            if let Err(err) = cond_ty.unify(primitive_bool()) {
-                let err_msg = YuuError::builder()
-                    .kind(ErrorKind::TypeMismatch)
-                    .message(format!(
-                        "While condition must be of type 'bool', got '{}'",
-                        err.left
-                    ))
-                    .source(
-                        data.src_code.source.clone(),
-                        data.src_code.file_name.clone(),
-                    )
-                    .span(
-                        while_expr.condition_block.condition.span().clone(),
-                        format!("has type '{}'", err.left),
-                    )
-                    .help("Conditions must evaluate to a boolean type")
-                    .build();
-                data.errors.push(err_msg);
-                // Continue execution but mark as error
-                data.type_registry
-                    .type_info_table
-                    .insert(while_expr.id, error_type());
-                return error_type();
-            }
-
-            let unify_res = data
-                .type_registry
-                .type_info_table
-                .unify_and_insert(while_expr.id, while_expr_ty);
-
-            match unify_res {
-                Ok(ty) => ty,
-                Err(err) => {
-                    let err_msg = YuuError::builder()
-                        .kind(ErrorKind::TypeMismatch)
-                        .message("While loop has inconsistent break types")
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            while_expr.condition_block.body.span.clone(),
-                            // TODO: I should collect "breaks" in a separate datastructure so we can pinpoint the breaks which are incompatible and have a better error message
-                            format!("Cannot unify type '{}' and type '{}'", err.left, err.right),
-                        )
-                        .help("All break statements within a while loop must have compatible types")
-                        .build();
-                    data.errors.push(err_msg);
-
-                    data.type_registry
-                        .type_info_table
-                        .insert(while_expr.id, error_type());
-                    error_type()
-                }
-            }
-        }
         ExprNode::MemberAccess(member_access_expr) => {
-            // Infer the type of the left-hand side expression
-            let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
-
-            // Check if lhs is a struct type
-            match lhs_ty {
-                TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
-                    // Let's see if the struct has the field
-                    let si = data
-                        .type_registry
-                        .resolve_struct(s.name)
-                        .expect("Compiler bug: Struct type should be resolved here.");
-
-                    let field = si.fields.get(&member_access_expr.field.name).cloned(); // Cloning is fine - no heap alloc
-
-                    match field {
-                        Some(field_info) => {
-                            // Register the field type in the type registry
-                            data.type_registry
-                                .type_info_table
-                                .insert(member_access_expr.id, field_info.ty);
-
-                            // Return the field type
-                            field_info.ty
-                        }
-                        None => {
-                            // error for accessing undefined field
-                            let err = YuuError::builder()
-                                .kind(ErrorKind::ReferencedUndeclaredField)
-                                .message(format!(
-                                    "Struct '{}' has no field named '{}'",
-                                    s.name, member_access_expr.field.name
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(
-                                    member_access_expr.field.span.clone(),
-                                    "attempted to access undefined field",
-                                )
-                                .label(
-                                    member_access_expr.lhs.span().clone(),
-                                    format!("this expression has type '{}'", s.name),
-                                )
-                                .help(format!(
-                                    "Available fields for struct '{}': {}",
-                                    s.name,
-                                    if si.fields.is_empty() {
-                                        "none".to_string()
-                                    } else {
-                                        si.fields
-                                            .keys()
-                                            .map(|k| k.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    }
-                                ))
-                                .build();
-                            data.errors.push(err);
-
-                            // Register error type and return it
-                            data.type_registry
-                                .type_info_table
-                                .insert(member_access_expr.id, error_type());
-                            error_type()
-                        }
-                    }
-                }
-                _ => {
-                    // error for member access on non-struct type
-                    let err = YuuError::builder()
-                        .kind(ErrorKind::InvalidExpression)
-                        .message(format!(
-                            "Cannot access field '{}' on value of type '{}'",
-                            member_access_expr.field.name, lhs_ty
-                        ))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            member_access_expr.span.clone(),
-                            "attempted member access on non-struct type",
-                        )
-                        .label(
-                            member_access_expr.lhs.span().clone(),
-                            format!("this expression has type '{}'", lhs_ty),
-                        )
-                        .label(
-                            member_access_expr.field.span.clone(),
-                            "field access attempted here",
-                        )
-                        .help("Member access is only supported on struct types")
-                        .build();
-                    data.errors.push(err);
-
-                    // Register error type and return it
-                    data.type_registry
-                        .type_info_table
-                        .insert(member_access_expr.id, error_type());
-                    error_type()
-                }
-            }
+            infer_member_access(member_access_expr, block, data)
         }
+
+        ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
     }
 }

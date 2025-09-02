@@ -18,45 +18,45 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
             crate::pass_parse::ast::BuiltInTypeKind::Bool => primitive_bool(),
         },
         TypeNode::Ident(ident) => {
-            let s = data.type_registry.resolve_struct(ident.name);
-            match s {
-                Some(structinfo) => structinfo.ty,
-                None => {
-                    // TODO: Implement type inference for functions
-                    let help_msg = data
-                        .type_registry
-                        .get_similar_names_struct(ident.name, 3)
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>();
-                    let help_msg = if !help_msg.is_empty() {
-                        Some(format!(
-                            "Did you mean one of these?\n{}\n",
-                            help_msg.join("\n")
-                        ))
-                    } else {
-                        None
-                    };
+            // Try to resolve as either a struct or enum
+            let type_info = data.type_registry.resolve_struct_or_enum(ident.name);
+            if let Some(info) = type_info {
+                info.ty()
+            } else {
+                // TODO: Implement type inference for functions
+                let help_msg = data
+                    .type_registry
+                    .get_similar_names_struct(ident.name, 3)
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>();
+                let help_msg = if !help_msg.is_empty() {
+                    Some(format!(
+                        "Did you mean one of these?\n{}\n",
+                        help_msg.join("\n")
+                    ))
+                } else {
+                    None
+                };
 
-                    let mut message = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndefinedStruct)
-                        .message(format!("Cannot find struct type '{}'", ident.name))
-                        .source(
-                            data.src_code.source.clone(),
-                            data.src_code.file_name.clone(),
-                        )
-                        .span(
-                            ident.span.clone(),
-                            format!("'{}' is not defined", ident.name),
-                        );
+                let mut message = YuuError::builder()
+                    .kind(ErrorKind::ReferencedUndefinedStruct)
+                    .message(format!("Cannot find struct type '{}'", ident.name))
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(
+                        ident.span.clone(),
+                        format!("'{}' is not defined", ident.name),
+                    );
 
-                    if let Some(help_msg) = help_msg {
-                        message = message.help(help_msg);
-                    }
-                    let message = message.build();
-                    data.errors.push(message);
-                    error_type()
+                if let Some(help_msg) = help_msg {
+                    message = message.help(help_msg);
                 }
+                let message = message.build();
+                data.errors.push(message);
+                error_type()
             }
         }
     };

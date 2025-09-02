@@ -1,13 +1,15 @@
+
 use crate::{
-    Context,
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode},
     pass_type_inference::{
+        EnumVariantInfo,
         binding_info::BindingInfo,
+        error_type, inactive_type,
+        type_info::TypeInfo,
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
     pass_yir_lowering::block::{Block, RootBlock},
-    scheduling::scheduler::{Pass, ResourceId},
 };
 
 use super::{declare_function, infer_structural, infer_type};
@@ -17,15 +19,10 @@ pub struct TransientData<'a> {
     pub ast: &'a AST,
     pub errors: Vec<YuuError>,
     pub src_code: SourceInfo,
+    pub current_function_return_type: &'static TypeInfo,
 }
 
 pub struct TypeInferenceErrors(pub Vec<YuuError>);
-
-impl ResourceId for TypeInferenceErrors {
-    fn resource_name() -> &'static str {
-        "TypeInferenceErrors"
-    }
-}
 
 impl<'a> TransientData<'a> {
     pub fn new(type_registry: &'a mut TypeRegistry, ast: &'a AST, src_code: SourceInfo) -> Self {
@@ -34,58 +31,36 @@ impl<'a> TransientData<'a> {
             ast,
             errors: Vec::default(),
             src_code,
+            current_function_return_type: inactive_type(),
         }
+    }
+
+    pub fn set_current_function_return_type(&mut self, return_type: &'static TypeInfo) {
+        self.current_function_return_type = return_type;
     }
 }
 
-pub struct PassTypeInference;
+pub struct TypeInference;
 
-impl Default for PassTypeInference {
+impl Default for TypeInference {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PassTypeInference {
+impl TypeInference {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-fn collect_structural(structural: &StructuralNode, data: &mut TransientData, block: &mut Block) {
+fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData) {
     match structural {
-        StructuralNode::FuncDecl(decl) => {
-            declare_function(
-                decl.name,
-                &decl.args,
-                &decl.ret_ty,
-                decl.id,
-                decl.span.clone(),
-                block,
-                data,
-            );
-        }
-        StructuralNode::FuncDef(def) => {
-            let ret = declare_function(
-                def.decl.name,
-                &def.decl.args,
-                &def.decl.ret_ty,
-                def.id,
-                def.decl.span.clone(),
-                block,
-                data,
-            );
-            data.type_registry.type_info_table.insert(def.body.id, ret);
-        }
-        StructuralNode::Error(_) => (),
-        StructuralNode::StructDecl(_struct_decl) => {
-            unimplemented!("StructDecls are not supported");
-        }
         StructuralNode::StructDef(struct_def) => {
             let mut struct_defs = FieldsMap::default();
 
             for field in &struct_def.fields {
-                let ty = infer_type(&field.ty, data);
+                let ty = inactive_type(); //later: infer_type(&field.ty, data); See below for reason
                 let sfi = StructFieldInfo {
                     name: field.name,
                     ty,
@@ -106,49 +81,155 @@ fn collect_structural(structural: &StructuralNode, data: &mut TransientData, blo
                 },
             );
         }
+        StructuralNode::EnumDef(ed) => {
+            let mut enum_variant_defs = FieldsMap::default();
+
+            for (idx, variant) in ed.variants.iter().enumerate() {
+                let evi = EnumVariantInfo {
+                    variant_name: variant.name,
+                    variant_idx: idx as u64,
+                    binding_info: BindingInfo {
+                        id: variant.id,
+                        src_location: Some(variant.span.clone()),
+                    },
+                    variant: variant.data_type.as_ref().map(|_x| error_type()), // For collecting, we have to first declare everything as error_type, as we don't have all type info right now - later then: variant.data_type.as_ref().map(|x| infer_type(x, data)),
+                };
+                enum_variant_defs.insert(variant.name, evi);
+            }
+
+            data.type_registry.add_enum(
+                ed.decl.name,
+                enum_variant_defs,
+                BindingInfo {
+                    id: ed.id,
+                    src_location: Some(ed.span.clone()),
+                },
+            );
+        }
+        _ => (),
     };
 }
 
-impl Pass for PassTypeInference {
-    fn run(&self, context: &mut Context) -> anyhow::Result<()> {
+fn declare_and_define_functions(
+    structural: &StructuralNode,
+    data: &mut TransientData,
+    block: &mut Block,
+) {
+    match structural {
+        StructuralNode::FuncDecl(decl) => {
+            declare_function(
+                decl.name,
+                &decl.args,
+                &decl.ret_ty,
+                decl.id,
+                decl.span.clone(),
+                block,
+                data,
+            );
+        }
+        StructuralNode::FuncDef(def) => {
+            let ret_type = declare_function(
+                def.decl.name,
+                &def.decl.args,
+                &def.decl.ret_ty,
+                def.id,
+                def.decl.span.clone(),
+                block,
+                data,
+            );
+            data.type_registry
+                .type_info_table
+                .insert(def.body.id, ret_type);
+        }
+        _ => (),
+    };
+}
+
+fn define_user_def_types(
+    structural: &StructuralNode,
+    data: &mut TransientData,
+    helper_vec: &mut Vec<&'static TypeInfo>,
+) {
+    helper_vec.clear();
+    match structural {
+        StructuralNode::StructDef(struct_def_structural) => {
+            for field in &struct_def_structural.fields {
+                let ty = infer_type(&field.ty, data);
+                helper_vec.push(ty);
+            }
+
+            // Then, get the mutable reference and update the types
+            let sfi = data
+                .type_registry
+                .resolve_struct_mut(struct_def_structural.decl.name)
+                .unwrap();
+
+            for (ty, (_sfi_field_name, sfi_info)) in helper_vec.iter().zip(sfi.fields.iter_mut()) {
+                sfi_info.ty = *ty;
+            }
+        }
+        StructuralNode::EnumDef(enum_def_structural) => {
+            for variant in &enum_def_structural.variants {
+                let ty = variant.data_type.as_ref().map(|ty| infer_type(ty, data));
+                helper_vec.push(ty.unwrap_or_else(|| error_type())); // Use error_type as placeholder for None
+            }
+
+            // Then, get the mutable reference and update the types
+            let evi = data
+                .type_registry
+                .resolve_enum_mut(enum_def_structural.decl.name)
+                .unwrap();
+
+            for ((variant, ty), (_evi_variant_name, evi_info)) in enum_def_structural
+                .variants
+                .iter()
+                .zip(helper_vec.iter())
+                .zip(evi.variants.iter_mut())
+            {
+                if variant.data_type.is_some() {
+                    evi_info.variant = Some(*ty);
+                }
+            }
+        }
+        _ => (),
+    }
+}
+
+impl TypeInference {
+    pub fn run(
+        &self,
+        ast: &AST,
+        src_code: SourceInfo,
+    ) -> miette::Result<(TypeRegistry, Box<RootBlock>, TypeInferenceErrors)> {
         let mut root_block = RootBlock::new();
-        let ast = context.get_resource::<AST>(self);
         let mut type_registry = TypeRegistry::new();
+        let errors = {
+            let mut data = TransientData::new(&mut type_registry, ast, src_code);
+            let mut helper_vec = Vec::<&'static TypeInfo>::new();
 
-        let ast = ast.lock().unwrap();
-        let ast = &*ast;
+            // First pass: declare user-defined types (structs and enums)
+            for node in &ast.structurals {
+                declare_user_def_types(node, &mut data);
+            }
 
-        let src_code = context.get_resource::<SourceInfo>(self);
-        let src_code = src_code.lock().unwrap();
+            // Second pass: define user-defined types right after declaration
+            for node in &ast.structurals {
+                define_user_def_types(node, &mut data, &mut helper_vec);
+            }
 
-        let mut data = TransientData::new(&mut type_registry, ast, src_code.clone());
+            // Third pass: declare and define functions (can be done together since functions signatures don't reference each other)
+            for node in &ast.structurals {
+                declare_and_define_functions(node, &mut data, root_block.root_mut());
+            }
 
-        for node in &ast.structurals {
-            collect_structural(node, &mut data, root_block.root_mut());
-        }
+            // Fourth pass: infer the structural elements
+            for node in &ast.structurals {
+                infer_structural(node, root_block.root_mut(), &mut data);
+            }
 
-        for node in &ast.structurals {
-            infer_structural(node, root_block.root_mut(), &mut data);
-        }
+            data.errors
+        };
 
-        context.add_pass_data(TypeInferenceErrors(data.errors));
-        context.add_pass_data(type_registry);
-        context.add_pass_data(root_block);
-        Ok(())
-    }
-    fn install(self, schedule: &mut crate::scheduling::scheduler::Schedule)
-    where
-        Self: Sized,
-    {
-        schedule.produces_resource::<Box<RootBlock>>(&self);
-        schedule.produces_resource::<TypeInferenceErrors>(&self);
-        schedule.produces_resource::<TypeRegistry>(&self);
-        schedule.requires_resource_read::<AST>(&self);
-        schedule.requires_resource_read::<SourceInfo>(&self);
-        schedule.add_pass(self);
-    }
-
-    fn get_name(&self) -> &'static str {
-        "TypeInference"
+        Ok((type_registry, root_block, TypeInferenceErrors(errors)))
     }
 }

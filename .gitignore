@@ -1,1 +1,5 @@
 /target
+.vscode
+.claude
+.DS_STORE
+build
