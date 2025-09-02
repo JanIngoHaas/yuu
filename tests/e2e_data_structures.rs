@@ -31,7 +31,7 @@ fn test_vector_operations() {
             return 0 .
     "#;
 
-    let executable = run_to_executable(source, "test_vector_ops.yuu")
+    let executable = run_to_executable(source, "test_vector_operations.yuu")
         .expect("Failed to compile vector operations test");
 
     let output =
@@ -67,7 +67,7 @@ fn test_matrix_operations() {
             return 0 .
     "#;
 
-    let executable = run_to_executable(source, "test_matrix_ops.yuu")
+    let executable = run_to_executable(source, "test_matrix_operations.yuu")
         .expect("Failed to compile matrix operations test");
 
     let output =
@@ -103,7 +103,7 @@ fn test_point_distance_calculations() {
             return 0 .
     "#;
 
-    let executable = run_to_executable(source, "test_point_ops.yuu")
+    let executable = run_to_executable(source, "test_point_distance_calculations.yuu")
         .expect("Failed to compile point operations test");
 
     let output =
@@ -228,7 +228,7 @@ fn test_complex_number_operations() {
             return 0 .
     "#;
 
-    let executable = run_to_executable(source, "test_complex_ops.yuu")
+    let executable = run_to_executable(source, "test_complex_number_operations.yuu")
         .expect("Failed to compile complex operations test");
 
     let output = run_executable_with_output(&executable, &[])

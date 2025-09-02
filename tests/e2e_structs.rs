@@ -17,8 +17,8 @@ fn test_simple_struct_definition() {
             return p.x + p.y .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_struct.yuu").expect("Failed to compile struct test");
+    let executable = run_to_executable(source, "test_simple_struct_definition.yuu")
+        .expect("Failed to compile struct test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run struct test");
 
@@ -39,7 +39,7 @@ fn test_struct_with_different_types() {
             return m.count .
     "#;
 
-    let executable = run_to_executable(source, "test_mixed_struct.yuu")
+    let executable = run_to_executable(source, "test_struct_with_different_types.yuu")
         .expect("Failed to compile mixed struct test");
 
     let output =
@@ -88,7 +88,7 @@ fn test_struct_as_function_parameter() {
             return distance_from_origin(p) .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_param.yuu")
+    let executable = run_to_executable(source, "test_struct_as_function_parameter.yuu")
         .expect("Failed to compile struct param test");
 
     let output =
@@ -114,7 +114,7 @@ fn test_struct_as_return_value() {
             return p.x + p.y .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_return.yuu")
+    let executable = run_to_executable(source, "test_struct_as_return_value.yuu")
         .expect("Failed to compile struct return test");
 
     let output =
@@ -142,7 +142,7 @@ fn test_nested_struct_fields() {
             return outer.inner.value + outer.count .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_struct.yuu")
+    let executable = run_to_executable(source, "test_nested_struct_fields.yuu")
         .expect("Failed to compile nested struct test");
 
     let output =

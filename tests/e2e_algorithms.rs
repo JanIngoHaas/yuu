@@ -22,8 +22,8 @@ fn test_fibonacci_recursive() {
 
     // println!("{}", yir);
 
-    let executable =
-        run_to_executable(source, "test_fibonacci.yuu").expect("Failed to compile fibonacci test");
+    let executable = run_to_executable(source, "test_fibonacci_recursive.yuu")
+        .expect("Failed to compile fibonacci test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run fibonacci test");
@@ -43,8 +43,8 @@ fn test_factorial_recursive() {
         fn main() -> i64: return factorial(6) .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_factorial.yuu").expect("Failed to compile factorial test");
+    let executable = run_to_executable(source, "test_factorial_recursive.yuu")
+        .expect("Failed to compile factorial test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run factorial test");
@@ -68,7 +68,7 @@ fn test_factorial_iterative() {
         fn main() -> i64: return factorial_iter(5) .
     "#;
 
-    let executable = run_to_executable(source, "test_factorial_iter.yuu")
+    let executable = run_to_executable(source, "test_factorial_iterative.yuu")
         .expect("Failed to compile iterative factorial test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -89,7 +89,8 @@ fn test_gcd_algorithm() {
         fn main() -> i64: return gcd(48, 18) .
     "#;
 
-    let executable = run_to_executable(source, "test_gcd.yuu").expect("Failed to compile GCD test");
+    let executable =
+        run_to_executable(source, "test_gcd_algorithm.yuu").expect("Failed to compile GCD test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run GCD test");
 
@@ -110,7 +111,7 @@ fn test_power_function() {
     "#;
 
     let executable =
-        run_to_executable(source, "test_power.yuu").expect("Failed to compile power test");
+        run_to_executable(source, "test_power_function.yuu").expect("Failed to compile power test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run power test");
 
@@ -133,7 +134,7 @@ fn test_sum_of_squares() {
         fn main() -> i64: return sum_of_squares(5) .
     "#;
 
-    let executable = run_to_executable(source, "test_sum_squares.yuu")
+    let executable = run_to_executable(source, "test_sum_of_squares.yuu")
         .expect("Failed to compile sum of squares test");
 
     let output =
@@ -231,8 +232,8 @@ fn test_collatz_sequence() {
         fn main() -> i64: return collatz_length(7) .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_collatz.yuu").expect("Failed to compile collatz test");
+    let executable = run_to_executable(source, "test_collatz_sequence.yuu")
+        .expect("Failed to compile collatz test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run collatz test");
 

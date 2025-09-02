@@ -8,7 +8,7 @@ use common::*;
 fn test_integer_literals() {
     let source = r#"fn main() -> i64: return 42 ."#;
 
-    let executable = run_to_executable(source, "test_integer.yuu")
+    let executable = run_to_executable(source, "test_integer_literals.yuu")
         .expect("Failed to compile integer literal test");
 
     let output =
@@ -25,8 +25,8 @@ fn test_float_literals() {
         return 0 .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_float.yuu").expect("Failed to compile float literal test");
+    let executable = run_to_executable(source, "test_float_literals.yuu")
+        .expect("Failed to compile float literal test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run float literal test");
@@ -46,7 +46,7 @@ fn test_arithmetic_operations() {
         return sum + diff + prod + quot .
     "#;
 
-    let executable = run_to_executable(source, "test_arithmetic.yuu")
+    let executable = run_to_executable(source, "test_arithmetic_operations.yuu")
         .expect("Failed to compile arithmetic test");
 
     let output =
@@ -67,7 +67,7 @@ fn test_comparison_operations() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_comparison.yuu")
+    let executable = run_to_executable(source, "test_comparison_operations.yuu")
         .expect("Failed to compile comparison test");
 
     let output =
@@ -85,7 +85,7 @@ fn test_unary_operations() {
         return neg_x + pos_x .
     "#;
 
-    let executable = run_to_executable(source, "test_unary.yuu")
+    let executable = run_to_executable(source, "test_unary_operations.yuu")
         .expect("Failed to compile unary operations test");
 
     let output =
@@ -103,8 +103,8 @@ fn test_mixed_type_expressions() {
         return int_val .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_mixed.yuu").expect("Failed to compile mixed type test");
+    let executable = run_to_executable(source, "test_mixed_type_expressions.yuu")
+        .expect("Failed to compile mixed type test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run mixed type test");
@@ -119,7 +119,7 @@ fn test_operator_precedence() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_precedence.yuu")
+    let executable = run_to_executable(source, "test_operator_precedence.yuu")
         .expect("Failed to compile precedence test");
 
     let output =
@@ -136,8 +136,8 @@ fn test_parenthesized_expressions() {
         return result .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_parens.yuu").expect("Failed to compile parenthesized test");
+    let executable = run_to_executable(source, "test_parenthesized_expressions.yuu")
+        .expect("Failed to compile parenthesized test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run parenthesized test");

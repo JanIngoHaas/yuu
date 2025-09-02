@@ -26,7 +26,7 @@ fn test_simple_enum_definition_and_instantiation() {
             return color_value(color) .
     "#;
 
-    let executable = run_to_executable(source, "test_simple_enum.yuu")
+    let executable = run_to_executable(source, "test_simple_enum_definition_and_instantiation.yuu")
         .expect("Failed to compile simple enum test");
 
     let output =
@@ -94,7 +94,7 @@ fn test_enum_match_unit_variants() {
             return color_to_number(red) + color_to_number(green) + color_to_number(blue) .
     "#;
 
-    let executable = run_to_executable(source, "test_enum_match_unit.yuu")
+    let executable = run_to_executable(source, "test_enum_match_unit_variants.yuu")
         .expect("Failed to compile enum match unit variants test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -127,7 +127,7 @@ fn test_enum_match_data_variants() {
             return result1 + result2 .
     "#;
 
-    let executable = run_to_executable(source, "test_enum_match_data.yuu")
+    let executable = run_to_executable(source, "test_enum_match_data_variants.yuu")
         .expect("Failed to compile enum match data variants test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -174,7 +174,7 @@ fn test_nested_enum_variants() {
             return r1 + r2 + r3 .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_enum.yuu")
+    let executable = run_to_executable(source, "test_nested_enum_variants.yuu")
         .expect("Failed to compile nested enum test");
 
     let output =

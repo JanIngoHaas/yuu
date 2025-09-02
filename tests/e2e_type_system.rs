@@ -12,7 +12,7 @@ fn test_type_inference_basic() {
         return x .
     "#;
 
-    let executable = run_to_executable(source, "test_type_infer.yuu")
+    let executable = run_to_executable(source, "test_type_inference_basic.yuu")
         .expect("Failed to compile type inference test");
 
     let output =
@@ -29,7 +29,7 @@ fn test_explicit_type_annotations() {
         return x .
     "#;
 
-    let executable = run_to_executable(source, "test_explicit_types.yuu")
+    let executable = run_to_executable(source, "test_explicit_type_annotations.yuu")
         .expect("Failed to compile explicit types test");
 
     let output =
@@ -53,7 +53,7 @@ fn test_function_parameter_types() {
             return int_result .
     "#;
 
-    let executable = run_to_executable(source, "test_param_types.yuu")
+    let executable = run_to_executable(source, "test_function_parameter_types.yuu")
         .expect("Failed to compile parameter types test");
 
     let output =
@@ -77,7 +77,7 @@ fn test_return_type_matching() {
             return int_val .
     "#;
 
-    let executable = run_to_executable(source, "test_return_types.yuu")
+    let executable = run_to_executable(source, "test_return_type_matching.yuu")
         .expect("Failed to compile return types test");
 
     let output =
@@ -102,7 +102,7 @@ fn test_struct_type_checking() {
             return distance_squared(p) .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_types.yuu")
+    let executable = run_to_executable(source, "test_struct_type_checking.yuu")
         .expect("Failed to compile struct types test");
 
     let output =

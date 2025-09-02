@@ -11,7 +11,7 @@ fn test_let_binding_with_type_inference() {
         return x .
     "#;
 
-    let executable = run_to_executable(source, "test_let_infer.yuu")
+    let executable = run_to_executable(source, "test_let_binding_with_type_inference.yuu")
         .expect("Failed to compile let binding test");
 
     let output =
@@ -27,7 +27,7 @@ fn test_let_binding_with_explicit_type() {
         return x .
     "#;
 
-    let executable = run_to_executable(source, "test_let_explicit.yuu")
+    let executable = run_to_executable(source, "test_let_binding_with_explicit_type.yuu")
         .expect("Failed to compile explicit type test");
 
     let output =
@@ -44,8 +44,8 @@ fn test_mut_variable_assignment() {
         return x .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_mut.yuu").expect("Failed to compile mut assignment test");
+    let executable = run_to_executable(source, "test_mut_variable_assignment.yuu")
+        .expect("Failed to compile mut assignment test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run mut assignment test");
@@ -62,7 +62,7 @@ fn test_multiple_variable_declarations() {
         return c .
     "#;
 
-    let executable = run_to_executable(source, "test_multiple_vars.yuu")
+    let executable = run_to_executable(source, "test_multiple_variable_declarations.yuu")
         .expect("Failed to compile multiple vars test");
 
     let output =
@@ -79,8 +79,8 @@ fn test_variable_shadowing() {
         return x .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_shadowing.yuu").expect("Failed to compile shadowing test");
+    let executable = run_to_executable(source, "test_variable_shadowing.yuu")
+        .expect("Failed to compile shadowing test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run shadowing test");
@@ -97,8 +97,8 @@ fn test_mut_variable_operations() {
         return counter .
     "#;
 
-    let executable = run_to_executable(source, "test_mut_ops.yuu")
-        .expect("Failed to compile mut operations test");
+    let executable = run_to_executable(source, "test_mut_variable_operations.yuu")
+        .expect("Failed to compile mut ops test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run mut operations test");
@@ -116,7 +116,7 @@ fn test_float_variables() {
         return 0 .
     "#;
 
-    let executable = run_to_executable(source, "test_float_vars.yuu")
+    let executable = run_to_executable(source, "test_float_variables.yuu")
         .expect("Failed to compile float vars test");
 
     let output =
@@ -133,7 +133,7 @@ fn test_mixed_type_variables() {
         return int_var .
     "#;
 
-    let executable = run_to_executable(source, "test_mixed_vars.yuu")
+    let executable = run_to_executable(source, "test_mixed_type_variables.yuu")
         .expect("Failed to compile mixed type vars test");
 
     let output =

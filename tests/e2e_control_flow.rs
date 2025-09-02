@@ -14,7 +14,8 @@ fn test_simple_if_expression() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_if.yuu").expect("Failed to compile if test");
+    let executable = run_to_executable(source, "test_simple_if_expression.yuu")
+        .expect("Failed to compile if test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run if test");
 
@@ -55,8 +56,8 @@ fn test_nested_if_expressions() {
         return result .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_nested_if.yuu").expect("Failed to compile nested if test");
+    let executable = run_to_executable(source, "test_nested_if_expressions.yuu")
+        .expect("Failed to compile nested if test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run nested if test");
@@ -77,7 +78,7 @@ fn test_while_loop() {
     "#;
 
     let executable =
-        run_to_executable(source, "test_while.yuu").expect("Failed to compile while test");
+        run_to_executable(source, "test_while_loop.yuu").expect("Failed to compile while test");
 
     let output = run_executable_with_output(&executable, &[]).expect("Failed to run while test");
 
@@ -121,7 +122,7 @@ fn test_nested_while_loops() {
         return sum .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_while.yuu")
+    let executable = run_to_executable(source, "test_nested_while_loops.yuu")
         .expect("Failed to compile nested while test");
 
     let output =

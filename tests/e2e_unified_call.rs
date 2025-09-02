@@ -20,7 +20,7 @@ fn test_method_style_call() {
             return p.distance() .
     "#;
 
-    let executable = run_to_executable(source, "test_method_call.yuu")
+    let executable = run_to_executable(source, "test_method_style_call.yuu")
         .expect("Failed to compile method call test");
 
     let output =
@@ -47,7 +47,7 @@ fn test_method_with_additional_params() {
             return translated.x + translated.y .
     "#;
 
-    let executable = run_to_executable(source, "test_method_params.yuu")
+    let executable = run_to_executable(source, "test_method_with_additional_params.yuu")
         .expect("Failed to compile method with params test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -76,7 +76,7 @@ fn test_chained_method_calls() {
             return result.value .
     "#;
 
-    let executable = run_to_executable(source, "test_chained_calls.yuu")
+    let executable = run_to_executable(source, "test_chained_method_calls.yuu")
         .expect("Failed to compile chained calls test");
 
     let output =
@@ -106,7 +106,7 @@ fn test_mixed_call_styles() {
             return v1.scale(2).dot_product(v2) .
     "#;
 
-    let executable = run_to_executable(source, "test_mixed_calls.yuu")
+    let executable = run_to_executable(source, "test_mixed_call_styles.yuu")
         .expect("Failed to compile mixed calls test");
 
     let output =
@@ -138,7 +138,7 @@ fn test_long_method_chain() {
             return result.value .
     "#;
 
-    let executable = run_to_executable(source, "test_long_chain.yuu")
+    let executable = run_to_executable(source, "test_long_method_chain.yuu")
         .expect("Failed to compile long chain test");
 
     let output =
@@ -167,7 +167,7 @@ fn test_method_call_with_complex_expression() {
             return p1.distance_to(p2) .
     "#;
 
-    let executable = run_to_executable(source, "test_complex_method.yuu")
+    let executable = run_to_executable(source, "test_method_call_with_complex_expression.yuu")
         .expect("Failed to compile complex method test");
 
     let output =
@@ -195,7 +195,7 @@ fn test_nested_method_calls() {
             return result .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_methods.yuu")
+    let executable = run_to_executable(source, "test_nested_method_calls.yuu")
         .expect("Failed to compile nested methods test");
 
     let output =
@@ -222,7 +222,7 @@ fn test_method_call_in_expression() {
             return result .
     "#;
 
-    let executable = run_to_executable(source, "test_method_in_expr.yuu")
+    let executable = run_to_executable(source, "test_method_call_in_expression.yuu")
         .expect("Failed to compile method in expression test");
 
     let output = run_executable_with_output(&executable, &[])

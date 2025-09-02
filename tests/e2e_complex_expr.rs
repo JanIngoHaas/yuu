@@ -11,7 +11,7 @@ fn test_complex_arithmetic_expression() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_complex_arithmetic.yuu")
+    let executable = run_to_executable(source, "test_complex_arithmetic_expression.yuu")
         .expect("Failed to compile complex arithmetic test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -28,7 +28,7 @@ fn test_nested_parentheses() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_parens.yuu")
+    let executable = run_to_executable(source, "test_nested_parentheses.yuu")
         .expect("Failed to compile nested parentheses test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -65,7 +65,7 @@ fn test_mixed_unary_binary_operators() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_mixed_operators.yuu")
+    let executable = run_to_executable(source, "test_mixed_unary_binary_operators.yuu")
         .expect("Failed to compile mixed operators test");
 
     let output =
@@ -86,7 +86,7 @@ fn test_function_call_in_expression() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_func_in_expr.yuu")
+    let executable = run_to_executable(source, "test_function_call_in_expression.yuu")
         .expect("Failed to compile function in expression test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -106,7 +106,7 @@ fn test_deep_expression_nesting() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_deep_nesting.yuu")
+    let executable = run_to_executable(source, "test_deep_expression_nesting.yuu")
         .expect("Failed to compile deep nesting test");
 
     let output =
@@ -148,7 +148,7 @@ fn test_assignment_in_expression() {
         return result .
     "#;
 
-    let executable = run_to_executable(source, "test_assignment_expr.yuu")
+    let executable = run_to_executable(source, "test_assignment_in_expression.yuu")
         .expect("Failed to compile assignment expression test");
 
     let output = run_executable_with_output(&executable, &[])
@@ -193,7 +193,7 @@ fn test_expression_with_struct_access() {
             return result .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_access_expr.yuu")
+    let executable = run_to_executable(source, "test_expression_with_struct_access.yuu")
         .expect("Failed to compile struct access expression test");
 
     let output = run_executable_with_output(&executable, &[])

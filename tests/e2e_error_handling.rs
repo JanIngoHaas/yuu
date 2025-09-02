@@ -13,7 +13,7 @@ fn test_syntax_error_recovery() {
     "#; // Missing semicolon after x = 5
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_syntax_error.yuu");
+    let result = run_to_executable(source, "test_syntax_error_recovery.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to syntax error"
@@ -32,7 +32,7 @@ fn test_type_error_detection() {
     "#; // Passing float to function expecting int
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_type_error.yuu");
+    let result = run_to_executable(source, "test_type_error_detection.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to type error"
@@ -48,7 +48,7 @@ fn test_undefined_variable_error() {
     "#; // undefined_var is not defined
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_undefined_var.yuu");
+    let result = run_to_executable(source, "test_undefined_variable_error.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to undefined variable"
@@ -62,7 +62,7 @@ fn test_undefined_function_error() {
     "#; // undefined_function is not defined
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_undefined_func.yuu");
+    let result = run_to_executable(source, "test_undefined_function_error.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to undefined function"
@@ -80,7 +80,7 @@ fn test_wrong_number_of_arguments() {
     "#; // add_ expects 2 arguments, got 1
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_wrong_args.yuu");
+    let result = run_to_executable(source, "test_wrong_number_of_arguments.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to wrong number of arguments"
@@ -147,7 +147,10 @@ fn test_successful_compilation_after_error_fix() {
         return x .
     "#; // Missing semicolon
 
-    let result = run_to_executable(source_with_error, "test_error_fix.yuu");
+    let result = run_to_executable(
+        source_with_error,
+        "test_successful_compilation_after_error_fix.yuu",
+    );
     assert!(result.is_err(), "Expected compilation to fail");
 
     // Now try with fixed version
@@ -156,8 +159,11 @@ fn test_successful_compilation_after_error_fix() {
         return x .
     "#;
 
-    let executable = run_to_executable(source_fixed, "test_error_fix.yuu")
-        .expect("Expected compilation to succeed after fix");
+    let executable = run_to_executable(
+        source_fixed,
+        "test_successful_compilation_after_error_fix.yuu",
+    )
+    .expect("Expected compilation to succeed after fix");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Expected execution to succeed");
@@ -175,7 +181,7 @@ fn test_multiple_errors_in_source() {
     "#; // Multiple errors: missing semicolon, undefined variable, immutable assignment
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_multiple_errors.yuu");
+    let result = run_to_executable(source, "test_multiple_errors_in_source.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to multiple errors"
@@ -195,7 +201,7 @@ fn test_recursive_type_error() {
     "#; // Node contains itself directly, causing infinite size
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_recursive_type.yuu");
+    let result = run_to_executable(source, "test_recursive_type_error.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to recursive type definition"
@@ -225,7 +231,7 @@ fn test_indirect_recursive_type_error() {
     "#; // A -> B -> C -> A creates a three-layer cycle
 
     // This should fail to compile
-    let result = run_to_executable(source, "test_indirect_recursive.yuu");
+    let result = run_to_executable(source, "test_indirect_recursive_type_error.yuu");
     assert!(
         result.is_err(),
         "Expected compilation to fail due to indirect recursive types"

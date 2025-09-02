@@ -12,7 +12,7 @@ fn test_simple_function_call() {
         fn main() -> i64: return add_(5, 3) .
     "#;
 
-    let executable = run_to_executable(source, "test_func_call.yuu")
+    let executable = run_to_executable(source, "test_simple_function_call.yuu")
         .expect("Failed to compile function call test");
 
     let output =
@@ -29,8 +29,8 @@ fn test_function_with_no_params() {
         fn main() -> i64: return get_answer() .
     "#;
 
-    let executable =
-        run_to_executable(source, "test_no_params.yuu").expect("Failed to compile no params test");
+    let executable = run_to_executable(source, "test_function_with_no_params.yuu")
+        .expect("Failed to compile no params test");
 
     let output =
         run_executable_with_output(&executable, &[]).expect("Failed to run no params test");
@@ -46,7 +46,7 @@ fn test_function_with_multiple_params() {
         fn main() -> i64: return calc(1, 2, 3) .
     "#;
 
-    let executable = run_to_executable(source, "test_multi_params.yuu")
+    let executable = run_to_executable(source, "test_function_with_multiple_params.yuu")
         .expect("Failed to compile multi params test");
 
     let output =
@@ -66,7 +66,7 @@ fn test_nested_function_calls() {
         fn multiply(a: i64, b: i64) -> i64: return a * b .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_calls.yuu")
+    let executable = run_to_executable(source, "test_nested_function_calls.yuu")
         .expect("Failed to compile nested calls test");
 
     let output =
@@ -105,7 +105,7 @@ fn test_function_with_mutable_params() {
         fn main() -> i64: return modify_value(5) .
     "#;
 
-    let executable = run_to_executable(source, "test_mut_params.yuu")
+    let executable = run_to_executable(source, "test_function_with_mutable_params.yuu")
         .expect("Failed to compile mut params test");
 
     let output =
