@@ -306,56 +306,6 @@ impl YuuErrorBuilder {
     }
 }
 
-// create related info
-// pub fn related_info(
-//     message: impl Into<String>,
-//     location: Option<(impl Into<SourceSpan>, impl Into<String>)>,
-// ) -> MietteDiagnostic {
-//     let mut diagnostic = MietteDiagnostic::new(message.into());
-
-//     if let Some((span, label)) = location {
-//         let span = span.into();
-//         let label_span = LabeledSpan::new(Some(label.into()), span.offset(), span.len());
-//         diagnostic = diagnostic.with_labels(vec![label_span]);
-//     }
-
-//     diagnostic
-// }
-
-/// Configure miette with syntax highlighting and other nice features
-///
-/// This function sets up miette with syntax highlighting for code in error messages.
-/// You can optionally specify a custom theme name and whether to use background colors.
-///
-/// # Available themes
-/// - "InspiredGitHub" (light)
-/// - "Solarized (light)"
-/// - "Solarized (dark)"
-/// - "base16-ocean.dark" (default)
-/// - "base16-eighties.dark"
-/// - "base16-mocha.dark"
-/// - "base16-ocean.light"
-///
-/// # Arguments
-/// * `theme_name` - Optional theme name to use. Defaults to "base16-ocean.dark" if None or if the specified theme is not found.
-/// * `use_bg_color` - Whether to use background colors in the syntax highlighting. Defaults to false.
-///
-/// # Example
-/// ```
-/// fn main() -> miette::Result<()> {
-///     // Use default theme (base16-ocean.dark)
-///     yuu_shared::error::setup_error_formatter(None, false)?;
-///     
-///     // Or use a specific theme:
-///     // yuu_shared::error::setup_error_formatter(Some("base16-mocha.dark"), true)?;
-///     
-///     // Or for a light theme:
-///     // yuu_shared::error::setup_error_formatter(Some("InspiredGitHub"), false)?;
-///     
-///     // Rest of your code...
-///     Ok(())
-/// }
-/// ```
 pub fn setup_error_formatter(
     theme_name: Option<&str>,
     use_bg_color: bool,
@@ -418,26 +368,6 @@ pub fn setup_error_formatter(
     Ok(())
 }
 
-// /// Apply a theme from YIR color palettes
-// pub fn apply_yir_theme(palette: &str) -> Result<(), miette::Error> {
-//     match palette {
-//         "warm_ember" => setup_error_formatter(Some("AutumnRust"), true),
-//         "deep_ocean" => setup_error_formatter(Some("DeepOcean"), true),
-//         "cosmic_night" => {
-//             // We could create a specific cosmic_night theme in the future
-//             setup_error_formatter(Some("base16-mocha.dark"), true)
-//         }
-//         "mystic_forest" => {
-//             // We could create a specific mystic_forest theme in the future
-//             setup_error_formatter(Some("base16-ocean.dark"), true)
-//         }
-//         _ => {
-//             // Default to AutumnRust if not recognized
-//             setup_error_formatter(Some("AutumnRust"), true)
-//         }
-//     }
-// }
-
 /// Reset miette handler to default
 ///
 /// This can be useful in tests when you want to reset the formatter
@@ -447,18 +377,6 @@ pub fn reset_error_formatter() -> Result<(), miette::Error> {
     }))?)
 }
 
-/// Return a list of all available syntax highlighting themes
-///
-/// This function can be useful for UI purposes or for providing options to users.
-///
-/// # Example
-/// ```
-///     let themes = yuu_shared::error::list_syntax_highlighting_themes();
-///     println!("Available themes:");
-///     for theme in themes {
-///         println!("  - {}", theme);
-///     }
-/// ```
 pub fn list_syntax_highlighting_themes() -> Vec<String> {
     use syntect::highlighting::ThemeSet;
 
