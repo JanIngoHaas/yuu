@@ -81,6 +81,14 @@ impl AddId for ExprNode {
                     data.add_id(generator);
                 }
             }
+            ExprNode::Deref(deref_expr) => {
+                deref_expr.id = generator.next();
+                deref_expr.operand.add_id(generator);
+            }
+            ExprNode::AddressOf(address_of_expr) => {
+                address_of_expr.id = generator.next();
+                address_of_expr.operand.add_id(generator);
+            }
         }
     }
 }
@@ -102,9 +110,9 @@ impl AddId for StmtNode {
             }
             StmtNode::Return(return_stmt) => {
                 return_stmt.id = generator.next();
-                if let Some(expr) = return_stmt
-                    .expr
-                    .as_deref_mut() { expr.add_id(generator) }
+                if let Some(expr) = return_stmt.expr.as_deref_mut() {
+                    expr.add_id(generator)
+                }
             }
             StmtNode::If(if_stmt) => {
                 if_stmt.id = generator.next();
@@ -301,6 +309,8 @@ impl GetId for ExprNode {
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
+            ExprNode::Deref(deref_expr) => deref_expr.id,
+            ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
         }
     }
 }

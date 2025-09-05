@@ -29,6 +29,7 @@ impl Parser {
     pub fn dismantle(self) -> (Vec<ParseError>, Lexer) {
         (self.errors, self.lexer)
     }
+
     fn get_infix_binding_power(op: &TokenKind) -> (i32, i32) {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
@@ -45,6 +46,8 @@ impl Parser {
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
             TokenKind::Plus | TokenKind::Minus => 13, // Unary operators bind tighter than * and +
+            TokenKind::Ampersand => 12,               // Address-of operator
+            TokenKind::Asterix => 11,                 // Dereference operator
             _ => -1,
         }
     }

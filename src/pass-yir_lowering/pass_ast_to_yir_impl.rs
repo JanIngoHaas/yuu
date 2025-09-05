@@ -114,11 +114,11 @@ impl<'a> TransientData<'a> {
             ExprNode::Ident(ident_expr) => {
                 // Find the NodeId of the variable declaration this identifier refers to
                 let binding_id = *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
-                    panic!(
-                        "Compiler Bug: No binding found for ident expr '{}': {} -> Span: {:#?}; bindings: {:#?}",
-                        ident_expr.ident, ident_expr.id, ident_expr.span, self.tr.bindings
-                    )
-                });
+                            panic!(
+                                "Compiler Bug: No binding found for ident expr '{}': {} -> Span: {:#?}; bindings: {:#?}",
+                                ident_expr.ident, ident_expr.id, ident_expr.span, self.tr.bindings
+                            )
+                        });
 
                 // Find the YIR variable associated with that declaration
                 let yir_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
@@ -149,7 +149,6 @@ impl<'a> TransientData<'a> {
 
                 result.map(Operand::Variable).unwrap_or(Operand::NoOp)
             }
-
             ExprNode::Assignment(assignment_expr) => {
                 let rhs = self.lower_expr(&assignment_expr.rhs);
                 let lhs = self.lower_expr(&assignment_expr.lhs);
@@ -221,7 +220,6 @@ impl<'a> TransientData<'a> {
                 // Return the struct variable pointer (already in pointer context from declare_var)
                 Operand::Variable(struct_var)
             }
-
             ExprNode::MemberAccess(member_access_expr) => {
                 // Lower the left-hand side expression
                 let lhs = self.lower_expr(&member_access_expr.lhs);
@@ -284,6 +282,30 @@ impl<'a> TransientData<'a> {
                 }
 
                 Operand::Variable(enum_var)
+            }
+            ExprNode::Deref(deref_expr) => {
+                let operand = self.lower_expr(&deref_expr.operand);
+                let var = self.function.make_load("deref_result".intern(), operand);
+                Operand::Variable(var)
+            }
+            ExprNode::AddressOf(address_of_expr) => {
+                let operand = self.lower_expr(&address_of_expr.operand);
+
+                let operand = match operand {
+                    Operand::Variable(var) => var,
+                    // Just create a anon variable to hold the expr result and take its address
+                    _ => {
+                        let anon_var = self.function.make_alloca(
+                            "anon_var".intern(),
+                            self.get_type(address_of_expr.operand.node_id()),
+                            Some(operand),
+                        );
+                        anon_var
+                    }
+                };
+
+                let addr = self.function.make_take_address("addr_of".intern(), operand);
+                Operand::Variable(addr)
             }
         }
     }

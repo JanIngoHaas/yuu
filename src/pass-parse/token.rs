@@ -179,6 +179,9 @@ pub enum TokenKind {
     #[token(".")]
     Dot,
 
+    #[token("&")]
+    Ampersand,
+
     #[token("@")]
     At,
 
@@ -251,6 +254,7 @@ impl Display for TokenKind {
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),
+            TokenKind::Ampersand => "'&'".fmt(f),
         }
     }
 }

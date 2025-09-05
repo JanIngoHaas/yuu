@@ -2,8 +2,8 @@ use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
 use crate::{
     pass_parse::ast::{
-        AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
-        IdentExpr, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
+        AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
+        LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     },
     pass_type_inference::type_info::{
         TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64,
@@ -695,11 +695,36 @@ pub fn infer_expr(
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
             infer_struct_instantiation(struct_instantiation_expr, block, data)
         }
-
         ExprNode::MemberAccess(member_access_expr) => {
             infer_member_access(member_access_expr, block, data)
         }
-
         ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
+
+        // TODO: Claude: Refactor --> extract function (follow pattern of other expressions)
+        ExprNode::Deref(deref_expr) => {
+            let ty = infer_expr(&deref_expr.operand, block, data, None);
+            let out = match ty {
+                TypeInfo::Pointer(pointee) => {
+                    data.type_registry
+                        .type_info_table
+                        .insert(deref_expr.id, pointee);
+                    pointee
+                }
+                _ => {
+                    todo!("TODO: Claude: Please provide a nice error message here...")
+                }
+            };
+            out
+        }
+
+        // TODO: Claude: Refactor --> extract function (follow pattern of other expressions)
+        ExprNode::AddressOf(address_of_expr) => {
+            let ty = infer_expr(&address_of_expr.operand, block, data, None);
+            let out = ty.ptr_to();
+            data.type_registry
+                .type_info_table
+                .insert(address_of_expr.id, out);
+            out
+        }
     }
 }

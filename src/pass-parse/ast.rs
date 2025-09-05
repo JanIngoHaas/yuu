@@ -166,6 +166,20 @@ pub struct UnaryExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct DerefExpr {
+    pub operand: Box<ExprNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AddressOfExpr {
+    pub operand: Box<ExprNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IdentExpr {
     pub ident: Ustr,
     pub span: Span,
@@ -245,6 +259,8 @@ pub enum ExprNode {
     StructInstantiation(StructInstantiationExpr),
     EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
+    Deref(DerefExpr),
+    AddressOf(AddressOfExpr),
     //Error,
 }
 
@@ -496,6 +512,8 @@ impl Spanned for ExprNode {
                 enum_instantiation_expr.span.clone()
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
+            ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
+            ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
         }
     }
 }
