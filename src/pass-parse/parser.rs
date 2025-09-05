@@ -266,6 +266,9 @@ impl Parser {
     ) -> ParseResult<(Span, ExprNode)> {
         let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
         let span = lhs.span().start..rhs_span.end;
+
+        // TODO: Claude: Determine assignment type (Variable, Field, Dereferenced)
+
         Ok((
             span.clone(),
             ExprNode::Assignment(AssignmentExpr {

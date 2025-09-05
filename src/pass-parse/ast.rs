@@ -187,11 +187,19 @@ pub struct IdentExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub enum AssignmentType {
+    ToVariable,
+    ToField,
+    ToDereferenced,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AssignmentExpr {
     pub lhs: Box<ExprNode>,
     pub rhs: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
+    pub assignment_type: AssignmentType,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

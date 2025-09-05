@@ -1,11 +1,8 @@
 use crate::{
     pass_parse::{
-        BlockStmt, GetId, RefutablePatternNode,
         ast::{
-            AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode,
-            UnaryOp,
-        },
-        token::{Integer, Token, TokenKind},
+            BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp, AST
+        }, token::{Integer, Token, TokenKind}, AssignmentType, BlockStmt, GetId, RefutablePatternNode
     },
     pass_type_inference::{TypeInfo, TypeRegistry},
     pass_yir_lowering::yir::{
@@ -151,9 +148,20 @@ impl<'a> TransientData<'a> {
             }
             ExprNode::Assignment(assignment_expr) => {
                 let rhs = self.lower_expr(&assignment_expr.rhs);
+                
+                let lhs = match assignment_expr.assignment_type {
+                    AssignmentType::ToVariable => {
+                        self.lower_expr(&assignment_expr.lhs);
+                    },
+                    AssignmentType::ToField => self.lower_expr(&assignment_expr.lhs),
+                    AssignmentType::ToDereferenced => todo!(),
+                };
+                
                 let lhs = self.lower_expr(&assignment_expr.lhs);
 
                 // Store rhs into lhs
+
+                let lhs_var = 
 
                 let lhs_var = match lhs {
                     Operand::Variable(var) => var,
