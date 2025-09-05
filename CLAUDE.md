@@ -4,124 +4,98 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Yuu is a multi-pass compiler for a custom programming language, written in Rust. It follows a sophisticated pass-based architecture that compiles source code through several intermediate representations, ultimately generating C code.
+Yuu is a multi-pass compiler for a custom programming language that transpiles to C code. The compiler is built in Rust and follows a traditional compiler pipeline architecture with distinct compilation passes.
 
-## Build and Development Commands
+## Development Commands
 
+### Building and Testing
 ```bash
 # Build the project
 cargo build
 
-# Run tests
+# Build with verbose output  
+cargo build --verbose
+
+# Run all tests
 cargo test
 
-# Run the compiler
-cargo run
+# Run tests with verbose output
+cargo test --verbose
 
 # Run a specific test
 cargo test test_name
 
 # Check code without building
 cargo check
+
+# Run the compiler
+cargo run -- <subcommand> [options]
+```
+
+### Compiler Usage
+The compiler has three main subcommands:
+
+```bash
+# Compile to C code
+cargo run -- c input.yuu -o output.c
+
+# Compile to YIR (Yuu Intermediate Representation)
+cargo run -- yir input.yuu -o output.yir
+
+# Check source for errors only
+cargo run -- check input.yuu
 ```
 
 ## Architecture Overview
 
-### Pass-Based Compilation Pipeline
+### Pipeline Architecture
+The compiler uses a multi-pass pipeline architecture where each pass operates on the output of the previous pass. The main pipeline is orchestrated by `src/utils/pipeline.rs:Pipeline`, which automatically manages pass dependencies and lazy computation.
 
-The compiler is built around a **pass scheduling system** in `src/scheduling/` that:
-- Automatically resolves dependencies between compilation passes
-- Executes independent passes in parallel using Rayon
-- Manages resources through a type-safe context system
-- Uses `Arc<Mutex<T>>` for thread-safe resource sharing
+**Compilation Pipeline Flow:**
+1. **Parse** (`src/pass-parse/`) - Source → AST + Syntax Errors
+2. **Type Inference** (`src/pass-type_inference/`) - AST → Type Registry + Type Errors  
+3. **Semantic Analysis** - Multiple passes:
+   - **Control Flow Analysis** (`src/pass-control_flow_analysis/`)
+   - **Type Dependencies** (`src/pass-type_dependencies/`)
+4. **YIR Lowering** (`src/pass-yir_lowering/`) - AST → YIR Module
+5. **C Lowering** (`src/pass-c_lowering/`) - YIR → C Source Code
+6. **C Compilation** (`src/pass-c_compilation/`) - C Source → Executable
 
-### Compilation Flow
+### Key Components
 
-**Source Code → Tokens → AST → Type-Annotated AST → YIR → C Code**
+**Main Entry Point:** `src/main.rs` - CLI interface using clap for argument parsing
 
-Major passes (each in `src/pass-*/`):
-1. **`pass-parse/`** - Lexical analysis and AST construction using Logos
-2. **`pass-type_inference/`** - Type system and binding analysis
-3. **`pass-yir_lowering/`** - Lower AST to YIR (Yuu Intermediate Representation)
-4. **`pass-print_yir/`** - YIR visualization with syntax highlighting
-5. **`pass-c_lowering/`** - Generate C code from YIR
-6. **`pass-diagnostics/`** - Rich error reporting with Miette
+**Pass Modules:** Each pass follows the pattern `src/pass-<name>/`:
+- `mod.rs` - Public interface and data structures
+- `pass_<name>_impl.rs` - Implementation of the pass logic
 
-### Key Architectural Patterns
+**Utilities:** `src/utils/`
+- `pipeline.rs` - Central pipeline orchestration with lazy evaluation
+- `layout_calculation.rs` - Memory layout calculations
 
-**Resource-Based Design:**
-- Each pass declares resource requirements (`requires_resource_read`, `requires_resource_write`, `produces_resource`)
-- Resources are accessed through `ResourceId` trait for type safety
-- Context splitting enables concurrent execution
+**Error Handling:** `src/pass-diagnostics/`
+- Comprehensive error reporting with syntax highlighting using miette
+- Supports fancy error display with syntect integration
 
-**Pass Implementation:**
-- All passes implement the `Pass` trait with `run()`, `install()`, and `get_name()` methods
-- Use `anyhow::Result` for error handling
-- Install passes into a `Schedule` which the `Scheduler` executes
+### Testing Strategy
 
-### Typical Development Pattern
+The project uses comprehensive E2E testing located in `tests/`:
+- `common/mod.rs` - Shared test utilities and helper functions
+- `e2e_*.rs` - End-to-end tests for different language features
+- Tests compile actual Yuu source code to executables and verify behavior
 
-```rust
-// 1. Create context with source
-let context = create_context_with_source(source_code, filename);
+**Test Utilities in `tests/common/mod.rs`:**
+- `run_to_yir()` - Compile to YIR with colored output
+- `run_to_c()` - Compile to C source code  
+- `run_to_executable()` - Full compilation to executable
+- `run_parse_only()` - Parse AST only
+- `run_executable_with_output()` - Execute and capture output
 
-// 2. Set up passes
-let mut schedule = Schedule::new();
-PassParse.install(&mut schedule);
-PassTypeInference.install(&mut schedule);
-PassDiagnostics.install(&mut schedule);
+### Dependencies and External Tools
 
-// 3. Execute pipeline
-let scheduler = Scheduler::new();
-let result = scheduler.run(schedule, context)?;
-
-// 4. Extract results
-let output = result.get_resource::<ResourceType>();
-```
-
-## Key Files
-
-- `src/scheduling/scheduler.rs` - Core pass execution engine
-- `src/lib.rs` - Main module exports and pass registration
-- `tests/common/mod.rs` - Test utilities and setup patterns
-- Each `src/pass-*/mod.rs` - Entry point for compilation passes
-
-## Error Handling
-
-The project uses Miette for rich error reporting with:
-- Source code context in error messages
-- Syntax highlighting in terminal output
-- Centralized diagnostics collection across passes
-
-## Testing
-
-Integration tests in `tests/` exercise the full compilation pipeline. Use `tests/common/mod.rs` utilities for setting up test contexts and schedules.
-
-## TODO: Syntax Improvements
-
-### Replace `=>` with whitespace-only syntax
-
-**Priority: High** - Language design improvement to reduce symbol overloading
-
-Currently `=>` is overused in the language syntax:
-- Function bodies: `fn name() -> Type =>`
-- If conditions: `if condition =>`
-- Else clauses: `else =>`
-- While loops: `while condition =>`
-
-**Proposed change:**
-- Replace all `=>` with whitespace-only separation
-- Rely on existing `.` statement terminators for parsing boundaries
-- Reserve `=>` exclusively for future match statements
-
-**Implementation steps:**
-1. Update lexer to remove `=>` token expectation after function signatures, if/else, while
-2. Update parser to expect whitespace instead of `=>` in these contexts
-3. Update all test files in `tests/` to use new syntax
-4. Update any example code in documentation
-
-**Benefits:**
-- Eliminates symbol overloading
-- Cleaner, more minimal syntax
-- Preserves `=>` for match statements (standard convention)
-- Maintains unambiguous parsing with `.` terminators
+The project requires **Clang** to be installed for C compilation (see GitHub Actions workflow). Key Rust dependencies include:
+- `clap` - CLI argument parsing
+- `miette` - Advanced error reporting
+- `logos` - Lexer generation
+- `serde` - Serialization
+- `assert_cmd` - Test command execution

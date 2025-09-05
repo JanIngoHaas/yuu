@@ -9,7 +9,7 @@ use crate::pass_parse::{AST, SourceInfo};
 use crate::pass_print_yir::pass_print_yir_impl::{
     YirTextualRepresentation, YirToColoredString, YirToString,
 };
-use crate::pass_type_dependencies::{
+use crate::pass_type_dependency_analysis::{
     TypeDependencyAnalysis, TypeDependencyAnalysisErrors, TypeDependencyGraph,
 };
 use crate::pass_type_inference::pass_type_inference_impl::TypeInference;

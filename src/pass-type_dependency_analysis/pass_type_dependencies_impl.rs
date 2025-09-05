@@ -7,7 +7,7 @@ use crate::pass_type_inference::IndexUstrMap;
 use crate::{
     pass_diagnostics::error::{ErrorKind, YuuError},
     pass_parse::SourceInfo,
-    pass_type_dependencies::TypeDependencyGraph,
+    pass_type_dependency_analysis::TypeDependencyGraph,
     pass_type_inference::{IndexUstrSet, StructOrEnumInfo, TypeInfo, TypeRegistry},
 };
 
