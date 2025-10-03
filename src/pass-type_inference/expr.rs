@@ -701,5 +701,10 @@ pub fn infer_expr(
         }
 
         ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
+
+        ExprNode::Deref(_deref_expr) => {
+            // TODO: Implement pointer dereference type inference
+            todo!("Pointer dereference not yet implemented")
+        }
     }
 }

@@ -261,6 +261,28 @@ impl Parser {
         _op_token: Token,
         min_binding_power: i32,
     ) -> ParseResult<(Span, ExprNode)> {
+        // Classify the lvalue based on the structure of the LHS
+        let lvalue_kind = match &lhs {
+            ExprNode::Ident(_) => LValueKind::Variable,
+            ExprNode::MemberAccess(_) => LValueKind::FieldAccess,
+            ExprNode::Deref(_) => LValueKind::Dereference,
+            _ => {
+                // Invalid assignment target
+                let err = YuuError::builder()
+                    .kind(ErrorKind::InvalidExpression)
+                    .message("Cannot assign to this expression")
+                    .source(self.lexer.code_info.source.clone(), self.lexer.code_info.file_name.clone())
+                    .span(
+                        lhs.span(),
+                        "not a valid assignment target",
+                    )
+                    .help("You can only assign to variables, struct fields, or dereferenced pointers")
+                    .build();
+                self.errors.push(err);
+                LValueKind::Unknown
+            }
+        };
+
         let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
         let span = lhs.span().start..rhs_span.end;
         Ok((
@@ -270,6 +292,7 @@ impl Parser {
                 rhs: Box::new(rhs),
                 span,
                 id: 0,
+                lvalue_kind,
             }),
         ))
     }

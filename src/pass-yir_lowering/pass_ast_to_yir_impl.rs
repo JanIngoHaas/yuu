@@ -1,3 +1,55 @@
+// ============================================================================
+// TODO: IMPLEMENT POINTERS AND FIX ASSIGNMENT LOWERING
+// ============================================================================
+//
+// COMPLETED:
+// ✓ Added LValueKind enum to AST (ast.rs:175-181)
+// ✓ Added DerefExpr to AST (ast.rs:200-205)
+// ✓ Updated parser to classify lvalues at parse time (parser.rs:264-284)
+// ✓ Added lvalue_kind field to AssignmentExpr
+// ✓ Updated all AST traversal code (add_ids.rs, span(), node_id())
+//
+// REMAINING WORK:
+//
+// 1. POINTER SYNTAX & PARSING:
+//    - [ ] Add pointer type syntax: *T (in parser and AST)
+//    - [ ] Parse address-of operator: &x
+//    - [ ] Parse dereference operator: ptr.* (postfix)
+//    - [ ] Add tokens for these operators to lexer
+//
+// 2. TYPE SYSTEM:
+//    - [ ] Add Pointer variant to TypeInfo enum
+//    - [ ] Implement pointer type inference in type_inference/expr.rs
+//    - [ ] Handle address-of: infer &x as *T where x: T
+//    - [ ] Handle deref: infer ptr.* as T where ptr: *T
+//    - [ ] Add pointer type unification rules
+//
+// 3. YIR LOWERING - FIX VALUE/POINTER SEMANTICS (CRITICAL):
+//    Current issue: Redundant ADDR+LOAD pairs in generated YIR
+//    - [ ] Add ensure_pointer helper in yir.rs (converts values to pointers only when needed)
+//    - [ ] Remove make_take_address from make_binary (yir.rs:655)
+//    - [ ] Remove make_take_address from make_unary (yir.rs:~675)
+//    - [ ] Remove make_take_address from make_call (yir.rs:525)
+//    - [ ] Update make_store to use ensure_pointer on value operand (yir.rs:577)
+//    - [ ] Update load_if_pointer to check var.ty().is_ptr() before loading (yir.rs:816)
+//    - [ ] Update make_alloca init handling
+//
+// 4. YIR LOWERING - POINTER OPERATIONS:
+//    - [ ] Implement ExprNode::Deref lowering (pass_ast_to_yir_impl.rs:295)
+//          Should: LOAD the pointer variable to get the pointed-to address
+//    - [ ] Implement address-of operator lowering
+//          Should: Return the pointer variable directly (variables are already pointers)
+//    - [ ] Test with assignment: ptr.* = value
+//
+// 5. C CODE GENERATION:
+//    - [ ] Generate C pointer syntax for pointer types
+//    - [ ] Handle pointer arithmetic if needed
+//    - [ ] Ensure proper C pointer operations
+//
+// See test file: test_assignment.yuu (shows current ADDR+LOAD redundancy issue)
+//
+// ============================================================================
+
 use crate::{
     pass_parse::{
         BlockStmt, GetId, RefutablePatternNode,
@@ -151,16 +203,22 @@ impl<'a> TransientData<'a> {
             }
 
             ExprNode::Assignment(assignment_expr) => {
+                // Lower RHS to get the value to store
                 let rhs = self.lower_expr(&assignment_expr.rhs);
-                let lhs = self.lower_expr(&assignment_expr.lhs);
 
-                // Store rhs into lhs
+                // Lower LHS to get a pointer to the target location
+                // This works for all lvalue kinds:
+                // - Variable: returns pointer to the variable
+                // - FieldAccess: returns pointer to the field (via make_get_field_ptr)
+                // - Dereference: returns the dereferenced pointer (when implemented)
+                let lhs = self.lower_expr(&assignment_expr.lhs);
 
                 let lhs_var = match lhs {
                     Operand::Variable(var) => var,
-                    _ => unreachable!("Invalid assignment target - can only assign to variables"),
+                    _ => unreachable!("Assignment LHS must evaluate to a variable (pointer)"),
                 };
 
+                // Store the RHS value into the LHS location
                 self.function.make_store(lhs_var, rhs);
                 lhs
 
@@ -284,6 +342,11 @@ impl<'a> TransientData<'a> {
                 }
 
                 Operand::Variable(enum_var)
+            }
+
+            ExprNode::Deref(_deref_expr) => {
+                // TODO: Implement pointer dereference lowering
+                todo!("Pointer dereference not yet implemented")
             }
         }
     }
