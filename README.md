@@ -1,6 +1,6 @@
 # Yuu
 
-Yuu is a unusable programming language.
+Yuu is a programming language.
 
 *Note: More positive adjectives will be added as Yuu becomes less terrible.*
 
