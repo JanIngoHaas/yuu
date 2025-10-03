@@ -4,7 +4,7 @@ Yuu is a programming language.
 
 *Note: More positive adjectives will be added as Yuu becomes less terrible.*
 
-[![Build Status](https://github.com/JanIngoHaas/yuu/workflows/CI/badge.svg)](https://github.com/JanIngoHaas/yuu/actions)
+[![Build Status](https://github.com/JanIngoHaas/yuu/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/JanIngoHaas/yuu/actions/workflows/rust.yml)
 [![Rust](https://img.shields.io/badge/rust-1.90+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -119,6 +119,6 @@ end
 
 ## Syntax Notes
 
-Statements end with `;`. When you have a statement termination followed by block termination (similar to `; }` in other languages), you can write ` .` (note the space) instead. Complex blocks use `end`.
+Statements end with `;`. When you have a statement termination followed by block termination (similar to `; }` in other languages), you can write ` .` (note the space) instead. Complex blocks use `end[...]`
 
 See the `tests/` folder for more comprehensive language examples.
