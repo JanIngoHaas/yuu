@@ -119,6 +119,6 @@ end
 
 ## Syntax Notes
 
-Statements end with `;`. When you have a block termination (similar to `; }` in other languages), you can write ` .` (note the space) instead. Complex blocks use `end`.
+Statements end with `;`. When you have a statement termination followed by block termination (similar to `; }` in other languages), you can write ` .` (note the space) instead. Complex blocks use `end`.
 
 See the `tests/` folder for more comprehensive language examples.
