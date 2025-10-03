@@ -122,4 +122,3 @@ end
 Statements end with `;`. When you have a block termination (similar to `; }` in other languages), you can write ` .` (note the space) instead. Complex blocks use `end`.
 
 See the `tests/` folder for more comprehensive language examples.
->>>>>>> 5cdc271804c0f1aac3fd3af0ca3951125cfac6a7
