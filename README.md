@@ -84,7 +84,7 @@ FN main() -> @i64
 ## Language Features
 
 - **Structs**: Custom data types with named fields
-- **Functions**: First-class functions with parameters and return types  
+- **Functions**: Functions with parameters and return types  
 - **Control Flow**: `if`/`else`, `while` loops with `break`
 - **Pattern Matching**: `match` expressions with enums
 - **Type System**: Strong static typing with inference
