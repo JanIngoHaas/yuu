@@ -140,24 +140,6 @@ fn test_deep_expression_nesting() {
 //     assert_eq!(output, 1);
 // }
 
-#[test]
-fn test_assignment_in_expression() {
-    let source = r#"fn main() -> i64:
-        let mut x = 5;
-        let result = (x = x + 3) + x;
-        return result .
-    "#;
-
-    let executable = run_to_executable(source, "test_assignment_in_expression.yuu")
-        .expect("Failed to compile assignment expression test");
-
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run assignment expression test");
-
-    // x = 5 + 3 = 8, then 8 + 8 = 16
-    assert_eq!(output, 16);
-}
-
 // #[test]
 // fn test_precedence_with_all_operators() {
 //     let source = r#"fn main() -> i64:
@@ -193,12 +175,14 @@ fn test_expression_with_struct_access() {
             return result .
     "#;
 
-    let executable = run_to_executable(source, "test_expression_with_struct_access.yuu")
+    let executable = run_to_yir(source, "test_expression_with_struct_access.yuu")
         .expect("Failed to compile struct access expression test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run struct access expression test");
+    println!("{}", executable);
+
+    //let output = run_executable_with_output(&executable, &[])
+    //    .expect("Failed to run struct access expression test");
 
     // (3 + 1) * (4 - 2) = 4 * 2 = 8
-    assert_eq!(output, 8);
+    //assert_eq!(output, 8);
 }

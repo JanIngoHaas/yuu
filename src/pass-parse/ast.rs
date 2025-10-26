@@ -177,7 +177,6 @@ pub enum LValueKind {
     Variable,
     FieldAccess,
     Dereference,
-    Unknown, // Set during parsing, determined during type inference
 }
 
 #[derive(Serialize, Deserialize, Clone)]
