@@ -33,6 +33,7 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
+            TokenKind::DotStar | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
@@ -466,10 +467,44 @@ impl Parser {
                 TokenKind::Dot => {
                     lhs = self.parse_member_access_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
+                TokenKind::DotStar => {
+                    lhs = self.parse_deref_expr(lhs.1, op.clone())?;
+                }
+                TokenKind::DotAmpersand => {
+                    lhs = self.parse_address_of_expr(lhs.1, op.clone())?;
+                }
                 _ => break,
             }
         }
         Ok(lhs)
+    }
+
+    pub fn parse_deref_expr(
+        &mut self,
+        operand: ExprNode,
+        op_token: Token,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let span = operand.span().start..op_token.span.end;
+        let deref_expr = DerefExpr {
+            operand: Box::new(operand),
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::Deref(deref_expr)))
+    }
+
+    pub fn parse_address_of_expr(
+        &mut self,
+        operand: ExprNode,
+        op_token: Token,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let span = operand.span().start..op_token.span.end;
+        let address_of_expr = AddressOfExpr {
+            operand: Box::new(operand),
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::AddressOf(address_of_expr)))
     }
 
     pub fn parse_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
@@ -492,6 +527,19 @@ impl Parser {
                     id: 0,
                 }),
             ),
+            TokenKind::Asterix => {
+                // Parse pointer type: *T
+                let pointee = Box::new(self.parse_type()?);
+                let span = t.span.start..pointee.span().end;
+                (
+                    span.clone(),
+                    TypeNode::Pointer(PointerType {
+                        id: 0,
+                        span,
+                        pointee,
+                    }),
+                )
+            }
             TokenKind::Ident(name) => {
                 let span = t.span.clone();
                 let ty = TypeNode::Ident(IdentType {

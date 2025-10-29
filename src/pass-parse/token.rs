@@ -185,6 +185,15 @@ pub enum TokenKind {
     #[token("#")]
     Hash,
 
+    #[token("&")]
+    Ampersand,
+
+    #[token(".*")]
+    DotStar,
+
+    #[token(".&")]
+    DotAmpersand,
+
     EOF,
 }
 
@@ -248,6 +257,9 @@ impl Display for TokenKind {
             TokenKind::MatchKw => "'match'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
             TokenKind::At => "'@'".fmt(f),
+            TokenKind::Ampersand => "'&'".fmt(f),
+            TokenKind::DotStar => "'.*'".fmt(f),
+            TokenKind::DotAmpersand => "'.&'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),

@@ -184,7 +184,7 @@ impl TypeInterner {
         let key = TypeCombination::Struct(struct_);
         let out = self
             .combination_to_type
-            .entry(key)
+            .entry_sync(key)
             .or_insert_with(|| Box::new(TypeInfo::Struct(StructType { name: struct_ })));
 
         // SAFETY: The Box lives as long as TypeInterner and we never remove from the map
@@ -195,7 +195,7 @@ impl TypeInterner {
         let key = TypeCombination::Struct(enum_);
         let out = self
             .combination_to_type
-            .entry(key)
+            .entry_sync(key)
             .or_insert_with(|| Box::new(TypeInfo::Enum(EnumType { name: enum_ })));
         unsafe { &*(out.as_ref() as *const TypeInfo) }
     }
@@ -204,7 +204,7 @@ impl TypeInterner {
         let key = TypeCombination::Pointer(GiveMePtrHashes(ty));
         let out = self
             .combination_to_type
-            .entry(key)
+            .entry_sync(key)
             .or_insert_with(|| Box::new(TypeInfo::Pointer(ty)));
 
         // SAFETY: The Box lives as long as TypeInterner and we never remove from the map
@@ -237,7 +237,7 @@ impl TypeInterner {
             GiveMePtrHashes(ret),
         ));
 
-        let out = self.combination_to_type.entry(key).or_insert_with(|| {
+        let out = self.combination_to_type.entry_sync(key).or_insert_with(|| {
             Box::new(TypeInfo::Function(FunctionType {
                 args: args.to_vec(),
                 ret,

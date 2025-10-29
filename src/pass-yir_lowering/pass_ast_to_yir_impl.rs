@@ -55,8 +55,12 @@ use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ContextKind {
-    Value,           // Need the actual value
-    StorageLocation, // Need a pointer/address to the storage location
+    AsIs,           // Need the actual value - i.e. the value follows its type  
+    StorageLocation, // Need a pointer/address to the storage location of some value. DOES NOT follow its type (often it's just the pointer to the value).
+    // ^--- THis is useful in many cases where temporary variables are produced; i.e. "a.b.c"; To adhere to the correct, implicit semantics of ".", a.b.c, means:
+    // "get pointer of b in object a (let's call it b_ptr)"; "get pointer OR value (depending on context) of c in object b";
+    // In this case, "b_ptr" is a temporary variable, being a pointer to the location of the "b" field in "a" even though in Yuu its type (i.e. a.b) is different.
+    // Here, we just need to represent it as a StorageLocation. Thus, this flag is used to tell the lowering expression to return a storage location, not the value itself! 
 }
 
 pub struct TransientData<'a> {
@@ -106,7 +110,7 @@ impl<'a> TransientData<'a> {
 
         match context {
             ContextKind::StorageLocation => yir_var,
-            ContextKind::Value => {
+            ContextKind::AsIs => {
                 self.function.make_load("var_value".intern(), Operand::Variable(yir_var))
             }
         }
@@ -141,8 +145,8 @@ impl<'a> TransientData<'a> {
                 }
             },
             ExprNode::Binary(bin_expr) => {
-                let lhs = self.lower_expr(&bin_expr.left, ContextKind::Value);
-                let rhs = self.lower_expr(&bin_expr.right, ContextKind::Value);
+                let lhs = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
+                let rhs = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
 
                 let ty = self.get_type(bin_expr.id);
 
@@ -165,7 +169,7 @@ impl<'a> TransientData<'a> {
                     .make_binary("bin_result".intern(), op, lhs, rhs, ty);
 
                 match context {
-                    ContextKind::Value => Operand::Variable(result),
+                    ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
                         let storage = self.function.make_alloca("bin_storage".intern(), ty, Some(Operand::Variable(result)));
                         Operand::Variable(storage)
@@ -173,18 +177,17 @@ impl<'a> TransientData<'a> {
                 }
             }
             ExprNode::Unary(un_expr) => {
-                let operand = self.lower_expr(&un_expr.operand, ContextKind::Value);
+                let operand = self.lower_expr(&un_expr.operand, ContextKind::AsIs);
                 let ty = self.get_type(un_expr.id);
 
                 let result = match un_expr.op {
                     UnaryOp::Negate => {
-                        let target = self.function.make_unary(
+                        self.function.make_unary(
                             "neg_result".intern(),
                             ty,
                             YirUnaryOp::Neg,
                             operand,
-                        );
-                        target
+                        )
                     }
                     UnaryOp::Pos => match operand {
                         Operand::Variable(var) => var,
@@ -193,7 +196,7 @@ impl<'a> TransientData<'a> {
                 };
 
                 match context {
-                    ContextKind::Value => Operand::Variable(result),
+                    ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
                         let storage = self.function.make_alloca("unary_storage".intern(), ty, Some(Operand::Variable(result)));
                         Operand::Variable(storage)
@@ -212,7 +215,7 @@ impl<'a> TransientData<'a> {
                 let args: Vec<_> = func_call_expr
                     .args
                     .iter()
-                    .map(|arg| self.lower_expr(arg, ContextKind::Value))
+                    .map(|arg| self.lower_expr(arg, ContextKind::AsIs))
                     .collect();
 
                 let return_type = self.get_type(func_call_expr.id);
@@ -222,7 +225,7 @@ impl<'a> TransientData<'a> {
 
                 match result {
                     Some(result_var) => match context {
-                        ContextKind::Value => Operand::Variable(result_var),
+                        ContextKind::AsIs => Operand::Variable(result_var),
                         ContextKind::StorageLocation => {
                                 let storage = self.function.make_alloca("call_storage".intern(), return_type, Some(Operand::Variable(result_var)));
                             Operand::Variable(storage)
@@ -239,7 +242,7 @@ impl<'a> TransientData<'a> {
             }
 
             ExprNode::Assignment(assignment_expr) => {
-                let rhs = self.lower_expr(&assignment_expr.rhs, ContextKind::Value);
+                let rhs = self.lower_expr(&assignment_expr.rhs, ContextKind::AsIs);
                 let target_var = match assignment_expr.lvalue_kind {
                     LValueKind::Variable => {
                         match assignment_expr.lhs.as_ref() {
@@ -255,7 +258,11 @@ impl<'a> TransientData<'a> {
                         }
                     }
                     LValueKind::Dereference => {
-                        todo!("Dereference assignment not yet implemented - need to load pointer value")
+                        let lhs = self.lower_expr(&assignment_expr.lhs, ContextKind::StorageLocation);
+                        match lhs {
+                            Operand::Variable(var) => var,
+                            _ => unreachable!("Compiler bug: Dereference LHS must evaluate to a variable (pointer)"),
+                        }
                     }
                 };
 
@@ -299,7 +306,7 @@ impl<'a> TransientData<'a> {
 
                 for (field, field_expr) in &struct_instantiation_expr.fields {
                     let field_name = field.name;
-                    let field_op = self.lower_expr(field_expr, ContextKind::Value);
+                    let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
 
                     let field = sinfo
                         .fields
@@ -317,7 +324,7 @@ impl<'a> TransientData<'a> {
                     ContextKind::StorageLocation => {
                         Operand::Variable(struct_var)
                     }
-                    ContextKind::Value => {
+                    ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("struct_value".intern(), Operand::Variable(struct_var));
                         Operand::Variable(loaded_value)
                     }
@@ -349,7 +356,7 @@ impl<'a> TransientData<'a> {
                     ContextKind::StorageLocation => {
                         Operand::Variable(field_ptr)
                     }
-                    ContextKind::Value => {
+                    ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("field_value".intern(), Operand::Variable(field_ptr));
                         Operand::Variable(loaded_value)
                     }
@@ -366,7 +373,7 @@ impl<'a> TransientData<'a> {
                     .get(&ei.variant_name)
                     .expect("Compiler bug: enum variant not found in lowering to YIR");
 
-                let data_operand = ei.data.as_ref().map(|data_expr| self.lower_expr(data_expr, ContextKind::Value));
+                let data_operand = ei.data.as_ref().map(|data_expr| self.lower_expr(data_expr, ContextKind::AsIs));
 
                 let enum_var =
                     self.function
@@ -388,16 +395,26 @@ impl<'a> TransientData<'a> {
                     ContextKind::StorageLocation => {
                         Operand::Variable(enum_var)
                     }
-                    ContextKind::Value => {
+                    ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("enum_value".intern(), Operand::Variable(enum_var));
                         Operand::Variable(loaded_value)
                     }
                 }
             }
 
-            ExprNode::Deref(_deref_expr) => {
-                // TODO: Implement pointer dereference lowering
-                todo!("Pointer dereference not yet implemented")
+            ExprNode::Deref(deref_expr) => {
+                let ptr_var = self.lower_expr(&deref_expr.operand, ContextKind::AsIs);
+                match context {
+                    ContextKind::AsIs => {
+                        let loaded = self.function.make_load("deref_val".intern(), ptr_var);
+                        Operand::Variable(loaded)
+                    }
+                    ContextKind::StorageLocation => ptr_var
+                }
+            }
+            ExprNode::AddressOf(address_of_expr) => {
+                debug_assert_eq!(context, ContextKind::AsIs);
+                self.lower_expr(&address_of_expr.operand, ContextKind::StorageLocation)
             }
         }
     }
@@ -418,12 +435,12 @@ impl<'a> TransientData<'a> {
     fn lower_stmt(&mut self, stmt: &StmtNode) -> StmtRes {
         match stmt {
             StmtNode::Let(let_stmt) => {
-                let init_value_operand = self.lower_expr(&let_stmt.expr, ContextKind::Value);
+                let init_value_operand = self.lower_expr(&let_stmt.expr, ContextKind::AsIs);
                 self.lower_binding(let_stmt.binding.as_ref(), init_value_operand);
                 StmtRes::Proceed
             }
             StmtNode::Atomic(expr) => {
-                let _ = self.lower_expr(expr, ContextKind::Value);
+                let _ = self.lower_expr(expr, ContextKind::AsIs);
                 StmtRes::Proceed
             }
             StmtNode::Break(_exit_stmt) => {
@@ -441,7 +458,7 @@ impl<'a> TransientData<'a> {
                 "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
             ),
             StmtNode::Return(return_stmt) => {
-                let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e, ContextKind::Value));
+                let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e, ContextKind::AsIs));
                 self.function.make_return(ret_value);
                 StmtRes::Break
             }
@@ -452,7 +469,7 @@ impl<'a> TransientData<'a> {
                 self.function.make_jump_if_no_terminator(match_header);
                 self.function.set_current_block(&match_header);
 
-                let lowered_match_expr = self.lower_expr(&match_stmt.scrutinee, ContextKind::Value);
+                let lowered_match_expr = self.lower_expr(&match_stmt.scrutinee, ContextKind::AsIs);
 
                 let ty = self.get_type(match_stmt.scrutinee.node_id());
 
@@ -519,7 +536,7 @@ impl<'a> TransientData<'a> {
                 self.function.make_jump_if_no_terminator(if_header);
                 self.function.set_current_block(&if_header);
 
-                let lowered_if_condition = self.lower_expr(&if_stmt.if_block.condition, ContextKind::Value);
+                let lowered_if_condition = self.lower_expr(&if_stmt.if_block.condition, ContextKind::AsIs);
 
                 self.function.set_current_block(&if_body);
                 self.lower_block_body(&if_stmt.if_block.body);
@@ -540,7 +557,7 @@ impl<'a> TransientData<'a> {
                     );
 
                     self.function.set_current_block(&else_if_header);
-                    let lowered_else_if_cond = self.lower_expr(&else_if_block.condition, ContextKind::Value);
+                    let lowered_else_if_cond = self.lower_expr(&else_if_block.condition, ContextKind::AsIs);
 
                     self.function.set_current_block(&else_if_body);
                     self.lower_block_body(&else_if_block.body);
@@ -577,7 +594,7 @@ impl<'a> TransientData<'a> {
                 self.function.set_current_block(&while_header);
 
                 let lowered_while_condition =
-                    self.lower_expr(&while_stmt.condition_block.condition, ContextKind::Value);
+                    self.lower_expr(&while_stmt.condition_block.condition, ContextKind::AsIs);
                 self.function.make_branch_to_existing(
                     lowered_while_condition,
                     while_body,

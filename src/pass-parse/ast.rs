@@ -203,6 +203,13 @@ pub struct DerefExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AddressOfExpr {
+    pub operand: Box<ExprNode>,
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -261,6 +268,7 @@ pub enum ExprNode {
     EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
     Deref(DerefExpr),
+    AddressOf(AddressOfExpr),
     //Error,
 }
 
@@ -343,9 +351,17 @@ pub struct BuiltInType {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct PointerType {
+    pub id: NodeId,
+    pub span: Span,
+    pub pointee: Box<TypeNode>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum TypeNode {
     BuiltIn(BuiltInType),
     Ident(IdentType),
+    Pointer(PointerType),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -513,6 +529,7 @@ impl Spanned for ExprNode {
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
+            ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
         }
     }
 }
@@ -539,6 +556,7 @@ impl Spanned for TypeNode {
         match self {
             TypeNode::Ident(ident_type) => ident_type.span.clone(),
             TypeNode::BuiltIn(built_in_type) => built_in_type.span.clone(),
+            TypeNode::Pointer(pointer_type) => pointer_type.span.clone(),
         }
     }
 }
