@@ -388,9 +388,8 @@ pub fn format_instruction(
         Instruction::Store { dest, value } => {
             writeln!(
                 f,
-                "{} <- {} {}",
+                "{} <- {}",
                 format_operand(dest, do_color),
-                format_keyword("LOAD", do_color),
                 format_operand(value, do_color)
             )
         }

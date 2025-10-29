@@ -3,10 +3,10 @@ use crate::pass_parse::add_ids::GetId;
 use crate::{
     pass_parse::ast::{
         AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
-        IdentExpr, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
+        IdentExpr, LiteralExpr, LValueKind, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     },
     pass_type_inference::type_info::{
-        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64,
+        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
     },
     pass_yir_lowering::block::Block,
 };
@@ -254,30 +254,17 @@ fn infer_assignment(
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    // let binding = &assignment_expr.lhs;
-    // // match_binding_node_to_type(binding, block, ty, data) -> we probably need to call this somehow
-    // let binding_ty = data
-    //     .type_registry
-    //     .type_info_table
-    //     .get(binding.node_id())
-    //     .expect("Compiler bug: binding not found in type table");
+    // checking LValueKind is done in parsing already..
 
-    // TODO: Check mutability - We need to do this in another pass!
-    //     let err = YuuError::builder()
-    //         .kind(ErrorKind::InvalidExpression)
-    //         .message("Cannot assign to immutable binding")
-    //         .source(
-    //             data.src_code.source.clone(),
-    //             data.src_code.file_name.clone(),
-    //         )
-    //         .span(
-    //             assignment_expr.span.clone(),
-    //             "assignment to immutable binding",
-    //         )
-    //         .help("Consider adding 'mut' when declaring this binding")
-    //         .build();
-    //     data.errors.push(err);
-    //     return error_type();
+    debug_assert!(
+        match (&*assignment_expr.lhs, &assignment_expr.lvalue_kind) {
+            (ExprNode::Ident(_), LValueKind::Variable) => true,
+            (ExprNode::MemberAccess(_), LValueKind::FieldAccess) => true,
+            (ExprNode::Deref(_), LValueKind::Dereference) => true,
+            _ => false,
+        },
+        "LValueKind should match the LHS expression structure"
+    );
 
     let ty_lhs = infer_expr(&assignment_expr.lhs, block, data, None);
     let ty_rhs = infer_expr(&assignment_expr.rhs, block, data, None);
@@ -302,7 +289,7 @@ fn infer_assignment(
     }
 
     // First unify to check compatibility
-    let unified = match ty_lhs.unify(ty_rhs) {
+    let _unified = match ty_lhs.unify(ty_rhs) {
         Ok(unified) => unified,
         Err(err) => {
             let err_msg = YuuError::builder()
@@ -330,19 +317,12 @@ fn infer_assignment(
         }
     };
 
-    // Then insert the unified type and return it
-
-    (match data
-        .type_registry
+    // Assignment expressions always have type "nil"
+    data.type_registry
         .type_info_table
-        .unify_and_insert(assignment_expr.id, unified)
-    {
-        Ok(ty) => ty,
-        Err(_err) => {
-            // This should never happen if the previous unify worked, but just in case
-            unreachable!("Compiler bug: We should never have inconsistent types here");
-        }
-    }) as _
+        .insert(assignment_expr.id, primitive_nil());
+
+    primitive_nil()
 }
 
 fn infer_struct_instantiation(
@@ -701,5 +681,10 @@ pub fn infer_expr(
         }
 
         ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
+
+        ExprNode::Deref(_deref_expr) => {
+            // TODO: Implement pointer dereference type inference
+            todo!("Pointer dereference not yet implemented")
+        }
     }
 }

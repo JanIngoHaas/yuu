@@ -261,6 +261,18 @@ impl Parser {
         _op_token: Token,
         min_binding_power: i32,
     ) -> ParseResult<(Span, ExprNode)> {
+        // Determine the proper LValueKind based on the LHS expression structure
+        let lvalue_kind = match &lhs {
+            ExprNode::Ident(_) => LValueKind::Variable,
+            ExprNode::MemberAccess(_) => LValueKind::FieldAccess,
+            ExprNode::Deref(_) => LValueKind::Dereference,
+            _ => {
+                // Invalid assignment target - will be caught during type inference
+                // For now, default to Variable to avoid Unknown
+                LValueKind::Variable
+            }
+        };
+
         let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
         let span = lhs.span().start..rhs_span.end;
         Ok((
@@ -270,6 +282,7 @@ impl Parser {
                 rhs: Box::new(rhs),
                 span,
                 id: 0,
+                lvalue_kind,
             }),
         ))
     }

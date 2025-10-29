@@ -191,7 +191,7 @@ impl CLowering {
             Instruction::Store { dest, value } => {
                 write!(data.output, "*")?;
                 self.gen_operand(data, dest)?;
-                write!(data.output, "=*")?;
+                write!(data.output, "=")?;
                 self.gen_operand(data, value)?;
                 write!(data.output, ";")?;
             }
@@ -258,7 +258,10 @@ impl CLowering {
                 self.gen_simple_var_decl(data, target)?;
                 write!(data.output, "=")?;
                 self.gen_operand(data, source)?;
-                write!(data.output, "->tag;")?;
+                match source.ty() {
+                    TypeInfo::Pointer(_) => write!(data.output, "->tag;")?,
+                    _ => write!(data.output, ".tag;")?,
+                }
             }
             Instruction::GetVariantDataPtr {
                 target,
@@ -270,7 +273,10 @@ impl CLowering {
                 Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, "=&(")?;
                 self.gen_operand(data, base)?;
-                write!(data.output, "->data.{}_data);", variant)?;
+                match base.ty() {
+                    TypeInfo::Pointer(_) => write!(data.output, "->data.{}_data);", variant)?,
+                    _ => write!(data.output, ".data.{}_data);", variant)?,
+                }
             }
         }
         Ok(())

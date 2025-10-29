@@ -172,18 +172,33 @@ pub struct IdentExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum LValueKind {
+    Variable,
+    FieldAccess,
+    Dereference,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AssignmentExpr {
     pub lhs: Box<ExprNode>,
     pub rhs: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
+    pub lvalue_kind: LValueKind,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MemberAccessExpr {
     pub lhs: Box<ExprNode>,
     pub field: Field,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DerefExpr {
+    pub operand: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
 }
@@ -245,6 +260,7 @@ pub enum ExprNode {
     StructInstantiation(StructInstantiationExpr),
     EnumInstantiation(EnumInstantiationExpr),
     MemberAccess(MemberAccessExpr),
+    Deref(DerefExpr),
     //Error,
 }
 
@@ -496,6 +512,7 @@ impl Spanned for ExprNode {
                 enum_instantiation_expr.span.clone()
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
+            ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
         }
     }
 }

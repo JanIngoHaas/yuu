@@ -384,7 +384,11 @@ impl Function {
         }
     }
 
-    pub fn make_store_active_variant_idx(&mut self, dest: Variable, variant_info: &EnumVariantInfo) {
+    pub fn make_store_active_variant_idx(
+        &mut self,
+        dest: Variable,
+        variant_info: &EnumVariantInfo,
+    ) {
         let value = Operand::U64Const(variant_info.variant_idx);
         let instr = Instruction::StoreActiveVariantIdx { dest, value };
         self.get_current_block_mut().instructions.push(instr);
@@ -397,13 +401,21 @@ impl Function {
         target
     }
 
-    pub fn make_get_variant_data_ptr(&mut self, name_hint: Ustr, base: Operand, variant_info: &EnumVariantInfo) -> Variable {
-        let target_type = variant_info.variant.expect("Variant must have data type").ptr_to();
+    pub fn make_get_variant_data_ptr(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        variant_info: &EnumVariantInfo,
+    ) -> Variable {
+        let target_type = variant_info
+            .variant
+            .expect("Variant must have data type")
+            .ptr_to();
         let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::GetVariantDataPtr { 
-            target, 
-            base, 
-            variant: variant_info.variant_name 
+        let instr = Instruction::GetVariantDataPtr {
+            target,
+            base,
+            variant: variant_info.variant_name,
         };
         self.get_current_block_mut().instructions.push(instr);
         target
@@ -503,15 +515,9 @@ impl Function {
         &mut self,
         target: Ustr,
         name: Ustr,
-        mut args: Vec<Operand>,
+        args: Vec<Operand>,
         return_type: &'static TypeInfo,
     ) -> Option<Variable> {
-        // Load arguments if they are pointers (Case b)
-
-        for arg in &mut args {
-            *arg = self.load_if_pointer(*arg, "call_arg".intern());
-        }
-
         let target = if return_type.is_nil() {
             None
         } else {
@@ -520,12 +526,9 @@ impl Function {
         let current_block = self.get_current_block_mut();
         let instr = Instruction::Call { target, name, args };
         current_block.instructions.push(instr);
-
-        // If we have a return value, wrap it in pointer context
-        target.map(|result_var| self.make_take_address("call_result_ptr".intern(), result_var))
+        target
     } // Builder method for TakeAddress
     pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
-        // Case c) - NO loading! We expect a value here, not a pointer context
         let target_type = source.ty().ptr_to();
         let target = self.fresh_variable(name_hint, target_type);
         let instr = Instruction::TakeAddress { target, source };
@@ -538,8 +541,6 @@ impl Function {
         base: Operand,
         field_info: &StructFieldInfo,
     ) -> Variable {
-        // Case d) - base needs to be a pointer, but here, DONT load it.
-        // Validate that base is a pointer to a struct type
         let base_type = base.ty();
         debug_assert!(
             matches!(base_type, TypeInfo::Pointer(_)),
@@ -564,18 +565,22 @@ impl Function {
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return as pointer for "pointer context"
         target
     } // Builder method for Load
     pub fn make_load(&mut self, name_hint: Ustr, source: Operand) -> Variable {
-        // Case e) - Yeah of course. Load, source needs to be a pointer
-        let loaded_value = self.make_load_internal(name_hint, source);
-
-        // Return a pointer to the loaded value to stay in "pointer context"
-        self.make_take_address(format!("{}_ptr", name_hint).intern(), loaded_value)
+        let source_ty = source.ty();
+        debug_assert!(
+            source_ty.is_ptr(),
+            "Load source must be a pointer, got {}",
+            source_ty
+        );
+        let target_type = source_ty.deref_ptr();
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::Load { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
     } // Builder method for Store
     pub fn make_store(&mut self, dest: Variable, value: Operand) -> Variable {
-        // Case f) - Yeah of course. Needs to be a pointer, obviously.
         let dest_ty = dest.ty();
 
         debug_assert!(
@@ -611,14 +616,14 @@ impl Function {
                 // NoOp is a special case, we can just return the destination - there is nothing to store
                 return dest;
             }
-            _ => value,
+            Operand::Variable(_) => value,
         };
 
         debug_assert_eq!(
             value_ptr.ty(),
-            dest_ty,
-            "Store type mismatch: dest expects {}, value_ptr is {}",
-            dest_ty,
+            dest_ty.deref_ptr(),
+            "Store type mismatch: dest expects to store {}, value is {}",
+            dest_ty.deref_ptr(),
             value_ptr.ty()
         );
         let instr = Instruction::Store {
@@ -638,21 +643,17 @@ impl Function {
         rhs: Operand,
         result_type: &'static TypeInfo,
     ) -> Variable {
-        // Case g) - Yeah, expect to load both, lhs and rhs.
-        let loaded_lhs = self.load_if_pointer(lhs, "binary_lhs".intern());
-        let loaded_rhs = self.load_if_pointer(rhs, "binary_rhs".intern());
-
         let target = self.fresh_variable(name_hint, result_type);
         let instr = Instruction::Binary {
             target,
             op,
-            lhs: loaded_lhs,
-            rhs: loaded_rhs,
+            lhs,
+            rhs,
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return a pointer to stay in "pointer context"
-        self.make_take_address(name_hint.intern(), target)
+        // Return the result directly - no need for pointer wrapping
+        target
     } // Builder method for Unary operation
     pub fn make_unary(
         &mut self,
@@ -661,19 +662,16 @@ impl Function {
         op: UnaryOp,
         operand: Operand,
     ) -> Variable {
-        // Case h) - Same as binary, load the operand
-        let loaded_operand = self.load_if_pointer(operand, "unary_operand".intern());
-
         let target = self.fresh_variable(name_hint, result_type);
         let instr = Instruction::Unary {
             target,
             op,
-            operand: loaded_operand,
+            operand,
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return a pointer to stay in "pointer context"
-        self.make_take_address(name_hint.intern(), target)
+        // Return the result directly - no need for pointer wrapping
+        target
     }
 
     // pub fn make_enum(
@@ -705,10 +703,7 @@ impl Function {
         self.set_terminator(ControlFlow::Jump { target });
     }
     pub fn make_return(&mut self, value: Option<Operand>) {
-        // Case i) - Of course. Load first.
-        let loaded_value = value.map(|v| self.load_if_pointer(v, "return_value".intern()));
-
-        match (loaded_value.as_ref().map(|op| op.ty()), self.return_type) {
+        match (value.as_ref().map(|op| op.ty()), self.return_type) {
             (Some(ty), ret_ty) if ty == ret_ty => {}
             (None, ret_ty) if ret_ty.is_nil() => {}
             (val_ty, ret_ty) => panic!(
@@ -716,7 +711,7 @@ impl Function {
                 ret_ty, val_ty
             ),
         }
-        self.set_terminator(ControlFlow::Return(loaded_value));
+        self.set_terminator(ControlFlow::Return(value));
     }
     pub fn make_branch_to_existing(
         &mut self,
@@ -724,17 +719,14 @@ impl Function {
         then_label: Label,
         else_label: Label,
     ) {
-        // Case j) - Yes, load the condition first
-        let loaded_condition = self.load_if_pointer(condition, "branch_condition".intern());
-
         debug_assert_eq!(
-            loaded_condition.ty(),
+            condition.ty(),
             primitive_bool(),
             "Branch condition must be boolean, got {}",
-            loaded_condition.ty()
+            condition.ty()
         );
         self.set_terminator(ControlFlow::Branch {
-            condition: loaded_condition,
+            condition,
             if_true: then_label,
             if_false: else_label,
         });
@@ -747,17 +739,23 @@ impl Function {
         default: Option<Label>,
     ) {
         //let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
-        
+
         let loaded_scrutinee = match scrutinee.ty() {
             TypeInfo::Pointer(TypeInfo::Enum(_et)) => {
                 // Load only the active variant index for this operation...
-                Operand::Variable(self.make_load_active_variant_idx("variant_idx".intern(), scrutinee)) 
-            },
-            _ => {
-                self.load_if_pointer(scrutinee, "enum_scrutinee".intern())
+                Operand::Variable(
+                    self.make_load_active_variant_idx("variant_idx".intern(), scrutinee),
+                )
             }
+            TypeInfo::Enum(_et) => {
+                // For enum values, we also need to load the variant index
+                Operand::Variable(
+                    self.make_load_active_variant_idx("variant_idx".intern(), scrutinee),
+                )
+            }
+            _ => scrutinee,
         };
-        
+
         debug_assert_eq!(
             loaded_scrutinee.ty(),
             primitive_u64(),
@@ -778,21 +776,18 @@ impl Function {
         name_then: Option<Ustr>,
         name_else: Option<Ustr>,
     ) -> (Label, Label) {
-        // Case j) - Yes, load the condition first
-        let loaded_condition = self.load_if_pointer(condition, "branch_condition".intern());
-
         debug_assert_eq!(
-            loaded_condition.ty(),
+            condition.ty(),
             primitive_bool(),
             "Branch condition must be boolean, got {}",
-            loaded_condition.ty()
+            condition.ty()
         );
 
         let true_label = self.add_block(name_then.unwrap_or_else(|| "then".intern()));
         let false_label = self.add_block(name_else.unwrap_or_else(|| "else".intern()));
 
         self.set_terminator(ControlFlow::Branch {
-            condition: loaded_condition,
+            condition,
             if_true: true_label,
             if_false: false_label,
         });
@@ -810,39 +805,6 @@ impl Function {
 
     pub fn sort_blocks_by_id(&mut self) {
         self.blocks.sort_unstable_by(|a, _, b, _| a.cmp(b));
-    }
-
-    // Helper function to load a value from pointer context if needed
-    fn load_if_pointer(&mut self, operand: Operand, name_hint: Ustr) -> Operand {
-        match operand {
-            // Constants don't need loading
-            Operand::I64Const(_)
-            | Operand::U64Const(_)
-            | Operand::F32Const(_)
-            | Operand::F64Const(_)
-            | Operand::BoolConst(_)
-            | Operand::NoOp => operand,
-            // Variables are pointers in our context - load them
-            Operand::Variable(_) => {
-                let loaded = self.make_load_internal(name_hint, operand);
-                Operand::Variable(loaded)
-            }
-        }
-    }
-
-    // Internal load function that doesn't wrap result in pointer context
-    fn make_load_internal(&mut self, name_hint: Ustr, source: Operand) -> Variable {
-        let source_ty = source.ty();
-        debug_assert!(
-            source_ty.is_ptr(),
-            "Load source must be a pointer, got {}",
-            source_ty
-        );
-        let target_type = source_ty.deref_ptr();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::Load { target, source };
-        self.get_current_block_mut().instructions.push(instr);
-        target
     }
 }
 

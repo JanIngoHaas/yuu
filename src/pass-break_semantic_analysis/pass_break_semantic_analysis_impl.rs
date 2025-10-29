@@ -132,9 +132,6 @@ impl<'a> BreakSemanticAnalyzer<'a> {
             
             self.errors.push(error);
         }
-        
-        // TODO: Future enhancement - validate break labels if they exist
-        // For now, we assume unlabeled breaks which target the innermost loop
     }
 
     fn _current_loop_context(&self) -> Option<NodeId> {
