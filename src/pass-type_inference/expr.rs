@@ -1,5 +1,6 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
+use crate::pass_parse::{AddressOfExpr, DerefExpr};
 use crate::{
     pass_parse::ast::{
         AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
@@ -257,12 +258,7 @@ fn infer_assignment(
     // checking LValueKind is done in parsing already..
 
     debug_assert!(
-        match (&*assignment_expr.lhs, &assignment_expr.lvalue_kind) {
-            (ExprNode::Ident(_), LValueKind::Variable) => true,
-            (ExprNode::MemberAccess(_), LValueKind::FieldAccess) => true,
-            (ExprNode::Deref(_), LValueKind::Dereference) => true,
-            _ => false,
-        },
+        matches!((&*assignment_expr.lhs, &assignment_expr.lvalue_kind), (ExprNode::Ident(_), LValueKind::Variable) | (ExprNode::MemberAccess(_), LValueKind::FieldAccess) | (ExprNode::Deref(_), LValueKind::Dereference)),
         "LValueKind should match the LHS expression structure"
     );
 
@@ -682,9 +678,56 @@ pub fn infer_expr(
 
         ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
 
-        ExprNode::Deref(_deref_expr) => {
-            // TODO: Implement pointer dereference type inference
-            todo!("Pointer dereference not yet implemented")
+        ExprNode::Deref(deref_expr) => {
+            infer_deref_expr(deref_expr, block, data)
+        }
+        ExprNode::AddressOf(address_of_expr) => {
+            infer_address_of_expr(address_of_expr, block, data)
         }
     }
+}
+
+fn infer_deref_expr(
+    deref_expr: &DerefExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let operand_type = infer_expr(&deref_expr.operand, block, data, None);
+
+    let result_type = match operand_type {
+        TypeInfo::Pointer(pointee_type) => pointee_type,
+        _ => {
+            // Error: trying to dereference non-pointer
+            let error = YuuError::builder()
+                .kind(ErrorKind::TypeMismatch)
+                .message("Cannot dereference non-pointer type".to_string())
+                .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                .span(deref_expr.span.clone(), "This expression is not a pointer".to_string())
+                .build();
+            data.errors.push(error);
+            error_type()
+        }
+    };
+
+    data.type_registry
+        .type_info_table
+        .insert(deref_expr.id, result_type);
+
+    result_type
+}
+
+fn infer_address_of_expr(
+    address_of_expr: &AddressOfExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let operand_type = infer_expr(&address_of_expr.operand, block, data, None);
+
+    let result_type = operand_type.ptr_to();
+
+    data.type_registry
+        .type_info_table
+        .insert(address_of_expr.id, result_type);
+
+    result_type
 }

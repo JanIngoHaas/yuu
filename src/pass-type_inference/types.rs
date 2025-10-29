@@ -59,6 +59,10 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
                 error_type()
             }
         }
+        TypeNode::Pointer(pointer) => {
+            let pointee_type = infer_type(&pointer.pointee, data);
+            pointee_type.ptr_to()
+        }
     };
     // Add the type to the type info table
     data.type_registry

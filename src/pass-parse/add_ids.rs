@@ -85,6 +85,10 @@ impl AddId for ExprNode {
                 deref_expr.id = generator.next();
                 deref_expr.operand.add_id(generator);
             }
+            ExprNode::AddressOf(address_of_expr) => {
+                address_of_expr.id = generator.next();
+                address_of_expr.operand.add_id(generator);
+            }
         }
     }
 }
@@ -166,6 +170,10 @@ impl AddId for TypeNode {
             }
             TypeNode::BuiltIn(built_in_type) => {
                 built_in_type.id = generator.next();
+            }
+            TypeNode::Pointer(pointer_type) => {
+                pointer_type.id = generator.next();
+                pointer_type.pointee.add_id(generator);
             }
         }
     }
@@ -306,6 +314,7 @@ impl GetId for ExprNode {
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.id,
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
             ExprNode::Deref(deref_expr) => deref_expr.id,
+            ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
         }
     }
 }
@@ -331,6 +340,7 @@ impl GetId for TypeNode {
         match self {
             TypeNode::Ident(i) => i.id,
             TypeNode::BuiltIn(built_in_type) => built_in_type.id,
+            TypeNode::Pointer(pointer_type) => pointer_type.id,
         }
     }
 }
