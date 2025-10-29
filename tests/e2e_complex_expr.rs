@@ -175,14 +175,14 @@ fn test_expression_with_struct_access() {
             return result .
     "#;
 
-    let executable = run_to_yir(source, "test_expression_with_struct_access.yuu")
+    let executable = run_to_executable(source, "test_expression_with_struct_access.yuu")
         .expect("Failed to compile struct access expression test");
 
-    println!("{}", executable);
+    //println!("{}", executable);
 
-    //let output = run_executable_with_output(&executable, &[])
-    //    .expect("Failed to run struct access expression test");
+    let output = run_executable_with_output(&executable, &[])
+        .expect("Failed to run struct access expression test");
 
     // (3 + 1) * (4 - 2) = 4 * 2 = 8
-    //assert_eq!(output, 8);
+    assert_eq!(output, 8);
 }
