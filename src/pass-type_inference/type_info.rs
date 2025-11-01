@@ -96,6 +96,7 @@ pub fn primitive_u64() -> &'static TypeInfo {
     &PRIMITIVE_U64
 }
 
+
 pub fn primitive_f32() -> &'static TypeInfo {
     &PRIMITIVE_F32
 }

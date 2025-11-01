@@ -461,6 +461,15 @@ pub fn format_instruction(
                 format_operand(base, do_color),
                 colorize(variant, "literal", do_color)
             )
+        }
+        Instruction::IntToPtr { target, source } => {
+            writeln!(
+                f,
+                "{} := {} {}",
+                format_variable(target, do_color),
+                format_keyword("INT_TO_PTR", do_color),
+                format_operand(source, do_color)
+            )
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,

@@ -5,19 +5,39 @@ use serde::{Deserialize, Serialize};
 use ustr::{Ustr, ustr};
 
 // Helper function for parsing i64 with different bases
-fn parse_integer(s: &str) -> Option<Integer> {
-    let s = s.trim_end_matches('i');
-    match s.get(..2) {
-        Some("0b") => i64::from_str_radix(&s[2..], 2).ok().map(Integer::I64),
-        Some("0o") => i64::from_str_radix(&s[2..], 8).ok().map(Integer::I64),
-        Some("0x") => i64::from_str_radix(&s[2..], 16).ok().map(Integer::I64),
-        _ => s.parse().ok().map(Integer::I64),
+fn parse_i64(s: &str) -> Option<Integer> { 
+    // Remove i64 suffix if present
+    let number_part = s.strip_suffix("i64").unwrap_or(s);
+
+    let value = match number_part.get(..2) {
+        Some("0b") => i64::from_str_radix(&number_part[2..], 2).ok(),
+        Some("0o") => i64::from_str_radix(&number_part[2..], 8).ok(),
+        Some("0x") => i64::from_str_radix(&number_part[2..], 16).ok(),
+        _ => number_part.parse().ok(),
+    };
+
+    value.map(|v| Integer::I64(v))
+}
+
+fn parse_u64(s: &str) -> Option<Integer> {
+    // first try u64, then ptr
+    let number_part = s
+        .strip_suffix("u64")
+        .or_else(|| s.strip_suffix("ptr"))
+        .expect("regex guarantees suffix");
+
+    match number_part.get(..2) {
+        Some("0b") => u64::from_str_radix(&number_part[2..], 2).ok().map(Integer::U64),
+        Some("0o") => u64::from_str_radix(&number_part[2..], 8).ok().map(Integer::U64),
+        Some("0x") => u64::from_str_radix(&number_part[2..], 16).ok().map(Integer::U64),
+        _ => number_part.parse().ok().map(Integer::U64),
     }
 }
 
 #[derive(Serialize, Deserialize, Logos, Debug, PartialEq, Copy, Clone)]
 pub enum Integer {
     I64(i64),
+    U64(u64),
     // CannotParseI64_TooManyDigits,
     // U64(u64),
     // U32(u32),
@@ -26,7 +46,6 @@ pub enum Integer {
     // I32(i32),
     // I16(i16),
     // I8(i8),
-    // UIdx(usize),
     // Idx(isize),
 }
 
@@ -71,8 +90,12 @@ pub enum TokenKind {
         lex.slice().trim_end_matches('f').parse().ok()
     })]
     #[logos(priority = 2)]
-    F64(f64), // Integer (i64) with radix support
-    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)", |lex| parse_integer(lex.slice()))]
+    F64(f64),
+
+    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)(u64|ptr)", |lex| parse_u64(lex.slice()))]
+    #[logos(priority = 3)]
+    // Plain integers (no suffix) default to i64
+    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)(i64)?", |lex| parse_i64(lex.slice()))]
     #[logos(priority = 1)]
     Integer(Integer),
 
@@ -188,8 +211,12 @@ pub enum TokenKind {
     #[token("&")]
     Ampersand,
 
-    #[token(".*")]
-    DotStar,
+    #[regex(r"\.\*+", |lex| {
+        let s = lex.slice();
+        // Count asterisks after the dot
+        Some(s.chars().filter(|&c| c == '*').count())
+    })]
+    MultiDeref(usize),
 
     #[token(".&")]
     DotAmpersand,
@@ -214,6 +241,7 @@ impl Display for TokenKind {
             TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
             TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
+            TokenKind::Integer(Integer::U64(u)) => write!(f, "'{}' (u64)", u),
             TokenKind::Ident(x) => write!(f, "'{}' (identifier)", x),
             TokenKind::I64Kw => "'i64'".fmt(f),
             TokenKind::IfKw => "'if'".fmt(f),
@@ -258,7 +286,7 @@ impl Display for TokenKind {
             TokenKind::Dot => "'.'".fmt(f),
             TokenKind::At => "'@'".fmt(f),
             TokenKind::Ampersand => "'&'".fmt(f),
-            TokenKind::DotStar => "'.*'".fmt(f),
+            TokenKind::MultiDeref(count) => write!(f, "'.{}'", "*".repeat(*count)),
             TokenKind::DotAmpersand => "'.&'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),

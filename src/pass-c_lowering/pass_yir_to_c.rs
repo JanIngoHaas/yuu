@@ -278,6 +278,16 @@ impl CLowering {
                     _ => write!(data.output, ".data.{}_data);", variant)?,
                 }
             }
+            Instruction::IntToPtr { target, source } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=(")?;
+                Self::gen_type(data, target.ty())?;
+                write!(data.output, ")")?;
+                self.gen_operand(data, source)?;
+                write!(data.output, ";")?;
+            }
         }
         Ok(())
     }

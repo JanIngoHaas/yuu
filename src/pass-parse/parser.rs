@@ -33,7 +33,7 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
-            TokenKind::DotStar | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
+            TokenKind::MultiDeref(_) | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
@@ -101,9 +101,14 @@ impl Parser {
         let peek = self.lexer.peek();
 
         match &peek.kind {
-            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) => {
+            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) | TokenKind::NilKw => {
                 let t = self.lexer.next_token(); // Consume the token
                 Ok(self.make_literal_expr(t))
+            }
+
+            // Handle pointer instantiation for any token that can be a type name
+            _ if self.lexer.peek_at(1).kind == TokenKind::At => {
+                return self.parse_pointer_instantiation_expr();
             }
 
             TokenKind::Ident(_) => {
@@ -467,8 +472,8 @@ impl Parser {
                 TokenKind::Dot => {
                     lhs = self.parse_member_access_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
-                TokenKind::DotStar => {
-                    lhs = self.parse_deref_expr(lhs.1, op.clone())?;
+                TokenKind::MultiDeref(count) => {
+                    lhs = self.parse_multi_deref_expr(lhs.1, op.clone(), count)?;
                 }
                 TokenKind::DotAmpersand => {
                     lhs = self.parse_address_of_expr(lhs.1, op.clone())?;
@@ -491,6 +496,27 @@ impl Parser {
             id: 0,
         };
         Ok((span, ExprNode::Deref(deref_expr)))
+    }
+
+    pub fn parse_multi_deref_expr(
+        &mut self,
+        operand: ExprNode,
+        op_token: Token,
+        count: usize,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let span = operand.span().start..op_token.span.end;
+
+        // Create nested DerefExpr nodes
+        let mut current_expr = operand;
+        for _ in 0..count {
+            current_expr = ExprNode::Deref(DerefExpr {
+                operand: Box::new(current_expr),
+                span: span.clone(),
+                id: 0,
+            });
+        }
+
+        Ok((span, current_expr))
     }
 
     pub fn parse_address_of_expr(
@@ -933,6 +959,48 @@ impl Parser {
                 Err(self.lexer.synchronize())
             }
         }
+    }
+
+    pub fn parse_pointer_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        // Parse the type name (can be identifier or keyword)
+        let type_token = self.lexer.next_token();
+        let type_name = match type_token.kind {
+            TokenKind::Ident(name) => name,
+            TokenKind::I64Kw => ustr::ustr("i64"),
+            TokenKind::F32Kw => ustr::ustr("f32"),
+            TokenKind::F64Kw => ustr::ustr("f64"),
+            TokenKind::NilKw => ustr::ustr("nil"),
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        type_token.span.clone(),
+                        "a type name".to_string(),
+                        type_token.kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected a type name (identifier or primitive type) for pointer instantiation".to_string()),
+                );
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        // Expect the @ token
+        let _at_token = self.lexer.expect(&[TokenKind::At], &mut self.errors)?;
+
+        // Parse the address expression
+        let (_, address_expr) = self.parse_expr()?;
+
+        let span = type_token.span.start..address_expr.span().end;
+        Ok((
+            span.clone(),
+            ExprNode::PointerInstantiation(PointerInstantiationExpr {
+                id: 0,
+                span,
+                type_name,
+                address: Box::new(address_expr),
+            }),
+        ))
     }
 
     pub fn parse_enum_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {

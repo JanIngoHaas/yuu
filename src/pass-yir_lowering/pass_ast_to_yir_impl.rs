@@ -130,6 +130,10 @@ impl<'a> TransientData<'a> {
                         ..
                     } => Operand::I64Const(*n),
                     Token {
+                        kind: TokenKind::Integer(Integer::U64(n)),
+                        ..
+                    } => Operand::U64Const(*n),
+                    Token {
                         kind: TokenKind::F32(f),
                         ..
                     } => Operand::F32Const(*f),
@@ -415,6 +419,24 @@ impl<'a> TransientData<'a> {
             ExprNode::AddressOf(address_of_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);
                 self.lower_expr(&address_of_expr.operand, ContextKind::StorageLocation)
+            }
+            ExprNode::PointerInstantiation(pointer_inst_expr) => {
+                debug_assert_eq!(context, ContextKind::AsIs);
+
+                // Get the address operand (should be u64)
+                let address_operand = self.lower_expr(&pointer_inst_expr.address, ContextKind::AsIs);
+
+                // Get the target pointer type
+                let pointer_type = self.get_type(pointer_inst_expr.id);
+
+                // Create the IntToPtr instruction
+                let ptr_var = self.function.make_int_to_ptr(
+                    "ptr_from_int".intern(),
+                    pointer_type,
+                    address_operand,
+                );
+
+                Operand::Variable(ptr_var)
             }
         }
     }

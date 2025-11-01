@@ -89,6 +89,7 @@ impl AddId for ExprNode {
                 address_of_expr.id = generator.next();
                 address_of_expr.operand.add_id(generator);
             }
+            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.address.add_id(generator),
         }
     }
 }
@@ -315,6 +316,7 @@ impl GetId for ExprNode {
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
             ExprNode::Deref(deref_expr) => deref_expr.id,
             ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
+            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.id,
         }
     }
 }

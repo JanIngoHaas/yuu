@@ -78,11 +78,17 @@ impl<'a> ControlFlowAnalyzer<'a> {
         match structural {
             StructuralNode::FuncDef(func_def) => {
                 // Get the function's declared return type
-                let declared_return_type = self
+                let function_type = self
                     .type_registry
                     .type_info_table
                     .get(func_def.id)
                     .expect("Function return type needs to be known at this point.");
+
+                // Extract the return type from the function type
+                let declared_return_type = match function_type {
+                    TypeInfo::Function(ft) => ft.ret,
+                    _ => unreachable!("Expected function type for function definition"),
+                };
 
                 // First, check if the function actually has a return type of something other than "nil"
                 if declared_return_type.is_exact_same_type(primitive_nil()) {

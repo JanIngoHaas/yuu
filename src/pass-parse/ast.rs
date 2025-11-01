@@ -210,6 +210,14 @@ pub struct AddressOfExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PointerInstantiationExpr {
+    pub type_name: Ustr,
+    pub address: Box<ExprNode>, // Expression that evaluates to usize
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -269,6 +277,7 @@ pub enum ExprNode {
     MemberAccess(MemberAccessExpr),
     Deref(DerefExpr),
     AddressOf(AddressOfExpr),
+    PointerInstantiation(PointerInstantiationExpr),
     //Error,
 }
 
@@ -530,6 +539,7 @@ impl Spanned for ExprNode {
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
             ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
+            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.span.clone(),
         }
     }
 }

@@ -209,6 +209,12 @@ pub enum Instruction {
         dest: Variable, // Destination pointer operand (the enum itself, not the data ptr!)
         value: Operand, // Must be of type u64
     },
+
+    // Convert integer to pointer
+    IntToPtr {
+        target: Variable, // Result pointer variable
+        source: Operand,  // Source integer operand (must be u64)
+    },
 }
 
 #[derive(Clone)]
@@ -260,6 +266,7 @@ impl BasicBlock {
                 Instruction::LoadActiveVariantIdx { .. } => {}
                 Instruction::GetVariantDataPtr { .. } => {}
                 Instruction::StoreActiveVariantIdx { .. } => {}
+                Instruction::IntToPtr { .. } => {}
             };
             None
         })
@@ -652,7 +659,6 @@ impl Function {
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return the result directly - no need for pointer wrapping
         target
     } // Builder method for Unary operation
     pub fn make_unary(
@@ -670,7 +676,19 @@ impl Function {
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return the result directly - no need for pointer wrapping
+        target
+    }
+
+    // Builder method for IntToPtr operation
+    pub fn make_int_to_ptr(
+        &mut self,
+        name_hint: Ustr,
+        target_type: &'static TypeInfo,
+        source: Operand,
+    ) -> Variable {
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::IntToPtr { target, source };
+        self.get_current_block_mut().instructions.push(instr);
         target
     }
 

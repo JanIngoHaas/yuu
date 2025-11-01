@@ -1,13 +1,13 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
-use crate::pass_parse::{AddressOfExpr, DerefExpr};
+use crate::pass_parse::{AddressOfExpr, DerefExpr, PointerInstantiationExpr};
 use crate::{
     pass_parse::ast::{
         AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
         IdentExpr, LiteralExpr, LValueKind, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     },
     pass_type_inference::type_info::{
-        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64,
     },
     pass_yir_lowering::block::Block,
 };
@@ -20,9 +20,11 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
     let out = match lit.lit.kind {
         crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
             crate::pass_parse::token::Integer::I64(_) => primitive_i64(),
+            crate::pass_parse::token::Integer::U64(_) => primitive_u64(),
         },
         crate::pass_parse::token::TokenKind::F32(_) => primitive_f32(),
         crate::pass_parse::token::TokenKind::F64(_) => primitive_f64(),
+        crate::pass_parse::token::TokenKind::NilKw => primitive_nil(),
         _ => unreachable!("Compiler bug: Literal not implemented"),
     };
     data.type_registry.add_literal(lit.id, out);
@@ -671,19 +673,78 @@ pub fn infer_expr(
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
             infer_struct_instantiation(struct_instantiation_expr, block, data)
         }
-
         ExprNode::MemberAccess(member_access_expr) => {
             infer_member_access(member_access_expr, block, data)
         }
-
         ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
-
         ExprNode::Deref(deref_expr) => {
             infer_deref_expr(deref_expr, block, data)
         }
         ExprNode::AddressOf(address_of_expr) => {
             infer_address_of_expr(address_of_expr, block, data)
         }
+        ExprNode::PointerInstantiation(pointer_inst_expr) => infer_pointer_instantiation_expr(pointer_inst_expr, block, data),
+    }
+}
+
+fn infer_pointer_instantiation_expr(
+    pointer_inst_expr: &PointerInstantiationExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+
+    let address_type = infer_expr(&pointer_inst_expr.address, block, data, None);
+
+    // Verify that address expression is actually a U64
+    if let Err(err) = address_type.unify(primitive_u64()) {
+        let err_msg = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "Pointer address must be of type 'u64', got '{}'",
+                err.left
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                pointer_inst_expr.address.span(),
+                "address expression has wrong type"
+            )
+            .help("Pointer addresses must be u64 values. Consider casting your expression to u64.".to_string())
+            .build();
+        data.errors.push(err_msg);
+        data.type_registry.type_info_table.insert(pointer_inst_expr.id, error_type());
+        return error_type();
+    }
+
+    let target_type = data.type_registry.resolve_type(pointer_inst_expr.type_name);
+
+    // Verify that the target type exists
+    if let Some(target_type) = target_type {
+        let pointer_type = target_type.ptr_to();
+        data.type_registry.type_info_table.insert(pointer_inst_expr.id, pointer_type);
+        pointer_type
+    } else {
+        let err_msg = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "Unknown type '{}' in pointer instantiation",
+                pointer_inst_expr.type_name
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(
+                pointer_inst_expr.span.clone(),
+                "unknown type"
+            )
+            .help(format!("Make sure the type '{}' is defined before using it in a pointer instantiation.", pointer_inst_expr.type_name))
+            .build();
+        data.errors.push(err_msg);
+        data.type_registry.type_info_table.insert(pointer_inst_expr.id, error_type());
+        error_type()
     }
 }
 

@@ -84,6 +84,13 @@ pub fn calc_pointer_alignment(_platform: TargetPlatform) -> usize {
     8
 }
 
+pub fn calc_usize_size(_platform: TargetPlatform) -> usize {
+    8 // Same as pointer size on 64-bit targets
+}
+pub fn calc_usize_alignment(_platform: TargetPlatform) -> usize {
+    8 // Same as pointer alignment on 64-bit targets
+}
+
 pub fn calc_primitive_layout(primitive: PrimitiveType, platform: TargetPlatform) -> LayoutInfo {
     match primitive {
         PrimitiveType::I64 => LayoutInfo {
