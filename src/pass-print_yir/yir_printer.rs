@@ -470,6 +470,35 @@ pub fn format_instruction(
                 format_keyword("INT_TO_PTR", do_color),
                 format_operand(source, do_color)
             )
+        }
+        Instruction::HeapAlloc { target, size, align } => {
+            if let Some(alignment) = align {
+                writeln!(
+                    f,
+                    "{} := {} {} {} {}",
+                    format_variable(target, do_color),
+                    format_keyword("HEAP_ALLOC", do_color),
+                    format_operand(size, do_color),
+                    format_keyword("ALIGN", do_color),
+                    colorize(&alignment.to_string(), "constant", do_color)
+                )
+            } else {
+                writeln!(
+                    f,
+                    "{} := {} {}",
+                    format_variable(target, do_color),
+                    format_keyword("HEAP_ALLOC", do_color),
+                    format_operand(size, do_color)
+                )
+            }
+        }
+        Instruction::HeapFree { ptr } => {
+            writeln!(
+                f,
+                "{} {}",
+                format_keyword("HEAP_FREE", do_color),
+                format_operand(ptr, do_color)
+            )
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,

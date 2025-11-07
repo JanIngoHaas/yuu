@@ -1,5 +1,5 @@
-pub mod layout_calculation;
+pub mod c_packing;
 pub mod pipeline;
 
-pub use layout_calculation::*;
+pub use c_packing::*;
 pub use pipeline::*;

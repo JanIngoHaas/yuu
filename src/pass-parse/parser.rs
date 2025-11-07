@@ -34,6 +34,7 @@ impl Parser {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
             TokenKind::MultiDeref(_) | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
+            TokenKind::At => (12, 11), // Pointer instantiation type@expr (right-associative for chaining: i64@ptr@addr)
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
@@ -46,6 +47,7 @@ impl Parser {
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
             TokenKind::Plus | TokenKind::Minus => 13, // Unary operators bind tighter than * and +
+            TokenKind::At => 13, // Heap allocation operator @expr
             _ => -1,
         }
     }
@@ -56,32 +58,47 @@ impl Parser {
         op: Token,
         span: Span,
     ) -> ParseResult<(Span, ExprNode)> {
-        let unary_op = match op.kind {
-            TokenKind::Plus => UnaryOp::Pos,
-            TokenKind::Minus => UnaryOp::Negate,
+        match op.kind {
+            TokenKind::At => {
+                // Handle heap allocation: @expr
+                let span_copy = span.clone();
+                let heap_alloc = HeapAllocExpr {
+                    value: Box::new(operand),
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::HeapAlloc(heap_alloc)))
+            }
+            TokenKind::Plus | TokenKind::Minus => {
+                let unary_op = match op.kind {
+                    TokenKind::Plus => UnaryOp::Pos,
+                    TokenKind::Minus => UnaryOp::Negate,
+                    _ => unreachable!(),
+                };
+                let span_copy = span.clone();
+                let unary = UnaryExpr {
+                    operand: Box::new(operand),
+                    op: unary_op,
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::Unary(unary)))
+            }
             _ => {
                 self.errors.push(
                     YuuError::builder()
                         .kind(ErrorKind::InvalidSyntax)
-                        .message(format!("Expected an unary operator, found {}", op.kind))
+                        .message(format!("Expected a prefix operator, found {}", op.kind))
                         .source(
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
-                        .span(span.clone(), "invalid unary operator")
+                        .span(span.clone(), "invalid prefix operator")
                         .build(),
                 );
-                return Err(self.lexer.synchronize());
+                Err(self.lexer.synchronize())
             }
-        };
-        let span_copy = span.clone();
-        let unary = UnaryExpr {
-            operand: Box::new(operand),
-            op: unary_op,
-            span,
-            id: 0,
-        };
-        Ok((span_copy, ExprNode::Unary(unary)))
+        }
     }
 
     fn make_literal_expr(&mut self, lit: Token) -> (Span, ExprNode) {
@@ -106,10 +123,6 @@ impl Parser {
                 Ok(self.make_literal_expr(t))
             }
 
-            // Handle pointer instantiation for any token that can be a type name
-            _ if self.lexer.peek_at(1).kind == TokenKind::At => {
-                return self.parse_pointer_instantiation_expr();
-            }
 
             TokenKind::Ident(_) => {
                 // Check if this identifier is followed by a double colon (enum instantiation)
@@ -133,7 +146,7 @@ impl Parser {
                 }
             }
 
-            TokenKind::Plus | TokenKind::Minus => {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::At => {
                 let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
@@ -462,6 +475,9 @@ impl Parser {
                 | TokenKind::GtEq
                 | TokenKind::EqEq => {
                     lhs = self.parse_bin_expr(lhs.1, op.clone(), right_binding_power)?;
+                }
+                TokenKind::At => {
+                    lhs = self.parse_pointer_instantiation_expr_infix(lhs.1, op.clone(), right_binding_power)?;
                 }
                 TokenKind::Equal => {
                     lhs = self.parse_assignment_expr(lhs.1, op.clone(), right_binding_power)?;
@@ -1003,6 +1019,46 @@ impl Parser {
         ))
     }
 
+    pub fn parse_pointer_instantiation_expr_infix(
+        &mut self,
+        lhs: ExprNode,
+        _op: Token,
+        right_binding_power: i32,
+    ) -> ParseResult<(Span, ExprNode)> {
+        // lhs is the type expression (like an identifier for a type name)
+        let type_name = match &lhs {
+            ExprNode::Ident(ident_expr) => ident_expr.ident,
+            _ => {
+                self.errors.push(
+                    YuuError::builder()
+                        .kind(ErrorKind::InvalidSyntax)
+                        .message("Left side of @ must be a type name".to_string())
+                        .source(
+                            self.lexer.code_info.source.clone(),
+                            self.lexer.code_info.file_name.clone(),
+                        )
+                        .span(lhs.span().clone(), "not a valid type name")
+                        .build(),
+                );
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        // Parse the address expression with the right binding power
+        let (_, address_expr) = self.parse_expr_chain(right_binding_power)?;
+
+        let span = lhs.span().start..address_expr.span().end;
+        Ok((
+            span.clone(),
+            ExprNode::PointerInstantiation(PointerInstantiationExpr {
+                id: 0,
+                span,
+                type_name,
+                address: Box::new(address_expr),
+            }),
+        ))
+    }
+
     pub fn parse_enum_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
         // First token should be the enum name (identifier)
         let enum_token = self.lexer.next_token();
@@ -1067,35 +1123,9 @@ impl Parser {
             if next.kind == TokenKind::BlockTerminator {
                 let bt = self.lexer.next_token();
 
-                // Check if there's a label after the block terminator
-                let (label, label_end_span) = if self.lexer.peek().kind == TokenKind::At {
-                    let _ = self.lexer.next_token(); // consume @
-                    let label_token = self.lexer.next_token();
-                    match label_token.kind {
-                        TokenKind::Ident(label) => (Some(label), Some(label_token.span.clone())),
-                        _ => {
-                            self.errors.push(YuuError::unexpected_token(
-                                label_token.span.clone(),
-                                "a label identifier".to_string(),
-                                label_token.kind,
-                                self.lexer.code_info.source.clone(),
-                                self.lexer.code_info.file_name.clone(),
-                            ).with_help("The preceding @ indicates a block label, so an identifier is expected".to_string()));
-                            return Err(self.lexer.synchronize());
-                        }
-                    }
-                } else {
-                    (None, None)
-                };
+                let span = colon.span.start..bt.span.end;
 
-                let span = if let Some(label_span) = label_end_span {
-                    // If there's a label, extend span to include it
-                    colon.span.start..label_span.end
-                } else {
-                    colon.span.start..bt.span.end
-                };
-
-                return Ok(self.make_block_expr(stmts, span, label));
+                return Ok(self.make_block_expr(stmts, span, None));
             }
 
             let stmt_res = self.parse_stmt();

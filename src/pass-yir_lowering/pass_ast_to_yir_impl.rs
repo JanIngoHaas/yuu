@@ -42,14 +42,14 @@
 
 use crate::{
     pass_parse::{
-        ast::{
-            BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp, AST
-        }, token::{Integer, Token, TokenKind}, BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode
+        BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode, ast::{
+            AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp
+        }, token::{Integer, Token, TokenKind}
     },
     pass_type_inference::{TypeInfo, TypeRegistry},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
-    },
+    }, utils::calculate_type_layout,
 };
 use indexmap::IndexMap;
 
@@ -435,6 +435,28 @@ impl<'a> TransientData<'a> {
                     pointer_type,
                     address_operand,
                 );
+
+                Operand::Variable(ptr_var)
+            }
+            ExprNode::HeapAlloc(heap_alloc_expr) => {
+                debug_assert_eq!(context, ContextKind::AsIs);
+
+                let value_operand = self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
+                let value_type = self.get_type(heap_alloc_expr.value.node_id());
+
+                let layout = calculate_type_layout(value_type, self.tr);
+                let size_operand = Operand::U64Const(layout.size as u64);
+
+                // Allocate memory on heap
+                let ptr_var = self.function.make_heap_alloc(
+                    "heap_ptr".intern(),
+                    value_type,
+                    size_operand,
+                    None, // No alignment requirement for now
+                );
+
+                // Initialize the allocated memory with the value
+                self.function.make_store(ptr_var, value_operand);
 
                 Operand::Variable(ptr_var)
             }

@@ -90,6 +90,10 @@ impl AddId for ExprNode {
                 address_of_expr.operand.add_id(generator);
             }
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.address.add_id(generator),
+            ExprNode::HeapAlloc(heap_alloc_expr) => {
+                heap_alloc_expr.id = generator.next();
+                heap_alloc_expr.value.add_id(generator);
+            }
         }
     }
 }
@@ -317,6 +321,7 @@ impl GetId for ExprNode {
             ExprNode::Deref(deref_expr) => deref_expr.id,
             ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.id,
+            ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
         }
     }
 }

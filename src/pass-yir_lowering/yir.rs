@@ -215,6 +215,18 @@ pub enum Instruction {
         target: Variable, // Result pointer variable
         source: Operand,  // Source integer operand (must be u64)
     },
+
+    // Heap allocation - returns a pointer to allocated memory
+    HeapAlloc {
+        target: Variable,   // Pointer variable to store the heap address
+        size: Operand,      // Size in bytes (must be u64)
+        align: Option<u64>, // Optional alignment requirement
+    },
+
+    // Heap deallocation - frees previously allocated memory
+    HeapFree {
+        ptr: Operand, // Pointer to memory to free (must be heap-allocated)
+    },
 }
 
 #[derive(Clone)]
@@ -255,6 +267,9 @@ impl BasicBlock {
                 Instruction::Alloca { target } => {
                     return Some(target);
                 }
+                Instruction::HeapAlloc { target, .. } => {
+                    return Some(target);
+                }
                 Instruction::StoreImmediate { .. } => {}
                 Instruction::TakeAddress { .. } => {}
                 Instruction::GetFieldPtr { .. } => {}
@@ -267,6 +282,7 @@ impl BasicBlock {
                 Instruction::GetVariantDataPtr { .. } => {}
                 Instruction::StoreActiveVariantIdx { .. } => {}
                 Instruction::IntToPtr { .. } => {}
+                Instruction::HeapFree { .. } => {}
             };
             None
         })
@@ -690,6 +706,39 @@ impl Function {
         let instr = Instruction::IntToPtr { target, source };
         self.get_current_block_mut().instructions.push(instr);
         target
+    }
+
+    // Builder method for heap allocation
+    pub fn make_heap_alloc(
+        &mut self,
+        name_hint: Ustr,
+        ty: &'static TypeInfo,
+        size: Operand,
+        align: Option<u64>,
+    ) -> Variable {
+        debug_assert_eq!(
+            size.ty(),
+            primitive_u64(),
+            "HeapAlloc size must be u64, got {}",
+            size.ty()
+        );
+
+        let target = self.fresh_variable(name_hint, ty.ptr_to());
+        let instr = Instruction::HeapAlloc { target, size, align };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for heap deallocation
+    pub fn make_heap_free(&mut self, ptr: Operand) {
+        debug_assert!(
+            ptr.ty().is_ptr(),
+            "HeapFree ptr must be a pointer, got {}",
+            ptr.ty()
+        );
+
+        let instr = Instruction::HeapFree { ptr };
+        self.get_current_block_mut().instructions.push(instr);
     }
 
     // pub fn make_enum(

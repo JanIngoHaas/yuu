@@ -1,6 +1,6 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
-use crate::pass_parse::{AddressOfExpr, DerefExpr, PointerInstantiationExpr};
+use crate::pass_parse::{AddressOfExpr, DerefExpr, PointerInstantiationExpr, HeapAllocExpr};
 use crate::{
     pass_parse::ast::{
         AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
@@ -684,6 +684,7 @@ pub fn infer_expr(
             infer_address_of_expr(address_of_expr, block, data)
         }
         ExprNode::PointerInstantiation(pointer_inst_expr) => infer_pointer_instantiation_expr(pointer_inst_expr, block, data),
+        ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block, data),
     }
 }
 
@@ -746,6 +747,23 @@ fn infer_pointer_instantiation_expr(
         data.type_registry.type_info_table.insert(pointer_inst_expr.id, error_type());
         error_type()
     }
+}
+
+fn infer_heap_alloc_expr(
+    heap_alloc_expr: &HeapAllocExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    // Infer the type of the expression to be allocated
+    let value_type = infer_expr(&heap_alloc_expr.value, block, data, None);
+
+    // Create a pointer to that type
+    let pointer_type = value_type.ptr_to();
+
+    // Store the result type in the type table
+    data.type_registry.type_info_table.insert(heap_alloc_expr.id, pointer_type);
+
+    pointer_type
 }
 
 fn infer_deref_expr(

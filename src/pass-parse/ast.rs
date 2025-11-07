@@ -218,6 +218,13 @@ pub struct PointerInstantiationExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HeapAllocExpr {
+    pub value: Box<ExprNode>, // Expression to allocate on heap
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -278,6 +285,7 @@ pub enum ExprNode {
     Deref(DerefExpr),
     AddressOf(AddressOfExpr),
     PointerInstantiation(PointerInstantiationExpr),
+    HeapAlloc(HeapAllocExpr),
     //Error,
 }
 
@@ -540,6 +548,7 @@ impl Spanned for ExprNode {
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
             ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.span.clone(),
+            ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
         }
     }
 }

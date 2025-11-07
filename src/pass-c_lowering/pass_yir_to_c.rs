@@ -288,6 +288,25 @@ impl CLowering {
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
             }
+            Instruction::HeapAlloc { target, size, align } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                if align.is_some() {
+                    write!(data.output, "=aligned_alloc({}, ", align.unwrap())?;
+                    self.gen_operand(data, size)?;
+                    write!(data.output, ");")?;
+                } else {
+                    write!(data.output, "=malloc(")?;
+                    self.gen_operand(data, size)?;
+                    write!(data.output, ");")?;
+                }
+            }
+            Instruction::HeapFree { ptr } => {
+                write!(data.output, "free(")?;
+                self.gen_operand(data, ptr)?;
+                write!(data.output, ");")?;
+            }
         }
         Ok(())
     }
