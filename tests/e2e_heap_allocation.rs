@@ -95,6 +95,7 @@ fn main() -> i64:
         Status::Ready: return 0 .
         Status::Processing(value): return value .
     end
+end
     "#;
 
     let executable = run_to_executable(source, "test_heap_allocation_with_enum.yuu").expect("Failed to compile");

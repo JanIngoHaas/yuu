@@ -556,19 +556,6 @@ impl Parser {
     pub fn parse_type(&mut self) -> ParseResult<TypeNode> {
         let t = self.lexer.next_token();
         let out = match t.kind {
-            TokenKind::I64Kw | TokenKind::F32Kw | TokenKind::F64Kw => (
-                t.span.clone(),
-                TypeNode::BuiltIn(BuiltInType {
-                    span: t.span.clone(),
-                    kind: match t.kind {
-                        TokenKind::I64Kw => BuiltInTypeKind::I64,
-                        TokenKind::F32Kw => BuiltInTypeKind::F32,
-                        TokenKind::F64Kw => BuiltInTypeKind::F64,
-                        _ => unreachable!(),
-                    },
-                    id: 0,
-                }),
-            ),
             TokenKind::Asterix => {
                 // Parse pointer type: *T
                 let pointee = Box::new(self.parse_type()?);
@@ -982,9 +969,6 @@ impl Parser {
         let type_token = self.lexer.next_token();
         let type_name = match type_token.kind {
             TokenKind::Ident(name) => name,
-            TokenKind::I64Kw => ustr::ustr("i64"),
-            TokenKind::F32Kw => ustr::ustr("f32"),
-            TokenKind::F64Kw => ustr::ustr("f64"),
             TokenKind::NilKw => ustr::ustr("nil"),
             _ => {
                 self.errors.push(
@@ -995,7 +979,7 @@ impl Parser {
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
-                    .with_help("Expected a type name (identifier or primitive type) for pointer instantiation".to_string()),
+                    .with_help("Expected a type name identifier for pointer instantiation".to_string()),
                 );
                 return Err(self.lexer.synchronize());
             }

@@ -441,13 +441,11 @@ impl<'a> TransientData<'a> {
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);
 
-                let value_operand = self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
                 let value_type = self.get_type(heap_alloc_expr.value.node_id());
-
                 let layout = calculate_type_layout(value_type, self.tr);
                 let size_operand = Operand::U64Const(layout.size as u64);
 
-                // Allocate memory on heap
+                // Allocate memory on heap first
                 let ptr_var = self.function.make_heap_alloc(
                     "heap_ptr".intern(),
                     value_type,
@@ -455,8 +453,38 @@ impl<'a> TransientData<'a> {
                     None, // No alignment requirement for now
                 );
 
-                // Initialize the allocated memory with the value
-                self.function.make_store(ptr_var, value_operand);
+                // Check if we can initialize directly on heap (for struct literals)
+                match &*heap_alloc_expr.value {
+                    ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                        // Initialize struct fields directly in heap memory
+                        let sinfo = self
+                            .tr
+                            .resolve_struct(struct_instantiation_expr.struct_name)
+                            .expect("Compiler bug: struct not found in lowering to YIR");
+
+                        for (field, field_expr) in &struct_instantiation_expr.fields {
+                            let field_name = field.name;
+                            let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
+
+                            let field_info = sinfo
+                                .fields
+                                .get(&field_name)
+                                .expect("Compiler bug: field not found in lowering to YIR");
+                            let field_var = self.function.make_get_field_ptr(
+                                field_name,
+                                Operand::Variable(ptr_var),
+                                field_info,
+                            );
+
+                            self.function.make_store(field_var, field_op);
+                        }
+                    }
+                    _ => {
+                        // For non-struct literals, fall back to stack-then-copy
+                        let value_operand = self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
+                        self.function.make_store(ptr_var, value_operand);
+                    }
+                }
 
                 Operand::Variable(ptr_var)
             }

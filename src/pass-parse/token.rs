@@ -102,20 +102,11 @@ pub enum TokenKind {
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| ustr(lex.slice()))]
     Ident(Ustr),
 
-    #[token("i64")]
-    I64Kw,
-
     #[token("if")]
     IfKw,
 
     #[token("else")]
     ElseKw,
-
-    #[token("f32")]
-    F32Kw,
-
-    #[token("f64")]
-    F64Kw,
 
     #[token("let")]
     LetKw,
@@ -243,11 +234,8 @@ impl Display for TokenKind {
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
             TokenKind::Integer(Integer::U64(u)) => write!(f, "'{}' (u64)", u),
             TokenKind::Ident(x) => write!(f, "'{}' (identifier)", x),
-            TokenKind::I64Kw => "'i64'".fmt(f),
             TokenKind::IfKw => "'if'".fmt(f),
             TokenKind::ElseKw => "'else'".fmt(f),
-            TokenKind::F32Kw => "'f32'".fmt(f),
-            TokenKind::F64Kw => "'f64'".fmt(f),
             TokenKind::LetKw => "'let'".fmt(f),
             TokenKind::MutKw => "'mut'".fmt(f),
             TokenKind::FnKw => "'fn'".fmt(f),

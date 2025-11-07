@@ -93,7 +93,7 @@ fn test_while_with_break() {
         while counter < 10:
             if counter == 5: break .
             counter = counter + 1;
-        end@test_label
+        end
         return counter .
     "#;
 

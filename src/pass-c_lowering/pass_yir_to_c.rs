@@ -289,15 +289,17 @@ impl CLowering {
                 write!(data.output, ";")?;
             }
             Instruction::HeapAlloc { target, size, align } => {
-                self.gen_variable_decl(data, target)?;
-                write!(data.output, ";")?;
+                // type *var = malloc(size);
+                Self::gen_type(data, target.ty())?;
+                write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, " = ")?;
                 if align.is_some() {
-                    write!(data.output, "=aligned_alloc({}, ", align.unwrap())?;
+                    write!(data.output, "aligned_alloc({}, ", align.unwrap())?;
                     self.gen_operand(data, size)?;
                     write!(data.output, ");")?;
                 } else {
-                    write!(data.output, "=malloc(")?;
+                    write!(data.output, "malloc(")?;
                     self.gen_operand(data, size)?;
                     write!(data.output, ");")?;
                 }
@@ -457,7 +459,7 @@ impl CLowering {
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         write!(
             data.output,
-            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n"
+            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n"
         )?;
 
         for name in data.type_dependency_order.create_topological_order() {
