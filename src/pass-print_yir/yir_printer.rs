@@ -499,6 +499,16 @@ pub fn format_instruction(
                 format_keyword("HEAP_FREE", do_color),
                 format_operand(ptr, do_color)
             )
+        }
+        Instruction::KillSet { vars } => {
+            write!(f, "{} {{", colorize("KILLSET", "keyword", do_color))?;
+            for (i, var) in vars.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", format_variable(var, do_color))?;
+            }
+            writeln!(f, "}}")
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,

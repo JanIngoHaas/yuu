@@ -309,6 +309,9 @@ impl CLowering {
                 self.gen_operand(data, ptr)?;
                 write!(data.output, ");")?;
             }
+            Instruction::KillSet { vars: _ } => {
+                // No code generation needed for stack variable kills in C
+            }
         }
         Ok(())
     }

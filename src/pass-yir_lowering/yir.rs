@@ -36,7 +36,7 @@ impl PartialEq for Variable {
 
 impl Eq for Variable {}
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct Label {
     name: Ustr,
     id: i64,
@@ -113,7 +113,7 @@ impl Operand {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinOp {
     Add,
     Sub,
@@ -128,12 +128,12 @@ pub enum BinOp {
     GreaterThanEq,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum UnaryOp {
     Neg,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Instruction {
     // Declares a variable on the stack, returns a pointer to it
     Alloca {
@@ -227,9 +227,14 @@ pub enum Instruction {
     HeapFree {
         ptr: Operand, // Pointer to memory to free (must be heap-allocated)
     },
+
+    // Marks that multiple stack variables are being killed (e.g., leaving scope)
+    KillSet {
+        vars: Vec<Variable>, // Stack variables being killed
+    },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ControlFlow {
     // Simple unconditional jump
     Jump {
@@ -253,7 +258,7 @@ pub enum ControlFlow {
     Unterminated,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<Instruction>,
@@ -264,10 +269,7 @@ impl BasicBlock {
     pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
         self.instructions.iter().filter_map(|instr| {
             match instr {
-                Instruction::Alloca { target } => {
-                    return Some(target);
-                }
-                Instruction::HeapAlloc { target, .. } => {
+                Instruction::Alloca { target } | Instruction::HeapAlloc { target, .. } => {
                     return Some(target);
                 }
                 Instruction::StoreImmediate { .. } => {}
@@ -283,6 +285,7 @@ impl BasicBlock {
                 Instruction::StoreActiveVariantIdx { .. } => {}
                 Instruction::IntToPtr { .. } => {}
                 Instruction::HeapFree { .. } => {}
+                Instruction::KillSet { .. } => {}
             };
             None
         })
@@ -331,7 +334,7 @@ impl Function {
         param
     }
 
-    fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
+    pub fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
         let id = self.next_reg_id.entry(name).or_insert(0);
         let var = Variable::new(name, *id, ty);
         *id += 1;
@@ -739,6 +742,14 @@ impl Function {
 
         let instr = Instruction::HeapFree { ptr };
         self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for killing multiple stack variables
+    pub fn make_kill_set(&mut self, vars: Vec<Variable>) {
+        if !vars.is_empty() {
+            let instr = Instruction::KillSet { vars };
+            self.get_current_block_mut().instructions.push(instr);
+        }
     }
 
     // pub fn make_enum(

@@ -68,6 +68,8 @@ pub struct TransientData<'a> {
     tr: &'a TypeRegistry,
     var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
     loop_context: Vec<yir::Label>,
+    scope_stack: Vec<Vec<Variable>>, // Stack of scopes, each containing variables declared in that scope
+    current_temporaries: Vec<Variable>, // Temporaries created in the current statement
 }
 
 enum StmtRes {
@@ -82,6 +84,8 @@ impl<'a> TransientData<'a> {
             tr,
             var_map: IndexMap::new(),
             loop_context: Vec::new(),
+            scope_stack: Vec::new(),
+            current_temporaries: Vec::new(),
         }
     }
 
@@ -91,6 +95,34 @@ impl<'a> TransientData<'a> {
             .types
             .get(&node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
+    }
+
+    fn push_scope(&mut self) {
+        self.scope_stack.push(Vec::new());
+    }
+
+    fn pop_scope_and_generate_killset(&mut self) {
+        if let Some(scope_vars) = self.scope_stack.pop() {
+            if !scope_vars.is_empty() {
+                self.function.make_kill_set(scope_vars);
+            }
+        }
+    }
+
+    fn add_variable_to_current_scope(&mut self, var: Variable) {
+        if let Some(current_scope) = self.scope_stack.last_mut() {
+            current_scope.push(var);
+        }
+    }
+
+    fn add_temporary(&mut self, var: Variable) {
+        self.current_temporaries.push(var);
+    }
+
+    fn kill_current_temporaries(&mut self) {
+        if !self.current_temporaries.is_empty() {
+            self.function.make_kill_set(std::mem::take(&mut self.current_temporaries));
+        }
     }
 
     fn lower_ident_assignment(&mut self, ident_expr: &IdentExpr, context: ContextKind) -> Variable {
@@ -111,7 +143,9 @@ impl<'a> TransientData<'a> {
         match context {
             ContextKind::StorageLocation => yir_var,
             ContextKind::AsIs => {
-                self.function.make_load("var_value".intern(), Operand::Variable(yir_var))
+                let temp = self.function.make_load("var_value".intern(), Operand::Variable(yir_var));
+                self.add_temporary(temp);
+                temp
             }
         }
     }
@@ -171,11 +205,13 @@ impl<'a> TransientData<'a> {
                 let result = self
                     .function
                     .make_binary("bin_result".intern(), op, lhs, rhs, ty);
+                self.add_temporary(result);
 
                 match context {
                     ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
                         let storage = self.function.make_alloca("bin_storage".intern(), ty, Some(Operand::Variable(result)));
+                        self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
                 }
@@ -186,12 +222,14 @@ impl<'a> TransientData<'a> {
 
                 let result = match un_expr.op {
                     UnaryOp::Negate => {
-                        self.function.make_unary(
+                        let temp = self.function.make_unary(
                             "neg_result".intern(),
                             ty,
                             YirUnaryOp::Neg,
                             operand,
-                        )
+                        );
+                        self.add_temporary(temp);
+                        temp
                     }
                     UnaryOp::Pos => match operand {
                         Operand::Variable(var) => var,
@@ -203,6 +241,7 @@ impl<'a> TransientData<'a> {
                     ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
                         let storage = self.function.make_alloca("unary_storage".intern(), ty, Some(Operand::Variable(result)));
+                        self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
                 }
@@ -228,11 +267,15 @@ impl<'a> TransientData<'a> {
                         .make_call("call_result".intern(), func_name, args, return_type);
 
                 match result {
-                    Some(result_var) => match context {
-                        ContextKind::AsIs => Operand::Variable(result_var),
-                        ContextKind::StorageLocation => {
+                    Some(result_var) => {
+                        self.add_temporary(result_var);
+                        match context {
+                            ContextKind::AsIs => Operand::Variable(result_var),
+                            ContextKind::StorageLocation => {
                                 let storage = self.function.make_alloca("call_storage".intern(), return_type, Some(Operand::Variable(result_var)));
-                            Operand::Variable(storage)
+                                self.add_temporary(storage);
+                                Operand::Variable(storage)
+                            }
                         }
                     },
                     None => {
@@ -307,6 +350,7 @@ impl<'a> TransientData<'a> {
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
                 let struct_var = self.function.make_alloca(sinfo.name, sinfo.ty, None);
+                self.add_temporary(struct_var);
 
                 for (field, field_expr) in &struct_instantiation_expr.fields {
                     let field_name = field.name;
@@ -321,6 +365,7 @@ impl<'a> TransientData<'a> {
                         Operand::Variable(struct_var),
                         field,
                     );
+                    self.add_temporary(field_var);
 
                     self.function.make_store(field_var, field_op);
                 }
@@ -330,6 +375,7 @@ impl<'a> TransientData<'a> {
                     }
                     ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("struct_value".intern(), Operand::Variable(struct_var));
+                        self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
                 }
@@ -355,6 +401,7 @@ impl<'a> TransientData<'a> {
                     lhs,
                     &field_info.fields[&field_name],
                 );
+                self.add_temporary(field_ptr);
 
                 match context {
                     ContextKind::StorageLocation => {
@@ -362,6 +409,7 @@ impl<'a> TransientData<'a> {
                     }
                     ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("field_value".intern(), Operand::Variable(field_ptr));
+                        self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
                 }
@@ -382,6 +430,7 @@ impl<'a> TransientData<'a> {
                 let enum_var =
                     self.function
                         .make_alloca("enum_result".intern(), enum_info.ty, None);
+                self.add_temporary(enum_var);
 
                 self.function
                     .make_store_active_variant_idx(enum_var, variant_info);
@@ -392,6 +441,7 @@ impl<'a> TransientData<'a> {
                         Operand::Variable(enum_var),
                         variant_info,
                     );
+                    self.add_temporary(variant_ptr);
                     self.function.make_store(variant_ptr, data_operand);
                 }
 
@@ -401,6 +451,7 @@ impl<'a> TransientData<'a> {
                     }
                     ContextKind::AsIs => {
                         let loaded_value = self.function.make_load("enum_value".intern(), Operand::Variable(enum_var));
+                        self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
                 }
@@ -411,6 +462,7 @@ impl<'a> TransientData<'a> {
                 match context {
                     ContextKind::AsIs => {
                         let loaded = self.function.make_load("deref_val".intern(), ptr_var);
+                        self.add_temporary(loaded);
                         Operand::Variable(loaded)
                     }
                     ContextKind::StorageLocation => ptr_var
@@ -435,6 +487,7 @@ impl<'a> TransientData<'a> {
                     pointer_type,
                     address_operand,
                 );
+                self.add_temporary(ptr_var);
 
                 Operand::Variable(ptr_var)
             }
@@ -452,6 +505,7 @@ impl<'a> TransientData<'a> {
                     size_operand,
                     None, // No alignment requirement for now
                 );
+                self.add_temporary(ptr_var);
 
                 // Check if we can initialize directly on heap (for struct literals)
                 match &*heap_alloc_expr.value {
@@ -475,6 +529,7 @@ impl<'a> TransientData<'a> {
                                 Operand::Variable(ptr_var),
                                 field_info,
                             );
+                            self.add_temporary(field_var);
 
                             self.function.make_store(field_var, field_op);
                         }
@@ -492,20 +547,28 @@ impl<'a> TransientData<'a> {
     }
 
     fn lower_block_body(&mut self, block_stmt: &BlockStmt) {
+        // Push a new scope for this block
+        self.push_scope();
+
         for stmt in &block_stmt.body {
             let res = self.lower_stmt(stmt);
 
             match res {
                 StmtRes::Break => {
+                    // Generate KillSet before breaking
+                    self.pop_scope_and_generate_killset();
                     return;
                 }
                 StmtRes::Proceed => (),
             }
         }
+
+        // Pop scope and generate KillSet for variables going out of scope
+        self.pop_scope_and_generate_killset();
     }
 
     fn lower_stmt(&mut self, stmt: &StmtNode) -> StmtRes {
-        match stmt {
+        let result = match stmt {
             StmtNode::Let(let_stmt) => {
                 let init_value_operand = self.lower_expr(&let_stmt.expr, ContextKind::AsIs);
                 self.lower_binding(let_stmt.binding.as_ref(), init_value_operand);
@@ -531,6 +594,23 @@ impl<'a> TransientData<'a> {
             ),
             StmtNode::Return(return_stmt) => {
                 let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e, ContextKind::AsIs));
+
+                // Pull all higher-level scopes into the current scope for KILLSETting
+                if self.scope_stack.len() > 0 {
+                    // First collect variables from all higher scopes
+                    let mut vars_to_merge = Vec::new();
+                    for scope in &self.scope_stack[..self.scope_stack.len()-1] {
+                        vars_to_merge.extend_from_slice(scope);
+                    }
+
+                    vars_to_merge.extend_from_slice(&self.current_temporaries);
+                    self.current_temporaries.clear();
+
+                    if let Some(current_scope) = self.scope_stack.last_mut() {
+                        current_scope.extend_from_slice(&vars_to_merge);
+                    }
+                }
+
                 self.function.make_return(ret_value);
                 StmtRes::Break
             }
@@ -562,7 +642,9 @@ impl<'a> TransientData<'a> {
                                     lowered_match_expr,
                                     variant_info,
                                 );
+                                self.add_temporary(variant_ptr);
                                 let variant_value = self.function.make_load("variant_value".intern(), Operand::Variable(variant_ptr));
+                                self.add_temporary(variant_value);
                                 self.lower_binding(
                                     variant_data_binding,
                                     Operand::Variable(variant_value),
@@ -609,6 +691,7 @@ impl<'a> TransientData<'a> {
                 self.function.set_current_block(&if_header);
 
                 let lowered_if_condition = self.lower_expr(&if_stmt.if_block.condition, ContextKind::AsIs);
+                self.kill_current_temporaries();
 
                 self.function.set_current_block(&if_body);
                 self.lower_block_body(&if_stmt.if_block.body);
@@ -630,6 +713,7 @@ impl<'a> TransientData<'a> {
 
                     self.function.set_current_block(&else_if_header);
                     let lowered_else_if_cond = self.lower_expr(&else_if_block.condition, ContextKind::AsIs);
+                    self.kill_current_temporaries();
 
                     self.function.set_current_block(&else_if_body);
                     self.lower_block_body(&else_if_block.body);
@@ -667,6 +751,7 @@ impl<'a> TransientData<'a> {
 
                 let lowered_while_condition =
                     self.lower_expr(&while_stmt.condition_block.condition, ContextKind::AsIs);
+                self.kill_current_temporaries();
                 self.function.make_branch_to_existing(
                     lowered_while_condition,
                     while_body,
@@ -690,7 +775,10 @@ impl<'a> TransientData<'a> {
                 self.lower_block_body(block_stmt);
                 StmtRes::Proceed
             }
-        }
+        };
+
+        self.kill_current_temporaries();
+        result
     }
 
     fn lower_binding(&mut self, binding: &BindingNode, init_value_operand: Operand) {
@@ -703,6 +791,8 @@ impl<'a> TransientData<'a> {
                     self.function
                         .make_alloca(name_hint, var_type, Some(init_value_operand));
                 self.var_map.insert(binding_id, yir_var);
+
+                self.add_variable_to_current_scope(yir_var);
             }
         }
     }
@@ -735,14 +825,23 @@ impl YirLowering {
                     let mut data =
                         TransientData::new(Function::new(func.decl.name, return_type), tr);
 
+                    // Push function-level scope for parameters
+                    data.push_scope();
+
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name);
                         let param = data.function.add_param("stack_param_mem".intern(), ty);
                         let param_ptr = data.function.make_take_address(name, param);
                         data.var_map.insert(arg.id, param_ptr);
+
+                        // Add parameter to function scope
+                        data.add_variable_to_current_scope(param_ptr);
                     }
 
                     data.lower_block_body(&func.body);
+
+                    // Generate KillSet for function parameters at end of function
+                    data.pop_scope_and_generate_killset();
 
                     // TODO: Implement a helper make_return_if_no_terminator
                     if data
