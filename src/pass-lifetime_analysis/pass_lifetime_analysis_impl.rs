@@ -32,73 +32,112 @@ enum NodeType {
     StackVar,
     HeapAlloc,
     PartOfAlloc,
+    MemAddr,
 }
 
 #[derive(Clone, Copy, Eq, Debug)]
-struct Node {
-    kind: NodeType,
-    var: Variable,
+enum Node {
+    Variable { kind: NodeType, var: Variable },
+    MemoryAddress { addr: u64 },
+    DontCare { var: Variable },
 }
 
 impl Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.var.write_unique_name(f)?;
-        write!(f, "({})", self.kind)
+        match self {
+            Node::Variable { kind, var } => {
+                var.write_unique_name(f)?;
+                write!(f, "({})", kind)
+            }
+            Node::MemoryAddress { addr } => {
+                write!(f, "addr_{}(MemAddr)", addr)
+            }
+            Node::DontCare { var } => {
+                var.write_unique_name(f)?;
+                write!(f, "(DontCare)")
+            }
+        }
     }
 }
 
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.var.id().cmp(&other.var.id())
+        match (self, other) {
+            (Node::Variable { var: v1, .. }, Node::Variable { var: v2, .. }) => v1.id().cmp(&v2.id()),
+            (Node::DontCare { var: v1 }, Node::DontCare { var: v2 }) => v1.id().cmp(&v2.id()),
+            (Node::MemoryAddress { addr: a1 }, Node::MemoryAddress { addr: a2 }) => a1.cmp(a2),
+            (Node::Variable { .. }, _) => std::cmp::Ordering::Less,
+            (Node::DontCare { .. }, Node::Variable { .. }) => std::cmp::Ordering::Greater,
+            (Node::DontCare { .. }, Node::MemoryAddress { .. }) => std::cmp::Ordering::Less,
+            (Node::MemoryAddress { .. }, _) => std::cmp::Ordering::Greater,
+        }
     }
 }
 
 impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.var.id().partial_cmp(&other.var.id())
+        Some(self.cmp(other))
     }
 }
 
 impl Node {
     fn heap_alloc(var: Variable) -> Node {
-        Node {
+        Node::Variable {
             kind: NodeType::HeapAlloc,
             var,
         }
     }
 
     fn dont_care(var: Variable) -> Node {
-        Node {
-            kind: NodeType::PartOfAlloc,
-            var,
-        }
+        Node::DontCare { var }
     }
 
     fn part_of_alloc(var: Variable) -> Node {
-        Node {
+        Node::Variable {
             kind: NodeType::PartOfAlloc,
             var,
         }
     }
 
     fn stack_alloc(var: Variable) -> Node {
-        Node {
+        Node::Variable {
             kind: NodeType::StackVar,
             var,
         }
+    }
+
+    fn memory_address(addr: u64) -> Node {
+        Node::MemoryAddress { addr }
     }
 }
 
 impl Hash for Node {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        //self.kind.hash(state);
-        self.var.hash(state);
+        match self {
+            Node::Variable { var, .. } => {
+                0u8.hash(state);
+                var.hash(state);
+            }
+            Node::MemoryAddress { addr } => {
+                1u8.hash(state);
+                addr.hash(state);
+            }
+            Node::DontCare { var } => {
+                2u8.hash(state);
+                var.hash(state);
+            }
+        }
     }
 }
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.var.id() == other.var.id()
+        match (self, other) {
+            (Node::Variable { var: v1, .. }, Node::Variable { var: v2, .. }) => v1.id() == v2.id(),
+            (Node::DontCare { var: v1 }, Node::DontCare { var: v2 }) => v1.id() == v2.id(),
+            (Node::MemoryAddress { addr: a1 }, Node::MemoryAddress { addr: a2 }) => a1 == a2,
+            _ => false,
+        }
     }
 }
 
@@ -113,6 +152,9 @@ impl std::fmt::Display for NodeType {
             }
             NodeType::PartOfAlloc => {
                 write!(f, "PartOfAlloc")
+            }
+            NodeType::MemAddr => {
+                write!(f, "MemAddr")
             }
         }
     }
@@ -289,6 +331,22 @@ fn process_instruction(g: &mut G, stack: &mut IndexSet<Node>, instruction: &Inst
                 }
                 _ => return false,
             };
+            true
+        }
+
+        Instruction::IntToPtr { target, source } => {
+            let target_node = Node::stack_alloc(*target);
+            g.add_node(target_node);
+            stack.insert(target_node);
+
+            let addr = match source {
+                Operand::U64Const(i) => *i as u64,
+                _ => 0,
+            };
+            let addr_node = Node::memory_address(addr);
+            g.add_node(addr_node);
+
+            g.add_edge(target_node, addr_node, ());
             true
         }
 

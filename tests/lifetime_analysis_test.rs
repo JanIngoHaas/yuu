@@ -69,6 +69,10 @@ end
 
     let module = pipeline.get_module().unwrap();
 
+    let mut m = String::new();
+    module.format_yir(true, &mut m).unwrap();
+    println!("{m}");
+
     LifetimeAnalysis.run(module);
 
 }
