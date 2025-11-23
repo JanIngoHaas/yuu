@@ -24,13 +24,14 @@ pub struct Variable {
 
 impl Hash for Variable {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
         self.id.hash(state);
     }
 }
 
 impl PartialEq for Variable {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.name == other.name && self.id == other.id
     }
 }
 

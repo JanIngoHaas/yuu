@@ -4,10 +4,11 @@ use crate::pass_yir_lowering::{
     yir::{self, Instruction, Variable},
 };
 use indexmap::{IndexMap, IndexSet};
+use petgraph::data::DataMap;
 use petgraph::{
     Direction,
     algo::isomorphism::is_isomorphic,
-    dot::Dot,
+    dot::{Dot, Config},
     visit::{Dfs, EdgeRef},
 };
 use std::fmt::Display;
@@ -27,35 +28,26 @@ type G = petgraph::graphmap::GraphMap<Node, EdgeType, petgraph::Directed>;
 
 type EdgeType = ();
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-enum NodeType {
-    StackVar,
-    HeapAlloc,
-    PartOfAlloc,
-    MemAddr,
-}
-
 #[derive(Clone, Copy, Eq, Debug)]
 enum Node {
-    Variable { kind: NodeType, var: Variable },
+    Heap,
+    StackVariable { var: Variable },
     MemoryAddress { addr: u64 },
-    DontCare { var: Variable },
+    GarbageMemory,
 }
 
 impl Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Node::Variable { kind, var } => {
+            Node::Heap => write!(f, "heap"),
+            Node::StackVariable { var} => {
                 var.write_unique_name(f)?;
-                write!(f, "({})", kind)
+                write!(f, "(StackVar)")
             }
             Node::MemoryAddress { addr } => {
                 write!(f, "addr_{}(MemAddr)", addr)
             }
-            Node::DontCare { var } => {
-                var.write_unique_name(f)?;
-                write!(f, "(DontCare)")
-            }
+            Node::GarbageMemory => write!(f, "garbage")
         }
     }
 }
@@ -63,13 +55,18 @@ impl Display for Node {
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (Node::Variable { var: v1, .. }, Node::Variable { var: v2, .. }) => v1.id().cmp(&v2.id()),
-            (Node::DontCare { var: v1 }, Node::DontCare { var: v2 }) => v1.id().cmp(&v2.id()),
+            (Node::Heap, Node::Heap) => std::cmp::Ordering::Equal,
+            (Node::StackVariable { var: v1, .. }, Node::StackVariable { var: v2, .. }) => v1.id().cmp(&v2.id()),
             (Node::MemoryAddress { addr: a1 }, Node::MemoryAddress { addr: a2 }) => a1.cmp(a2),
-            (Node::Variable { .. }, _) => std::cmp::Ordering::Less,
-            (Node::DontCare { .. }, Node::Variable { .. }) => std::cmp::Ordering::Greater,
-            (Node::DontCare { .. }, Node::MemoryAddress { .. }) => std::cmp::Ordering::Less,
-            (Node::MemoryAddress { .. }, _) => std::cmp::Ordering::Greater,
+            (Node::GarbageMemory, Node::GarbageMemory) => std::cmp::Ordering::Equal,
+            (Node::Heap, _) => std::cmp::Ordering::Less,
+            (Node::StackVariable { .. }, Node::Heap) => std::cmp::Ordering::Greater,
+            (Node::StackVariable { .. }, Node::MemoryAddress { .. }) => std::cmp::Ordering::Less,
+            (Node::StackVariable { .. }, Node::GarbageMemory) => std::cmp::Ordering::Less,
+            (Node::MemoryAddress { .. }, Node::Heap) => std::cmp::Ordering::Greater,
+            (Node::MemoryAddress { .. }, Node::StackVariable { .. }) => std::cmp::Ordering::Greater,
+            (Node::MemoryAddress { .. }, Node::GarbageMemory) => std::cmp::Ordering::Less,
+            (Node::GarbageMemory, _) => std::cmp::Ordering::Greater,
         }
     }
 }
@@ -81,50 +78,39 @@ impl PartialOrd for Node {
 }
 
 impl Node {
-    fn heap_alloc(var: Variable) -> Node {
-        Node::Variable {
-            kind: NodeType::HeapAlloc,
-            var,
-        }
-    }
-
-    fn dont_care(var: Variable) -> Node {
-        Node::DontCare { var }
-    }
-
-    fn part_of_alloc(var: Variable) -> Node {
-        Node::Variable {
-            kind: NodeType::PartOfAlloc,
-            var,
-        }
+    fn heap_alloc() -> Node {
+        Node::Heap
     }
 
     fn stack_alloc(var: Variable) -> Node {
-        Node::Variable {
-            kind: NodeType::StackVar,
-            var,
-        }
+        Node::StackVariable { var }
     }
 
     fn memory_address(addr: u64) -> Node {
         Node::MemoryAddress { addr }
+    }
+
+    fn garbage_mem_addr() -> Node {
+        Node::GarbageMemory
     }
 }
 
 impl Hash for Node {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            Node::Variable { var, .. } => {
+            Node::Heap => {
                 0u8.hash(state);
+            }
+            Node::StackVariable { var, .. } => {
+                1u8.hash(state);
                 var.hash(state);
             }
             Node::MemoryAddress { addr } => {
-                1u8.hash(state);
+                2u8.hash(state);
                 addr.hash(state);
             }
-            Node::DontCare { var } => {
-                2u8.hash(state);
-                var.hash(state);
+            Node::GarbageMemory => {
+                3u8.hash(state);
             }
         }
     }
@@ -133,32 +119,15 @@ impl Hash for Node {
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Node::Variable { var: v1, .. }, Node::Variable { var: v2, .. }) => v1.id() == v2.id(),
-            (Node::DontCare { var: v1 }, Node::DontCare { var: v2 }) => v1.id() == v2.id(),
+            (Node::Heap, Node::Heap) => true,
+            (Node::StackVariable { var: v1, .. }, Node::StackVariable { var: v2, .. }) => v1 == v2,
             (Node::MemoryAddress { addr: a1 }, Node::MemoryAddress { addr: a2 }) => a1 == a2,
+            (Node::GarbageMemory, Node::GarbageMemory) => true,
             _ => false,
         }
     }
 }
 
-impl std::fmt::Display for NodeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NodeType::StackVar => {
-                write!(f, "StackVar")
-            }
-            NodeType::HeapAlloc => {
-                write!(f, "HeapVar")
-            }
-            NodeType::PartOfAlloc => {
-                write!(f, "PartOfAlloc")
-            }
-            NodeType::MemAddr => {
-                write!(f, "MemAddr")
-            }
-        }
-    }
-}
 
 fn perform_reachability_analysis(g: &G, stack_vars: &IndexSet<Node>) -> (G, G) {
     let mut reachable = IndexSet::new();
@@ -233,7 +202,9 @@ fn remove_nodes_cascade(g: &mut G, mut to_remove: Vec<Node>) {
     while let Some(node) = to_remove.pop() {
         for neigh in g.neighbors_directed(node, Direction::Outgoing) {
             if g.neighbors_directed(neigh, Direction::Incoming).count() == 1 {
-                to_remove.push(neigh);
+                if matches!(g.node_weight(neigh), Some(Node::Heap)) {
+                    to_remove.push(neigh);
+                }
             }
         }
 
@@ -245,7 +216,7 @@ fn remove_nodes_cascade(g: &mut G, mut to_remove: Vec<Node>) {
 // This requires that all worklist items are still contained in the graph! The garbage is collected based on the worklist items.
 fn garbage_collect_from_nodes<'a>(g: &mut G, stack: &mut IndexSet<Node>, to_remove: Vec<Node>) {
     for v in &to_remove {
-        let out = stack.swap_remove(v);
+        let _ = stack.swap_remove(v);
         //debug_assert!(out);
     }
 
@@ -253,46 +224,58 @@ fn garbage_collect_from_nodes<'a>(g: &mut G, stack: &mut IndexSet<Node>, to_remo
 }
 
 fn garbage_collect_from_edges(g: &mut G, to_remove: Vec<(Node, Node)>) {
-    let mut worklist = Vec::new();
+    let mut worklist = Vec::with_capacity(to_remove.len());
 
     for tr in to_remove {
         g.remove_edge(tr.0, tr.1);
-        worklist.extend_from_slice(&[tr.0, tr.1]);
+        worklist.push(tr.1);
     }
 
     remove_nodes_cascade(g, worklist);
 }
 
 fn process_instruction(g: &mut G, stack: &mut IndexSet<Node>, instruction: &Instruction) -> bool {
+    println!("Processing instruction: {:?}", instruction);
     match instruction {
         Instruction::Alloca { target } => {
-            let node = g.add_node(Node::stack_alloc(*target));
-            stack.insert(node);
+            let stack_node = g.add_node(Node::stack_alloc(*target));
+            stack.insert(stack_node);
+            g.add_edge(stack_node, Node::garbage_mem_addr(), ());
+            println!("  ALLOCA: Created uninitialized stack node {:?} for variable {:?}",
+                     stack_node, target);
             true
         }
 
         Instruction::HeapAlloc { target, .. } => {
-            let node = g.add_node(Node::heap_alloc(*target));
-            stack.insert(node);
+            let heap_node = Node::heap_alloc();
+            let stack_node = Node::stack_alloc(*target);
+
+            let node_from = g.add_node(stack_node);
+            let node_to = g.add_node(heap_node);
+
+            g.add_edge(node_from, node_to, ());
+
+            stack.insert(node_from);
             true
         }
 
         Instruction::TakeAddress { target, source } => {
-            let tnode = g.add_node(Node::stack_alloc(*target));
+            let stack_node = Node::stack_alloc(*target);
+            g.add_node(stack_node);
             // Create edge from target to source (target points to source)
-            g.add_edge(tnode, Node::dont_care(*source), ());
-            stack.insert(tnode);
+
+            g.add_edge(stack_node, Node::stack_alloc(*source), ());
+            stack.insert(stack_node);
             true
         }
 
         Instruction::Load { target, source } => {
             if let Operand::Variable(source_var) = source {
-                let target_node = g.add_node(Node::part_of_alloc(*target));
+                let target_node = g.add_node(Node::stack_alloc(*target));
 
                 let source_outgoing = g
-                    .edges_directed(Node::dont_care(*source_var), Direction::Outgoing)
-                    .map(|x| x.target())
-                    .collect::<Vec<_>>();
+                    .edges_directed(Node::stack_alloc(*source_var), Direction::Outgoing)
+                    .map(|x| x.target()).collect::<Vec<_>>();
 
                 for edge_target in source_outgoing {
                     g.add_edge(target_node, edge_target, ());
@@ -302,32 +285,34 @@ fn process_instruction(g: &mut G, stack: &mut IndexSet<Node>, instruction: &Inst
         }
 
         Instruction::Store { dest: d, value: v } => {
-            // Handle case:
-
-            // dest <-- value ; dest is def a pointer. If we have a "pointer pointer+" type, we are actually storing a reference
-            // - otherwise, doesn't matter here. We don't have to check that case explicitly.
-
             match (d, v) {
                 (Operand::Variable(variable_to), value) => {
-                    // Remove existing outgoing edges from the destination - we are now reassigning
-                    let out = g
-                        .edges_directed(Node::dont_care(*variable_to), Direction::Outgoing)
-                        .map(|x| x.id())
-                        .collect::<Vec<_>>();
+                    println!("  STORE: Looking for variable {:?} in graph", variable_to);
+                    let lookup_node = Node::stack_alloc(*variable_to);
+                    println!("  STORE: Lookup node is {:?}", lookup_node);
 
-                    // If storing another variable, copy its outgoing edges
+                    // Step 1: Find what dest points to and remove all edges into this direction. 
+                    let edges_to_remove = g
+                        .edges_directed(lookup_node, Direction::Outgoing)
+                        .map(|x| (x.source(), x.target())).collect::<Vec<_>>();
+
+                    for (from, to) in &edges_to_remove {
+                        g.remove_edge(*from, *to);
+                    }
+
+                    // Step 2: Store the new value
                     if let Operand::Variable(variable_from) = value {
-                        // Whatever variable_from points to, we also want to point to for "to_node_idx"
-                        let out = g
-                            .edges_directed(Node::dont_care(*variable_from), Direction::Outgoing)
-                            .map(|x| x.target())
+                        let targets = g
+                            .edges_directed(Node::stack_alloc(*variable_from), Direction::Outgoing)
+                            .map(|x| x.1)
                             .collect::<Vec<_>>();
-                        for e in out {
-                            g.add_edge(Node::dont_care(*variable_to), e, ());
+                        for target in targets {
+                            g.add_edge(Node::stack_alloc(*variable_to), target, ());
                         }
                     }
 
-                    garbage_collect_from_edges(g, out);
+                    // Step 3: Garbage collect any nodes that became unreachable
+                    garbage_collect_from_edges(g, edges_to_remove);
                 }
                 _ => return false,
             };
@@ -351,10 +336,13 @@ fn process_instruction(g: &mut G, stack: &mut IndexSet<Node>, instruction: &Inst
         }
 
         Instruction::KillSet { vars } => {
+            println!("  KILLSET: Removing variables {:?}", vars);
+            let nodes_to_remove: Vec<Node> = vars.iter().map(|x| Node::stack_alloc(*x)).collect();
+            println!("  KILLSET: Mapped to nodes {:?}", nodes_to_remove);
             garbage_collect_from_nodes(
                 g,
                 stack,
-                vars.iter().map(|x| Node::dont_care(*x)).collect(),
+                nodes_to_remove,
             );
             true
         }
@@ -485,24 +473,20 @@ fn process_block(
 
     for (idx, instr) in block.instructions.iter().enumerate() {
         process_instruction(&mut initial_state.graph, &mut initial_state.stack, instr);
-        let name = format!(
-            "Block {} - {idx}",
-            block.label);
-        
-        let dot_content = format!("{:?}", Dot::new(&initial_state.graph));
+        let name = format!("Block {} - {idx}", block.label);
+
+        let dot_content = format!("{:?}", Dot::with_config(&initial_state.graph, &[Config::EdgeNoLabel]));
         let filename = format!("{name}.dot");
         let pdf_filename = format!("{name}.pdf");
-    
+
         if let Ok(mut file) = File::create(&filename) {
             let _ = file.write_all(dot_content.as_bytes());
-    
+
             let _ = Command::new("dot")
                 .args(["-Tpdf", &filename, "-o", &pdf_filename])
                 .output();
         }
     }
-
-
 
     let is = Rc::new(initial_state);
     memo.insert(block.label, is.clone());
