@@ -13,11 +13,11 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_01.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Simple heap allocation should succeed");
 }
 
@@ -38,10 +38,10 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_02.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Pointer reassignment chain should succeed");
 }
 
@@ -67,13 +67,13 @@ end
 
     let mut pipeline = Pipeline::new(source.to_string(), "test.yir".to_string()).unwrap();
 
-    let module = pipeline.get_module().unwrap();
+    let module = pipeline.get_module_mut().unwrap();
 
+    LifetimeAnalysis.run(module);
+    
     let mut m = String::new();
     module.format_yir(true, &mut m).unwrap();
     println!("{m}");
-
-    LifetimeAnalysis.run(module);
 
 }
 
@@ -91,10 +91,10 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_04.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Nested heap with indirection should succeed");
 }
 
@@ -226,10 +226,10 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_08.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Pointer aliasing and modification should succeed");
 }
 
@@ -260,10 +260,10 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_09.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Complex branching with loop and heap should succeed");
 }
 
@@ -296,9 +296,9 @@ fn main() -> i64:
 
     let mut pipeline = Pipeline::new(source.to_string(), "test_10.yuu".to_string())
         .expect("Failed to create pipeline");
-    let module = pipeline.get_module().expect("Failed to get module");
+    let module = pipeline.get_module_mut().expect("Failed to get module");
 
     let lifetime_pass = LifetimeAnalysis::new();
-    let result = lifetime_pass.run(module);
+    lifetime_pass.run(module);
     //assert!(result.is_ok(), "Extreme pointer web should succeed");
 }

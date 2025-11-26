@@ -233,6 +233,16 @@ impl Pipeline {
             .ok_or_else(|| miette::miette!("Module not available"))
     }
 
+    pub fn get_module_mut(&mut self) -> Result<&mut Module> {
+        if self.module.is_none() {
+            *self = std::mem::take(self).yir_lowering()?;
+        }
+
+        self.module
+            .as_mut()
+            .ok_or_else(|| miette::miette!("Module not available"))
+    }
+
     pub fn compile_executable(&mut self) -> Result<CExecutable> {
         // Auto-compute C code if not available
         if self.c_code.is_none() {
