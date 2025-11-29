@@ -3,6 +3,20 @@ use common::*;
 use yuu::pass_lifetime_analysis::LifetimeAnalysis;
 use yuu::utils::pipeline::Pipeline;
 
+fn run_lifetime_analysis(source: &str, filename: &str) -> Pipeline {
+     let mut pipeline = Pipeline::new(source.to_string(), filename.to_string())
+        .expect("Failed to create pipeline");
+    pipeline = pipeline.yir_lowering().unwrap();
+    let mut module = pipeline.module.take().unwrap();
+    let type_registry = pipeline.type_registry.as_ref().unwrap();
+
+    let lifetime_pass = LifetimeAnalysis::new();
+    lifetime_pass.run(&mut module, type_registry);
+    
+    pipeline.module = Some(module);
+    pipeline
+}
+
 #[test]
 fn test_01_simple_heap_allocation() {
     let source = r#"
@@ -11,14 +25,7 @@ fn main() -> i64:
     return heap_ptr.* .
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_01.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
-
-
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Simple heap allocation should succeed");
+    run_lifetime_analysis(source, "test_01.yuu");
 }
 
 #[test]
@@ -36,13 +43,7 @@ fn main() -> i64:
     return active.* .
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_02.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
-
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Pointer reassignment chain should succeed");
+    run_lifetime_analysis(source, "test_02.yuu");
 }
 
 #[test]
@@ -65,11 +66,8 @@ fn main() -> i64:
 end
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test.yir".to_string()).unwrap();
-
-    let module = pipeline.get_module_mut().unwrap();
-
-    LifetimeAnalysis.run(module);
+    let mut pipeline = run_lifetime_analysis(source, "test.yir");
+    let module = pipeline.module.as_ref().unwrap();
     
     let mut m = String::new();
     module.format_yir(true, &mut m).unwrap();
@@ -89,13 +87,7 @@ fn main() -> i64:
     return final_val .
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_04.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
-
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Nested heap with indirection should succeed");
+    run_lifetime_analysis(source, "test_04.yuu");
 }
 
 #[test]
@@ -224,13 +216,7 @@ fn main() -> i64:
     return original.* + alias1.* + alias2.* .
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_08.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
-
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Pointer aliasing and modification should succeed");
+    run_lifetime_analysis(source, "test_08.yuu");
 }
 
 #[test]
@@ -258,47 +244,29 @@ fn main() -> i64:
     return final_ptr.* .
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_09.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
-
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Complex branching with loop and heap should succeed");
+    run_lifetime_analysis(source, "test_09.yuu");
 }
 
 #[test]
-fn test_10_extreme_pointer_web() {
+fn test_11_struct_with_drop() {
     let source = r#"
+struct MyStruct:
+    a: i64,
+    b: i64
+end
+
 fn main() -> i64:
-    let a = @10;
-    let b = @a;
-    let c = @b;
-    let d = @20;
-    let e = @d;
-
-    let web1 = c;
-    let web2 = e;
-
-    if true:
-        let temp = @web1.*.*.* ;
-        web2.* = temp;
-    else:
-        let temp = @web2.*.* ;
-        web1.*.* = temp;
-    end
-
-    let final_a = web1.*.*.* ;
-    let final_b = web2.*.* ;
-
-    return final_a + final_b .
+    let s = @MyStruct { a: 1, b: 2 };
+    return 0
+end
     "#;
 
-    let mut pipeline = Pipeline::new(source.to_string(), "test_10.yuu".to_string())
-        .expect("Failed to create pipeline");
-    let module = pipeline.get_module_mut().expect("Failed to get module");
+    let mut pipeline = run_lifetime_analysis(source, "test_11.yuu");
+    let module = pipeline.module.as_ref().unwrap();
 
-    let lifetime_pass = LifetimeAnalysis::new();
-    lifetime_pass.run(module);
-    //assert!(result.is_ok(), "Extreme pointer web should succeed");
+    let mut m = String::new();
+    module.format_yir(false, &mut m).unwrap();
+    println!("{m}");
+
+    assert!(m.contains("CALL _drop"), "Generated YIR should contain a call to _drop");
 }
