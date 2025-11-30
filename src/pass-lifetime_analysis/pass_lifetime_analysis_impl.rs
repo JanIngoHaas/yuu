@@ -3,7 +3,6 @@ use crate::pass_yir_lowering::{
     yir::{self, Instruction},
 };
 use indexmap::IndexMap;
-use petgraph::algo::isomorphism::is_isomorphic;
 use std::rc::Rc;
 use crate::pass_lifetime_analysis::memory_graph::{MemoryGraph, G};
 use crate::pass_type_inference::TypeRegistry;
@@ -86,7 +85,7 @@ fn process_block(
                 process_block(pred_bb, predecessor_map, memo, function_name, type_registry);
             if let Some(already_existing_state) = &initial_state {
                 // If we don't have a full calc yet of ANY predecessor...
-                if !is_isomorphic(&already_existing_state.graph, &pred_bb_state.graph) {
+                if !already_existing_state.is_induced_isomorphic(&pred_bb_state) {
                     panic!("User Bug: Graphs not isomorphic"); // TODO: Make this a lifetime error that gets printed to console... We can print the subgraphs which are NOT isomorphic
                 }
             } else {

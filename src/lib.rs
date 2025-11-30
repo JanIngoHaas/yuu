@@ -19,6 +19,4 @@ pub mod pass_type_dependency_analysis;
 pub mod pass_type_inference;
 #[path = "pass-yir_lowering/mod.rs"]
 pub mod pass_yir_lowering;
-#[path = "pass-lifetime_analysis/mod.rs"]
-pub mod pass_lifetime_analysis;
 

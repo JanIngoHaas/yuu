@@ -90,35 +90,98 @@ impl Default for MemoryGraph {
 
 fn generate_nodes_for_type(ty: &'static TypeInfo, node_idx: NodeIndex, g: &mut MemoryGraph, type_registry: &TypeRegistry) {
     match ty {
-        // If: pointer: link "node" to garbage mem
         TypeInfo::Pointer(_) => {
             let garbage = Node::garbage_mem_addr();
             let garbage_idx = g.graph.add_node(garbage);
             g.graph.add_edge(node_idx, garbage_idx, None);
         }
-        // If: struct: get all fields, link "node" to all fields (we use 'PartOfAlloc' here!). Call generate_nodes_for_type
-        // recursively
         TypeInfo::Struct(struct_type) => {
             if let Some(struct_info) = type_registry.resolve_struct(struct_type.name) {
                 for field in struct_info.fields.values() {
                     let field_node = Node::PartOfAlloc { id: g.heap_counter };
                     g.heap_counter += 1;
                     let field_idx = g.graph.add_node(field_node);
-                    
-                    // Explicitly add the edge with field name
+
                     g.graph.add_edge(node_idx, field_idx, Some(field.name));
-                    
                     generate_nodes_for_type(field.ty, field_idx, g, type_registry);
                 }
             }
         }
-        _ => {
-             // Node is already added at the start of the function
-        }
+        _ => {}
     }
 }
 
 impl MemoryGraph {
+    pub fn is_induced_isomorphic(&self, other: &MemoryGraph) -> bool {
+        let mut visited = IndexSet::new();
+
+        for (stack_var, &self_node) in &self.stack {
+            if let Some(&other_node) = other.stack.get(stack_var) {
+                if !self.is_induced_isomorphic_recursive(self_node, other, other_node, &mut visited) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        self.stack.len() == other.stack.len()
+    }
+
+    fn is_induced_isomorphic_recursive(
+        &self,
+        self_node: NodeIndex,
+        other: &MemoryGraph,
+        other_node: NodeIndex,
+        visited: &mut IndexSet<(NodeIndex, NodeIndex)>,
+    ) -> bool {
+        let node_pair = (self_node, other_node);
+        if visited.contains(&node_pair) {
+            return true;
+        }
+
+        visited.insert(node_pair);
+
+        if self.graph.node_weight(self_node) != other.graph.node_weight(other_node) {
+            return false;
+        }
+
+        let self_edges: IndexMap<EdgeType, Vec<NodeIndex>> = self.graph
+            .edges_directed(self_node, Direction::Outgoing)
+            .fold(IndexMap::new(), |mut acc, edge| {
+                acc.entry(*edge.weight()).or_default().push(edge.target());
+                acc
+            });
+
+        let other_edges: IndexMap<EdgeType, Vec<NodeIndex>> = other.graph
+            .edges_directed(other_node, Direction::Outgoing)
+            .fold(IndexMap::new(), |mut acc, edge| {
+                acc.entry(*edge.weight()).or_default().push(edge.target());
+                acc
+            });
+
+        if self_edges.len() != other_edges.len() {
+            return false;
+        }
+
+        for (edge_weight, self_targets) in &self_edges {
+            if let Some(other_targets) = other_edges.get(edge_weight) {
+                if self_targets.len() != other_targets.len() {
+                    return false;
+                }
+
+                for (self_target, other_target) in self_targets.iter().zip(other_targets.iter()) {
+                    if !self.is_induced_isomorphic_recursive(*self_target, other, *other_target, visited) {
+                        return false;
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+
+        true
+    }
     pub fn process_instruction(&mut self, instruction: &Instruction, type_registry: &TypeRegistry) -> Vec<Instruction> {
         match instruction {
             Instruction::Alloca { target } => {
@@ -126,8 +189,8 @@ impl MemoryGraph {
                 let stack_node_idx = self.graph.add_node(node);
                 self.stack.insert(*target, stack_node_idx);
                 self.allocas.insert(*target);
-                
-                generate_nodes_for_type(target.ty().deref_ptr(), stack_node_idx, self, type_registry);
+
+                generate_nodes_for_type(target.ty(), stack_node_idx, self, type_registry);
                 Vec::new()
             }
 
@@ -155,16 +218,8 @@ impl MemoryGraph {
                 let stack_node_idx = self.graph.add_node(stack_node);
                 
                 if let Some(&source_node_idx) = self.stack.get(source) {
-                    // Create a new node for the source? No, TakeAddress should point to the existing stack node of the source?
-                    // Or rather, the target is a pointer *to* the source.
-                    // In this memory graph, if we have `x`, `x` is a node. `p = &x`. `p` is a node. `p` points to `x`.
-                    // So `stack_node_idx` (p) points to `source_node_idx` (x).
                     self.graph.add_edge(stack_node_idx, source_node_idx, None);
                 } else {
-                    // If source is not in stack map, maybe it's a temporary?
-                    // For now assuming it must be in stack map as per `stack_alloc` semantics in previous code.
-                    // If not found, we might need to create it, but `source` is a Variable, so it should be there.
-                    // Fallback or panic? Let's just create a node if missing (robustness)
                     let source_node = Node::stack_alloc(*source);
                     let source_node_idx = self.graph.add_node(source_node);
                     self.stack.insert(*source, source_node_idx);
@@ -213,22 +268,13 @@ impl MemoryGraph {
                     self.stack.insert(*target, target_node_idx);
 
                     if let Some(&source_node_idx) = self.stack.get(source_var) {
-                        // source_var points to Intermediate. Intermediate points to Final.
-                        // We want target -> Final.
-                        let intermediates: Vec<_> = self.graph
+                        let pointed_to: Vec<_> = self.graph
                             .edges_directed(source_node_idx, Direction::Outgoing)
                             .map(|x| x.target())
                             .collect();
 
-                        for inter in intermediates {
-                            let finals: Vec<_> = self.graph
-                                .edges_directed(inter, Direction::Outgoing)
-                                .map(|x| x.target())
-                                .collect();
-                            
-                            for final_node in finals {
-                                self.graph.add_edge(target_node_idx, final_node, None);
-                            }
+                        for pointed_node in pointed_to {
+                            self.graph.add_edge(target_node_idx, pointed_node, None);
                         }
                     }
                 }
@@ -237,124 +283,33 @@ impl MemoryGraph {
 
             Instruction::Store { dest: d, value: v } => {
                 match (d, v) {
-                    (Operand::Variable(variable_to), value) => {
-                        // Store into pointer `variable_to`.
-                        // `variable_to` is a stack variable (NodeIndex). It points to some location (Pointee).
-                        // We want Pointee to now point to `value`.
-                        
-                        // NOTE: The previous GraphMap implementation logic was:
-                        // lookup_node = Node::stack_alloc(*variable_to)
-                        // edges_to_remove = edges from lookup_node
-                        //
-                        // Wait, `Store` typically means `*ptr = val`.
-                        // If `variable_to` is the pointer `ptr`. `ptr` points to `Obj`.
-                        // We are modifying `Obj`.
-                        // But in the previous implementation:
-                        // "For Store, we use the 'dest' as the root operand to access the old value
-                        // Since 'dest' is the pointer variable, we can Load from it to get the heap pointer"
-                        // And it removed edges from `lookup_node`.
-                        //
-                        // If `variable_to` is the pointer variable itself, removing edges from it means changing what the pointer points to?
-                        // That's `ptr = val` (assignment), not `*ptr = val` (store).
-                        // `Instruction::Store` is `*dest = value`.
-                        // `Instruction::Assign` or just `Store`?
-                        // Let's check `yir.rs` definition.
-                        // `Store { dest: Operand, value: Operand }` -> "Store value through a pointer".
-                        // So `dest` is a pointer. `*dest = value`.
-                        // `variable_to` is `dest`.
-                        // `variable_to` points to `MemoryLocation`.
-                        // `MemoryLocation` should now point to `value`.
-                        
-                        // The previous implementation:
-                        // `let lookup_node = Node::stack_alloc(*variable_to);`
-                        // `edges_to_remove = self.graph.edges_directed(lookup_node, ...)`
-                        // This looks like it was treating `Store` as overwriting the pointer `variable_to` itself?
-                        // OR, it assumed `variable_to` IS the memory location?
-                        // But `dest` is `Operand`, usually `Operand::Variable`.
-                        // If `dest` is a pointer variable, we should follow it one step to get the memory location being written to.
-                        
-                        // HOWEVER, looking at `yir.rs`: `Store { dest, value }` "Store value through a pointer".
-                        // AND `StoreImmediate` "Simple assignment or from constant to variable".
-                        
-                        // Let's assume the previous logic was trying to model `*ptr = val`.
-                        // If `ptr` points to `Obj`. `Obj`'s outgoing edges should be replaced.
-                        // But the code removed edges from `lookup_node` (which is `variable_to`).
-                        // If `variable_to` is `ptr`, then it was changing `ptr` to point to something else.
-                        // That sounds like `ptr = val`.
-                        
-                        // Maybe I should stick to the exact logic of the previous implementation for now to avoid semantic drift, 
-                        // but adapted to StableGraph.
-                        // "process_instruction" ... "Instruction::Store"
-                        
-                        // Wait, if I follow the previous code literally:
-                        // `let lookup_node = Node::stack_alloc(*variable_to);`
-                        // In StableGraph, this is `self.stack.get(variable_to)`.
-                        
-                        if let Some(&ptr_node_idx) = self.stack.get(variable_to) {
-                             // In the previous code, it removed edges from `variable_to`.
-                             // This implies `variable_to` IS the thing being modified.
-                             // If `Store` is used for `ptr = val` in YIR (which might be `Store` if `dest` is a var?), then this is correct.
-                             // But `yir.rs` says `Store` is "Store value through a pointer".
-                             // AND `StoreImmediate` is "Simple assignment".
-                             
-                             // Let's look at how `Alloca` works. `Alloca` creates a stack slot `target`.
-                             // `stack_node` is that slot.
-                             // `Generate_nodes` adds edges from `stack_node` (e.g. to garbage).
-                             
-                             // If I have `let p = @...`. `p` is stack var. `p` points to heap.
-                             // If I do `p = q`. That is `Store { dest: p, value: q }`?
-                             // Or `Store` is only for `*p = q`?
-                             // `yir.rs` has `Instruction::StoreImmediate` for `target: Variable`.
-                             // `Instruction::Store` has `dest: Operand`.
-                             // If `dest` is `Variable(p)`, and `p` is a pointer type.
-                             // Does `Store` mean `p = value` or `*p = value`?
-                             // "Store value through a pointer" suggests `*p = value`.
-                             
-                             // BUT, the previous implementation removed edges from `variable_to`.
-                             // If `variable_to` is `p`, then it changes `p`'s target.
-                             // That models `p = value`.
-                             // If it modelled `*p = value`, it would find children of `p` and remove THEIR edges.
-                             
-                             // User prompt: "Follow my comments for now deviating if they are wrong."
-                             // Previous code: "For Store, we use the 'dest' as the root operand to access the old value".
-                             
-                             // Let's stick to the previous logic but adapt to `StableGraph`.
-                             
-                             let edges_to_remove: Vec<_> = self.graph
-                                .edges_directed(ptr_node_idx, Direction::Outgoing)
+                    (Operand::Variable(dest_var), value) => {
+                        if let Some(&dest_node_idx) = self.stack.get(dest_var) {
+                            let edges_to_remove: Vec<_> = self.graph
+                                .edges_directed(dest_node_idx, Direction::Outgoing)
                                 .map(|e| (e.source(), e.target(), e.id()))
                                 .collect();
-                             
-                             // Collect removal data (edges)
-                             // We need `(NodeIndex, NodeIndex)` for garbage collection later.
-                             let mut edges_for_gc = Vec::new();
 
-                             for (source, target, edge_id) in edges_to_remove {
-                                 self.graph.remove_edge(edge_id);
-                                 edges_for_gc.push((source, target));
-                             }
-                             
-                             if let Operand::Variable(variable_from) = value {
-                                 if let Some(&val_node_idx) = self.stack.get(variable_from) {
-                                     // Add edges from `val_node` targets to `ptr_node`?
-                                     // Previous code: `targets = ... edges_directed(variable_from ...).target()`.
-                                     // `add_edge(variable_to, target)`.
-                                     // It copies where `variable_from` points to, to `variable_to`.
-                                     // So if `q -> obj`, and we do `p = q`, then `p -> obj`.
-                                     // This confirms it models `p = q` (pointer assignment).
-                                     
-                                     let targets: Vec<_> = self.graph
-                                        .edges_directed(val_node_idx, Direction::Outgoing)
-                                        .map(|e| e.target())
-                                        .collect();
-                                        
-                                     for target_idx in targets {
-                                         self.graph.add_edge(ptr_node_idx, target_idx, None);
-                                     }
-                                 }
-                             }
-                             
-                             self.garbage_collect_from_edges(edges_for_gc, Some(Operand::Variable(*variable_to)))
+                            let mut edges_for_gc = Vec::new();
+                            for (source, target, edge_id) in edges_to_remove {
+                                self.graph.remove_edge(edge_id);
+                                edges_for_gc.push((source, target));
+                            }
+
+                            if let Operand::Variable(value_var) = value {
+                                if let Some(&val_node_idx) = self.stack.get(value_var) {
+                                    let targets: Vec<_> = self.graph
+                                       .edges_directed(val_node_idx, Direction::Outgoing)
+                                       .map(|e| e.target())
+                                       .collect();
+
+                                    for target_idx in targets {
+                                        self.graph.add_edge(dest_node_idx, target_idx, None);
+                                    }
+                                }
+                            }
+
+                            self.garbage_collect_from_edges(edges_for_gc, Some(Operand::Variable(*dest_var)))
                         } else {
                             Vec::new()
                         }
