@@ -138,7 +138,9 @@ pub enum UnaryOp {
 pub enum Instruction {
     // Declares a variable on the stack, returns a pointer to it
     Alloca {
-        target: Variable, // The variable being declared
+        target: Variable,   // The variable being declared
+        count: u64,     // Number of elements (must be u64)
+        align: Option<u64>, // Optional alignment requirement
     },
 
     // Simple assignment or from constant to variable
@@ -220,7 +222,7 @@ pub enum Instruction {
     // Heap allocation - returns a pointer to allocated memory
     HeapAlloc {
         target: Variable,   // Pointer variable to store the heap address
-        size: Operand,      // Size in bytes (must be u64)
+        size: Operand,     // size (bytes)
         align: Option<u64>, // Optional alignment requirement
     },
 
@@ -270,7 +272,7 @@ impl BasicBlock {
     pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
         self.instructions.iter().filter_map(|instr| {
             match instr {
-                Instruction::Alloca { target } | Instruction::HeapAlloc { target, .. } => {
+                Instruction::Alloca { target, .. } | Instruction::HeapAlloc { target, .. } => {
                     return Some(target);
                 }
                 Instruction::StoreImmediate { .. } => {}
@@ -457,7 +459,8 @@ impl Function {
     ) -> Variable {
         let dest_ty = ty.ptr_to();
         let target = self.fresh_variable(name_hint, dest_ty);
-        let instr = Instruction::Alloca { target };
+        let count = 1; // Default count of 1 element
+        let instr = Instruction::Alloca { target, count, align: None };
         self.get_current_block_mut().instructions.push(instr);
 
         if let Some(value_ptr) = init_value {
@@ -723,7 +726,7 @@ impl Function {
         debug_assert_eq!(
             size.ty(),
             primitive_u64(),
-            "HeapAlloc size must be u64, got {}",
+            "HeapAlloc count must be u64, got {}",
             size.ty()
         );
 

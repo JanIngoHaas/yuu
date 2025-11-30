@@ -41,6 +41,7 @@ impl<T> Eq for GiveMePtrHashes<T> {}
 pub enum TypeCombination {
     Pointer(GiveMePtrHashes<TypeInfo>),
     Function((Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>)),
+    Array((GiveMePtrHashes<TypeInfo>, Option<i64>)),
     Struct(Ustr),
     Enum(Ustr),
 }
@@ -51,6 +52,10 @@ impl Hash for TypeCombination {
             TypeCombination::Pointer(ptr) => ptr.hash(state),
             TypeCombination::Function(args) => {
                 args.hash(state);
+            }
+            TypeCombination::Array((element_type, size)) => {
+                element_type.hash(state);
+                size.hash(state);
             }
             TypeCombination::Struct(ustr) => {
                 (*ustr).hash(state);
@@ -67,6 +72,7 @@ impl PartialEq for TypeCombination {
         match (self, other) {
             (TypeCombination::Pointer(a), TypeCombination::Pointer(b)) => a == b,
             (TypeCombination::Function(a), TypeCombination::Function(c)) => a == c,
+            (TypeCombination::Array(a), TypeCombination::Array(b)) => a == b,
             (TypeCombination::Struct(a), TypeCombination::Struct(b)) => a == b,
             _ => false,
         }
@@ -359,6 +365,7 @@ impl From<FunctionType> for &'static TypeInfo {
         TYPE_CACHE.function_type(&value.args, value.ret).1
     }
 }
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructType {

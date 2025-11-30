@@ -64,6 +64,9 @@ pub enum TokenKind {
     #[token("break")]
     BreakKw,
 
+    #[token("defer")]
+    DeferKw,
+
     #[token("case")]
     CaseKw,
 
@@ -190,6 +193,10 @@ pub enum TokenKind {
     LBrace,
     #[token("}")]
     RBrace,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
     #[token(".")]
     Dot,
 
@@ -212,6 +219,9 @@ pub enum TokenKind {
     #[token(".&")]
     DotAmpersand,
 
+    #[token("~")]
+    Tilde,
+
     EOF,
 }
 
@@ -229,6 +239,7 @@ impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TokenKind::BreakKw => "'break'".fmt(f),
+            TokenKind::DeferKw => "'defer'".fmt(f),
             TokenKind::F32(x) => write!(f, "'{}f' (f32)", x),
             TokenKind::F64(x) => write!(f, "'{}ff' (f64)", x),
             TokenKind::Integer(Integer::I64(i)) => write!(f, "'{}' (i64)", i),
@@ -264,6 +275,8 @@ impl Display for TokenKind {
             TokenKind::RParen => "')'".fmt(f),
             TokenKind::LBrace => "'{'".fmt(f),
             TokenKind::RBrace => "'}'".fmt(f),
+            TokenKind::LBracket => "'['".fmt(f),
+            TokenKind::RBracket => "']'".fmt(f),
             TokenKind::EOF => "'EOF'".fmt(f),
             TokenKind::StructKw => "'struct'".fmt(f),
             TokenKind::Hash => "'#'".fmt(f),
@@ -276,6 +289,7 @@ impl Display for TokenKind {
             TokenKind::Ampersand => "'&'".fmt(f),
             TokenKind::MultiDeref(count) => write!(f, "'.{}'", "*".repeat(*count)),
             TokenKind::DotAmpersand => "'.&'".fmt(f),
+            TokenKind::Tilde => "'~'".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),

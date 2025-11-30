@@ -130,7 +130,7 @@ impl Pipeline {
         let ast = self.ast.as_ref().unwrap();
         let type_registry = self.type_registry.as_ref().unwrap();
 
-        let module = YirLowering::new().run(ast, type_registry)?;
+        let module = YirLowering::new().run(ast, type_registry, false)?;
         self.module = Some(module);
 
         Ok(self)

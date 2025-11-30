@@ -63,13 +63,19 @@ enum ContextKind {
     // Here, we just need to represent it as a StorageLocation. Thus, this flag is used to tell the lowering expression to return a storage location, not the value itself! 
 }
 
+struct Scope {
+    vars: Vec<Variable>,
+    defers: Vec<ExprNode>,
+}
+
 pub struct TransientData<'a> {
     pub function: Function,
     tr: &'a TypeRegistry,
     var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
     loop_context: Vec<yir::Label>,
-    scope_stack: Vec<Vec<Variable>>, // Stack of scopes, each containing variables declared in that scope
+    scope_stack: Vec<Scope>,
     current_temporaries: Vec<Variable>, // Temporaries created in the current statement
+    emit_kill_sets: bool, // Flag to control KillSet emission
 }
 
 enum StmtRes {
@@ -78,7 +84,7 @@ enum StmtRes {
 }
 
 impl<'a> TransientData<'a> {
-    fn new(function: Function, tr: &'a TypeRegistry) -> Self {
+    fn new(function: Function, tr: &'a TypeRegistry, emit_kill_sets: bool) -> Self {
         Self {
             function,
             tr,
@@ -86,6 +92,7 @@ impl<'a> TransientData<'a> {
             loop_context: Vec::new(),
             scope_stack: Vec::new(),
             current_temporaries: Vec::new(),
+            emit_kill_sets,
         }
     }
 
@@ -98,29 +105,46 @@ impl<'a> TransientData<'a> {
     }
 
     fn push_scope(&mut self) {
-        self.scope_stack.push(Vec::new());
+        self.scope_stack.push(Scope {
+            vars: Vec::new(),
+            defers: Vec::new(),
+        });
     }
 
     fn pop_scope_and_generate_killset(&mut self) {
-        if let Some(scope_vars) = self.scope_stack.pop() {
-            if !scope_vars.is_empty() {
-                self.function.make_kill_set(scope_vars);
+        if let Some(scope) = self.scope_stack.pop() {
+            // Execute deferred expressions in reverse order
+            for defer_expr in scope.defers.into_iter().rev() {
+                let _ = self.lower_expr(&defer_expr, ContextKind::AsIs);
+            }
+
+            // Generate killset for variables only if flag is set
+            if self.emit_kill_sets && !scope.vars.is_empty() {
+                self.function.make_kill_set(scope.vars);
             }
         }
     }
 
     fn add_variable_to_current_scope(&mut self, var: Variable) {
+        if self.emit_kill_sets && let Some(current_scope) = self.scope_stack.last_mut() {
+            current_scope.vars.push(var);
+        }
+    }
+
+    fn add_deferred_expression(&mut self, expr: &ExprNode) {
         if let Some(current_scope) = self.scope_stack.last_mut() {
-            current_scope.push(var);
+            current_scope.defers.push(expr.clone());
         }
     }
 
     fn add_temporary(&mut self, var: Variable) {
-        self.current_temporaries.push(var);
+        if self.emit_kill_sets {
+            self.current_temporaries.push(var);
+        }
     }
 
     fn kill_current_temporaries(&mut self) {
-        if !self.current_temporaries.is_empty() {
+        if self.emit_kill_sets && !self.current_temporaries.is_empty() {
             self.function.make_kill_set(std::mem::take(&mut self.current_temporaries));
         }
     }
@@ -235,6 +259,14 @@ impl<'a> TransientData<'a> {
                         Operand::Variable(var) => var,
                         _ => unreachable!("Compiler bug: Unary plus operand should be a variable"),
                     },
+                    UnaryOp::Free => {
+                        self.function.make_heap_free(operand);
+                        // Free doesn't return a meaningful value, but we need to return something
+                        // Create a dummy variable of the expected type
+                        let dummy = self.function.make_alloca("free_dummy".intern(), ty, None);
+                        self.add_temporary(dummy);
+                        dummy
+                    }
                 };
 
                 match context {
@@ -543,6 +575,9 @@ impl<'a> TransientData<'a> {
 
                 Operand::Variable(ptr_var)
             }
+            ExprNode::Array(array_expr) => {
+                array_expr.
+            }
         }
     }
 
@@ -589,6 +624,11 @@ impl<'a> TransientData<'a> {
                 }
                 StmtRes::Break
             }
+            StmtNode::Defer(defer_stmt) => {
+                // Add deferred expression to current scope
+                self.add_deferred_expression(&defer_stmt.expr);
+                StmtRes::Proceed
+            }
             StmtNode::Error(_) => unreachable!(
                 "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
             ),
@@ -600,14 +640,14 @@ impl<'a> TransientData<'a> {
                     // First collect variables from all higher scopes
                     let mut vars_to_merge = Vec::new();
                     for scope in &self.scope_stack[..self.scope_stack.len()-1] {
-                        vars_to_merge.extend_from_slice(scope);
+                        vars_to_merge.extend_from_slice(&scope.vars);
                     }
 
                     vars_to_merge.extend_from_slice(&self.current_temporaries);
                     self.current_temporaries.clear();
 
                     if let Some(current_scope) = self.scope_stack.last_mut() {
-                        current_scope.extend_from_slice(&vars_to_merge);
+                        current_scope.vars.extend_from_slice(&vars_to_merge);
                     }
                 }
 
@@ -811,7 +851,7 @@ impl YirLowering {
         Self
     }
 
-    fn lower_ast(&self, ast: &AST, tr: &TypeRegistry) -> Module {
+    fn lower_ast(&self, ast: &AST, tr: &TypeRegistry, emit_kill_sets: bool) -> Module {
         let mut module = Module::new();
 
         for structural in ast.structurals.iter() {
@@ -823,7 +863,7 @@ impl YirLowering {
                     };
 
                     let mut data =
-                        TransientData::new(Function::new(func.decl.name, return_type), tr);
+                        TransientData::new(Function::new(func.decl.name, return_type), tr, emit_kill_sets);
 
                     // Push function-level scope for parameters
                     data.push_scope();
@@ -873,8 +913,8 @@ impl YirLowering {
 }
 
 impl YirLowering {
-    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry) -> miette::Result<Module> {
-        let module = self.lower_ast(ast, type_registry);
+    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry, emit_kill_sets: bool) -> miette::Result<Module> {
+        let module = self.lower_ast(ast, type_registry, emit_kill_sets);
         Ok(module)
     }
 }

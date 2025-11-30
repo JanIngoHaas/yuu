@@ -16,6 +16,19 @@ use crate::{
 
 use super::pass_type_inference_impl::TransientData;
 
+/// Helper function to extract i64 literal value from an expression, if it's a constant
+pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Option<i64> {
+    match expr {
+        crate::pass_parse::ast::ExprNode::Literal(lit_expr) => {
+            match &lit_expr.lit.kind {
+                crate::pass_parse::token::TokenKind::Integer(crate::pass_parse::token::Integer::I64(val)) => Some(*val),
+                _ => None,
+            }
+        },
+        _ => None, // Not a constant literal
+    }
+}
+
 fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
         crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
@@ -685,6 +698,7 @@ pub fn infer_expr(
         }
         ExprNode::PointerInstantiation(pointer_inst_expr) => infer_pointer_instantiation_expr(pointer_inst_expr, block, data),
         ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block, data),
+        ExprNode::Array(array_expr) => infer_array_expr(array_expr, block, data),
     }
 }
 
@@ -807,6 +821,51 @@ fn infer_address_of_expr(
     data.type_registry
         .type_info_table
         .insert(address_of_expr.id, result_type);
+
+    result_type
+}
+
+fn infer_array_expr(
+    array_expr: &crate::pass_parse::ast::ArrayExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    use crate::pass_type_inference::types::infer_type;
+    use crate::pass_type_inference::type_info::{TypeInfo, PrimitiveType};
+
+    // Determine element type
+    let element_type = if let Some(explicit_type) = &array_expr.element_type {
+        // Explicit type provided: [value:type; count] or [:type; count]
+        infer_type(explicit_type, data)
+    } else if let Some(init_value) = &array_expr.init_value {
+        // Type inferred from init value: [value; count]
+        infer_expr(init_value, block, data, None)
+    } else {
+        // This should not happen - we need either explicit type or init value
+        panic!("Compiler Bug: Array expression must have either explicit type or init value for type inference");
+    };
+
+    // Verify size is an integer type
+    let size_type = infer_expr(&array_expr.size, block, data, None);
+    if !matches!(size_type, TypeInfo::BuiltInPrimitive(PrimitiveType::I64)) {
+        // Emit proper error for user mistake
+        data.errors.push(
+            crate::pass_diagnostics::error::YuuError::builder()
+                .kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
+                .message(format!("Array size must be i64, found {}", size_type))
+                .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                .span(array_expr.size.span(), "expected i64 for array size")
+                .build(),
+        );
+        return crate::pass_type_inference::type_info::error_type();
+    }
+
+    // Arrays are treated as pointers to the element type
+    let result_type = element_type.ptr_to();
+
+    data.type_registry
+        .type_info_table
+        .insert(array_expr.id, result_type);
 
     result_type
 }

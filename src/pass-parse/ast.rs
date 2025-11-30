@@ -73,6 +73,7 @@ impl BinOp {
 pub enum UnaryOp {
     Pos, // Meaningless, but included for completeness
     Negate,
+    Free,
 }
 
 impl UnaryOp {
@@ -80,6 +81,7 @@ impl UnaryOp {
         match self {
             UnaryOp::Pos => "_pos",
             UnaryOp::Negate => "_neg",
+            UnaryOp::Free => "_free",
         }
         .intern()
     }
@@ -90,6 +92,7 @@ impl Display for UnaryOp {
         match self {
             UnaryOp::Pos => write!(f, "+"),
             UnaryOp::Negate => write!(f, "-"),
+            UnaryOp::Free => write!(f, "~"),
         }
     }
 }
@@ -225,6 +228,15 @@ pub struct HeapAllocExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayExpr {
+    pub init_value: Option<Box<ExprNode>>,   // None for uninitialized (_)
+    pub element_type: Option<Box<TypeNode>>, // None for inferred type
+    pub size: Box<ExprNode>,                 // Array size expression
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -286,6 +298,7 @@ pub enum ExprNode {
     AddressOf(AddressOfExpr),
     PointerInstantiation(PointerInstantiationExpr),
     HeapAlloc(HeapAllocExpr),
+    Array(ArrayExpr),
     //Error,
 }
 
@@ -375,10 +388,19 @@ pub struct PointerType {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayType {
+    pub id: NodeId,
+    pub span: Span,
+    pub element_type: Box<TypeNode>,
+    pub size: Box<ExprNode>, // Array size expression
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum TypeNode {
     BuiltIn(BuiltInType),
     Ident(IdentType),
     Pointer(PointerType),
+    Array(ArrayType),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -477,12 +499,20 @@ pub struct ReturnStmt {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct DeferStmt {
+    pub span: Span,
+    pub expr: Box<ExprNode>,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StmtNode {
     Let(LetStmt),
     Atomic(ExprNode),
     //Return(ReturnStmt),
     Break(BreakStmt),
     Return(ReturnStmt),
+    Defer(DeferStmt),
     Match(MatchStmt),
     If(IfStmt),
     While(WhileStmt),
@@ -549,6 +579,7 @@ impl Spanned for ExprNode {
             ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.span.clone(),
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
+            ExprNode::Array(array_expr) => array_expr.span.clone(),
         }
     }
 }
@@ -561,6 +592,7 @@ impl Spanned for StmtNode {
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
             StmtNode::Return(return_stmt) => return_stmt.span.clone(),
+            StmtNode::Defer(defer_stmt) => defer_stmt.span.clone(),
             StmtNode::If(if_stmt) => if_stmt.span.clone(),
             StmtNode::While(while_stmt) => while_stmt.span.clone(),
             StmtNode::Block(block_stmt) => block_stmt.span.clone(),
@@ -576,6 +608,7 @@ impl Spanned for TypeNode {
             TypeNode::Ident(ident_type) => ident_type.span.clone(),
             TypeNode::BuiltIn(built_in_type) => built_in_type.span.clone(),
             TypeNode::Pointer(pointer_type) => pointer_type.span.clone(),
+            TypeNode::Array(array_type) => array_type.span.clone(),
         }
     }
 }

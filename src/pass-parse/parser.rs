@@ -46,7 +46,7 @@ impl Parser {
 
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
-            TokenKind::Plus | TokenKind::Minus => 13, // Unary operators bind tighter than * and +
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => 13, // Unary operators bind tighter than * and +
             TokenKind::At => 13, // Heap allocation operator @expr
             _ => -1,
         }
@@ -69,10 +69,11 @@ impl Parser {
                 };
                 Ok((span_copy, ExprNode::HeapAlloc(heap_alloc)))
             }
-            TokenKind::Plus | TokenKind::Minus => {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => {
                 let unary_op = match op.kind {
                     TokenKind::Plus => UnaryOp::Pos,
                     TokenKind::Minus => UnaryOp::Negate,
+                    TokenKind::Tilde => UnaryOp::Free,
                     _ => unreachable!(),
                 };
                 let span_copy = span.clone();
@@ -153,6 +154,10 @@ impl Parser {
                 let span = t.span.start..span.end;
                 let unary = self.make_unary_expr(operand, t, span)?;
                 Ok(unary)
+            }
+            TokenKind::LBracket => {
+                // Array expression: [init_value:type; count]
+                self.parse_array_expr()
             }
             TokenKind::LParen => {
                 let t = self.lexer.next_token();
@@ -1003,6 +1008,50 @@ impl Parser {
         ))
     }
 
+    pub fn parse_array_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
+
+        let lbracket_token = self.lexer.expect(&[TokenKind::LBracket], &mut self.errors)?;
+
+        let (init_value, element_type) = if self.lexer.peek().kind == TokenKind::Colon {
+            // Pattern: [:type; count] - uninitialized
+            self.lexer.next_token(); // consume ':'
+            let type_node = self.parse_type()?;
+            (None, Some(Box::new(type_node)))
+        } else {
+            // Parse expression first
+            let (_, first_expr) = self.parse_expr()?;
+            if self.lexer.peek().kind == TokenKind::Colon {
+                // Pattern: [value:type; count] - initialized with explicit type
+                self.lexer.next_token(); // consume ':'
+                let type_node = self.parse_type()?;
+                (Some(Box::new(first_expr)), Some(Box::new(type_node)))
+            } else {
+                // Pattern: [value; count] - initialized with inferred type
+                (Some(Box::new(first_expr)), None)
+            }
+        };
+
+        // Expect semicolon
+        self.lexer.expect(&[TokenKind::Semicolon], &mut self.errors)?;
+
+        // Parse size expression
+        let (_, size_expr) = self.parse_expr()?;
+
+        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_expr = ArrayExpr {
+            init_value,
+            element_type,
+            size: Box::new(size_expr),
+            span: span.clone(),
+            id: 0,
+        };
+
+        Ok((span, ExprNode::Array(array_expr)))
+    }
+
     pub fn parse_pointer_instantiation_expr_infix(
         &mut self,
         lhs: ExprNode,
@@ -1560,6 +1609,7 @@ impl Parser {
             //TokenKind::OutKw => self.parse_out_stmt(),
             TokenKind::BreakKw => self.parse_break_stmt(),
             TokenKind::Return => self.parse_return_stmt(),
+            TokenKind::DeferKw => self.parse_defer_stmt(),
             TokenKind::IfKw => self.parse_if_stmt(),
             TokenKind::WhileKw => self.parse_while_stmt(),
             TokenKind::MatchKw => self.parse_match_stmt(),
@@ -1589,6 +1639,23 @@ impl Parser {
         Ok((
             span.clone(),
             StmtNode::Return(ReturnStmt { span, expr, id: 0 }),
+        ))
+    }
+
+    fn parse_defer_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let defer_token = self.lexer.expect(&[TokenKind::DeferKw], &mut self.errors)?;
+
+        // Parse the expression - defer always requires an expression
+        let (expr_span, expr) = self.parse_expr()?;
+        let span = self.expect_semicolon_or_block_terminator(defer_token.span.clone(), expr_span)?;
+
+        Ok((
+            span.clone(),
+            StmtNode::Defer(DeferStmt {
+                span,
+                expr: Box::new(expr),
+                id: 0
+            }),
         ))
     }
 

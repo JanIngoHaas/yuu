@@ -151,8 +151,18 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca { target } => {
+            Instruction::Alloca { target, count, align } => {
+
+                if let Some(align) = align {
+                    write!(data.output, "alignas({align}) ");
+                }
+
                 self.gen_variable_decl(data, target)?;
+
+                if *count > 1 {
+                    write!(data.output, "[{count}]");
+                }
+
                 write!(data.output, ";")?;
             }
             Instruction::StoreImmediate { target, value } => {

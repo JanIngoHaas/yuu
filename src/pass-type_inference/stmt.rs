@@ -113,8 +113,13 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
         StmtNode::Return(return_stmt) => {
             infer_return_stmt(return_stmt, block, data);
         }
+        StmtNode::Defer(defer_stmt) => {
+            let _ = infer_expr(&defer_stmt.expr, block, data, None);
+            data.type_registry
+                .type_info_table
+                .insert(defer_stmt.id, primitive_nil());
+        }
         StmtNode::Error(_stmt) => {
-            // Even if we have an error in this context, the return stmt itself still produces no value.
         }
     }
 }

@@ -76,6 +76,11 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
             let pointee_type = infer_type(&pointer.pointee, data);
             pointee_type.ptr_to()
         }
+        TypeNode::Array(array) => {
+            // Arrays are treated as pointers to the element type
+            let element_type = infer_type(&array.element_type, data);
+            element_type.ptr_to()
+        }
     };
     // Add the type to the type info table
     data.type_registry

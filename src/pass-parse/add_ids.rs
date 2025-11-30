@@ -94,6 +94,16 @@ impl AddId for ExprNode {
                 heap_alloc_expr.id = generator.next();
                 heap_alloc_expr.value.add_id(generator);
             }
+            ExprNode::Array(array_expr) => {
+                array_expr.id = generator.next();
+                if let Some(init_value) = &mut array_expr.init_value {
+                    init_value.add_id(generator);
+                }
+                if let Some(element_type) = &mut array_expr.element_type {
+                    element_type.add_id(generator);
+                }
+                array_expr.size.add_id(generator);
+            }
         }
     }
 }
@@ -118,6 +128,10 @@ impl AddId for StmtNode {
                 if let Some(expr) = return_stmt
                     .expr
                     .as_deref_mut() { expr.add_id(generator) }
+            }
+            StmtNode::Defer(defer_stmt) => {
+                defer_stmt.id = generator.next();
+                defer_stmt.expr.add_id(generator);
             }
             StmtNode::If(if_stmt) => {
                 if_stmt.id = generator.next();
@@ -179,6 +193,11 @@ impl AddId for TypeNode {
             TypeNode::Pointer(pointer_type) => {
                 pointer_type.id = generator.next();
                 pointer_type.pointee.add_id(generator);
+            }
+            TypeNode::Array(array_type) => {
+                array_type.id = generator.next();
+                array_type.element_type.add_id(generator);
+                array_type.size.add_id(generator);
             }
         }
     }
@@ -322,6 +341,7 @@ impl GetId for ExprNode {
             ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.id,
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
+            ExprNode::Array(array_expr) => array_expr.id,
         }
     }
 }
@@ -333,6 +353,7 @@ impl GetId for StmtNode {
             StmtNode::Atomic(expr) => expr.node_id(),
             StmtNode::Break(exit_stmt) => exit_stmt.id,
             StmtNode::Return(return_stmt) => return_stmt.id,
+            StmtNode::Defer(defer_stmt) => defer_stmt.id,
             StmtNode::If(if_stmt) => if_stmt.id,
             StmtNode::While(while_stmt) => while_stmt.id,
             StmtNode::Block(block_stmt) => block_stmt.id,
@@ -348,6 +369,7 @@ impl GetId for TypeNode {
             TypeNode::Ident(i) => i.id,
             TypeNode::BuiltIn(built_in_type) => built_in_type.id,
             TypeNode::Pointer(pointer_type) => pointer_type.id,
+            TypeNode::Array(array_type) => array_type.id,
         }
     }
 }
