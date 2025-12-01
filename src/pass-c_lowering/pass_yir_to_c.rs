@@ -126,9 +126,49 @@ impl CLowering {
         data: &mut TransientData,
         var: &Variable,
     ) -> Result<(), std::fmt::Error> {
+        self.gen_variable_def(data, var, 1, None)
+    }
+
+    fn gen_variable_def(
+        &self,
+        data: &mut TransientData,
+        var: &Variable,
+        count: u64,
+        init: Option<&crate::pass_yir_lowering::yir::ArrayInit>,
+    ) -> Result<(), std::fmt::Error> {
         let ty = var.ty();
         Self::gen_type(data, ty.deref_ptr())?;
-        write!(data.output, " mem_{}_{};", var.name(), var.id())?;
+        write!(data.output, " mem_{}_{}", var.name(), var.id())?;
+
+        if count > 1 {
+            write!(data.output, "[{count}]")?;
+        }
+
+        // Handle initialization on the memory storage
+        if let Some(init) = init {
+            match init {
+                crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                    write!(data.output, "={{0}}")?;
+                }
+                crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                    write!(data.output, "=")?;
+                    self.gen_operand(data, operand)?;
+                }
+                crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                    write!(data.output, "={{")?;
+                    for (i, element) in elements.iter().enumerate() {
+                        if i > 0 {
+                            write!(data.output, ",")?;
+                        }
+                        self.gen_operand(data, element)?;
+                    }
+                    write!(data.output, "}}")?;
+                }
+            }
+        }
+
+        write!(data.output, ";")?;
+
         Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
@@ -151,19 +191,12 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca { target, count, align, .. } => {
-
+            Instruction::Alloca { target, count, align, init } => {
                 if let Some(align) = align {
                     write!(data.output, "alignas({align}) ")?;
                 }
 
-                self.gen_variable_decl(data, target)?;
-
-                if *count > 1 {
-                    write!(data.output, "[{count}]")?;
-                }
-
-                write!(data.output, ";")?;
+                self.gen_variable_def(data, target, *count, init.as_ref())?;
             }
             Instruction::StoreImmediate { target, value } => {
                 write!(data.output, "*")?;

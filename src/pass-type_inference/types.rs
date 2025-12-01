@@ -1,7 +1,5 @@
-use ustr::{Ustr, ustr};
 
 use crate::pass_diagnostics::{ErrorKind, YuuError};
-use crate::pass_parse::InternUstr;
 use crate::pass_parse::add_ids::GetId;
 use crate::pass_type_inference::pass_type_inference_impl::TransientData;
 use crate::{

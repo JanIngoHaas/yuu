@@ -902,7 +902,7 @@ fn infer_array_literal_expr(
                         i, element_type_inferred, element_type
                     ))
                     .source(data.src_code.source.clone(), data.src_code.file_name.clone())
-                    .span(element.span(), &format!("element {} has wrong type", i))
+                    .span(element.span(), format!("element {} has wrong type", i))
                     .build(),
             );
         }

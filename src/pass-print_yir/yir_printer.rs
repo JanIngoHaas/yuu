@@ -336,12 +336,12 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::Alloca { target, count, align, .. } => {
+        Instruction::Alloca { target, count, align, init } => {
             let align_str = align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
 
-            writeln!(
+            write!(
                 f,
                 "{} := {}[{}; {}], {} {}",
                 format_variable(target, do_color),
@@ -350,7 +350,31 @@ pub fn format_instruction(
                 colorize(&count.to_string(), "constant", do_color),
                 colorize("ALIGN", "keyword", do_color),
                 colorize(&align_str, "constant", do_color)
-            )
+            )?;
+
+            if let Some(init) = init {
+                write!(f, "\n    ^--{} ", colorize("INIT", "keyword", do_color))?;
+                match init {
+                    crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                        write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                        write!(f, "{}", format_operand(operand, do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                        write!(f, "{{")?;
+                        for (i, element) in elements.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", format_operand(element, do_color))?;
+                        }
+                        write!(f, "}}")?;
+                    }
+                }
+            }
+
+            writeln!(f)
         }
         Instruction::StoreImmediate { target, value } => {
             writeln!(

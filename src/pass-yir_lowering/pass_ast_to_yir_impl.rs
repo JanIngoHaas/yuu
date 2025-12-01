@@ -686,7 +686,7 @@ impl<'a> TransientData<'a> {
                 let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e, ContextKind::AsIs));
 
                 // Pull all higher-level scopes into the current scope for KILLSETting
-                if self.scope_stack.len() > 0 {
+                if !self.scope_stack.is_empty() {
                     // First collect variables from all higher scopes
                     let mut vars_to_merge = Vec::new();
                     for scope in &self.scope_stack[..self.scope_stack.len()-1] {

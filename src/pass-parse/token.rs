@@ -16,7 +16,7 @@ fn parse_i64(s: &str) -> Option<Integer> {
         _ => number_part.parse().ok(),
     };
 
-    value.map(|v| Integer::I64(v))
+    value.map(Integer::I64)
 }
 
 fn parse_u64(s: &str) -> Option<Integer> {
