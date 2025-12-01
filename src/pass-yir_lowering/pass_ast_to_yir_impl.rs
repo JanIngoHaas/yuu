@@ -1,45 +1,3 @@
-// ============================================================================
-// TODO: IMPLEMENT POINTERS AND FIX ASSIGNMENT LOWERING
-// ============================================================================
-//
-// COMPLETED:
-// ✓ Added LValueKind enum to AST (ast.rs:175-181)
-// ✓ Added DerefExpr to AST (ast.rs:200-205)
-// ✓ Updated parser to classify lvalues at parse time (parser.rs:264-284)
-// ✓ Added lvalue_kind field to AssignmentExpr
-// ✓ Updated all AST traversal code (add_ids.rs, span(), node_id())
-//
-// REMAINING WORK:
-//
-// 1. POINTER SYNTAX & PARSING:
-//    - [ ] Add pointer type syntax: *T (in parser and AST)
-//    - [ ] Parse address-of operator: &x
-//    - [ ] Parse dereference operator: ptr.* (postfix)
-//    - [ ] Add tokens for these operators to lexer
-//
-// 2. TYPE SYSTEM:
-//    - [ ] Add Pointer variant to TypeInfo enum
-//    - [ ] Implement pointer type inference in type_inference/expr.rs
-//    - [ ] Handle address-of: infer &x as *T where x: T
-//    - [ ] Handle deref: infer ptr.* as T where ptr: *T
-//    - [ ] Add pointer type unification rules
-//
-// 4. YIR LOWERING - POINTER OPERATIONS:
-//    - [ ] Implement ExprNode::Deref lowering (pass_ast_to_yir_impl.rs:295)
-//          Should: LOAD the pointer variable to get the pointed-to address
-//    - [ ] Implement address-of operator lowering
-//          Should: Return the pointer variable directly (variables are already pointers)
-//    - [ ] Test with assignment: ptr.* = value
-//
-// 5. C CODE GENERATION:
-//    - [ ] Generate C pointer syntax for pointer types
-//    - [ ] Handle pointer arithmetic if needed
-//    - [ ] Ensure proper C pointer operations
-//
-// See test file: test_assignment.yuu (shows current ADDR+LOAD redundancy issue)
-//
-// ============================================================================
-
 use crate::{
     pass_parse::{
         BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode, ast::{
@@ -55,12 +13,13 @@ use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ContextKind {
-    AsIs,           // Need the actual value - i.e. the value follows its type  
-    StorageLocation, // Need a pointer/address to the storage location of some value. DOES NOT follow its type (often it's just the pointer to the value).
-    // ^--- THis is useful in many cases where temporary variables are produced; i.e. "a.b.c"; To adhere to the correct, implicit semantics of ".", a.b.c, means:
-    // "get pointer of b in object a (let's call it b_ptr)"; "get pointer OR value (depending on context) of c in object b";
-    // In this case, "b_ptr" is a temporary variable, being a pointer to the location of the "b" field in "a" even though in Yuu its type (i.e. a.b) is different.
-    // Here, we just need to represent it as a StorageLocation. Thus, this flag is used to tell the lowering expression to return a storage location, not the value itself! 
+    // Return the actual value (load from memory if needed)
+    AsIs,
+
+    // Return a pointer to where the value is stored (don't load the value)
+    // Essential for chained field access like "a.b.c" where intermediate steps
+    // need pointers to field locations, not the field values themselves
+    StorageLocation,
 }
 
 struct Scope {
@@ -565,6 +524,12 @@ impl<'a> TransientData<'a> {
 
                             self.function.make_store(field_var, field_op);
                         }
+                    }
+                    ExprNode::Array(array_expr) => {
+                        todo!("TODO: Need to implement C packing for arrays first..")
+                    }
+                    ExprNode::ArrayLiteral(array_literal_expr) => {
+                        todo!("TODO: Need to implement C packing for arrays first...")
                     }
                     _ => {
                         // For non-struct literals, fall back to stack-then-copy
