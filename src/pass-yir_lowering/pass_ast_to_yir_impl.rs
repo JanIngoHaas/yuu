@@ -234,7 +234,7 @@ impl<'a> TransientData<'a> {
                 match context {
                     ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
-                        let storage = self.function.make_alloca("bin_storage".intern(), ty, Some(Operand::Variable(result)));
+                        let storage = self.function.make_alloca_single("bin_storage".intern(), ty, Some(Operand::Variable(result)));
                         self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
@@ -263,7 +263,7 @@ impl<'a> TransientData<'a> {
                         self.function.make_heap_free(operand);
                         // Free doesn't return a meaningful value, but we need to return something
                         // Create a dummy variable of the expected type
-                        let dummy = self.function.make_alloca("free_dummy".intern(), ty, None);
+                        let dummy = self.function.make_alloca_single("free_dummy".intern(), ty, None);
                         self.add_temporary(dummy);
                         dummy
                     }
@@ -272,7 +272,7 @@ impl<'a> TransientData<'a> {
                 match context {
                     ContextKind::AsIs => Operand::Variable(result),
                     ContextKind::StorageLocation => {
-                        let storage = self.function.make_alloca("unary_storage".intern(), ty, Some(Operand::Variable(result)));
+                        let storage = self.function.make_alloca_single("unary_storage".intern(), ty, Some(Operand::Variable(result)));
                         self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
@@ -304,7 +304,7 @@ impl<'a> TransientData<'a> {
                         match context {
                             ContextKind::AsIs => Operand::Variable(result_var),
                             ContextKind::StorageLocation => {
-                                let storage = self.function.make_alloca("call_storage".intern(), return_type, Some(Operand::Variable(result_var)));
+                                let storage = self.function.make_alloca_single("call_storage".intern(), return_type, Some(Operand::Variable(result_var)));
                                 self.add_temporary(storage);
                                 Operand::Variable(storage)
                             }
@@ -381,7 +381,7 @@ impl<'a> TransientData<'a> {
                     .resolve_struct(struct_instantiation_expr.struct_name)
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
-                let struct_var = self.function.make_alloca(sinfo.name, sinfo.ty, None);
+                let struct_var = self.function.make_alloca_single(sinfo.name, sinfo.ty, None);
                 self.add_temporary(struct_var);
 
                 for (field, field_expr) in &struct_instantiation_expr.fields {
@@ -461,7 +461,7 @@ impl<'a> TransientData<'a> {
 
                 let enum_var =
                     self.function
-                        .make_alloca("enum_result".intern(), enum_info.ty, None);
+                        .make_alloca_single("enum_result".intern(), enum_info.ty, None);
                 self.add_temporary(enum_var);
 
                 self.function
@@ -576,7 +576,57 @@ impl<'a> TransientData<'a> {
                 Operand::Variable(ptr_var)
             }
             ExprNode::Array(array_expr) => {
-                array_expr.
+                // Get the size operand
+                let size_operand = self.lower_expr(&array_expr.size, ContextKind::AsIs);
+                let count = match size_operand {
+                    Operand::U64Const(n) => n,
+                    Operand::I64Const(n) if n >= 0 => n as u64,
+                    _ => {
+                        unreachable!("Array size must be a compile-time constant - type checker should have ensured this");
+                    }
+                };
+
+                // Get element type from type registry (already inferred during type checking)
+                let array_type = self.get_type(array_expr.id);
+                let element_type = array_type.deref_ptr(); // Arrays are stored as pointers
+
+                let ptr_var = if let Some(init_value) = &array_expr.init_value {
+                    // Pattern: [value; count] - initialized with repeated value
+                    let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
+                    let init = Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(init_operand));
+                    self.function.make_alloca("array".intern(), element_type, count, init)
+                } else {
+                    // Pattern: [:type; count] - uninitialized
+                    self.function.make_alloca("array".intern(), element_type, count, None)
+                };
+
+                self.add_temporary(ptr_var);
+                Operand::Variable(ptr_var)
+            }
+            ExprNode::ArrayLiteral(array_literal_expr) => {
+                debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+
+                // Lower all elements to operands
+                let element_operands: Vec<Operand> = array_literal_expr.elements
+                    .iter()
+                    .map(|elem| self.lower_expr(elem, ContextKind::AsIs))
+                    .collect();
+
+                // Get element type from type registry (already inferred)
+                let array_type = self.get_type(array_literal_expr.id);
+                let element_type = array_type.deref_ptr(); // Arrays are stored as pointers
+
+                // Create array with explicit element values
+                let init = crate::pass_yir_lowering::yir::ArrayInit::Elements(element_operands);
+                let ptr_var = self.function.make_alloca(
+                    "array_literal".intern(),
+                    element_type,
+                    array_literal_expr.elements.len() as u64,
+                    Some(init)
+                );
+
+                self.add_temporary(ptr_var);
+                Operand::Variable(ptr_var)
             }
         }
     }
@@ -829,7 +879,7 @@ impl<'a> TransientData<'a> {
                 let var_type = self.get_type(binding_id);
                 let yir_var =
                     self.function
-                        .make_alloca(name_hint, var_type, Some(init_value_operand));
+                        .make_alloca_single(name_hint, var_type, Some(init_value_operand));
                 self.var_map.insert(binding_id, yir_var);
 
                 self.add_variable_to_current_scope(yir_var);

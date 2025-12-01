@@ -237,6 +237,14 @@ pub struct ArrayExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayLiteralExpr {
+    pub elements: Vec<ExprNode>,             // [1, 2, 3, 4]
+    pub element_type: Option<Box<TypeNode>>, // None for inferred type
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -299,6 +307,7 @@ pub enum ExprNode {
     PointerInstantiation(PointerInstantiationExpr),
     HeapAlloc(HeapAllocExpr),
     Array(ArrayExpr),
+    ArrayLiteral(ArrayLiteralExpr),
     //Error,
 }
 
@@ -580,6 +589,7 @@ impl Spanned for ExprNode {
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.span.clone(),
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
             ExprNode::Array(array_expr) => array_expr.span.clone(),
+            ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.span.clone(),
         }
     }
 }

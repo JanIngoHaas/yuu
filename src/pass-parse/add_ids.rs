@@ -104,6 +104,15 @@ impl AddId for ExprNode {
                 }
                 array_expr.size.add_id(generator);
             }
+            ExprNode::ArrayLiteral(array_literal_expr) => {
+                array_literal_expr.id = generator.next();
+                for element in &mut array_literal_expr.elements {
+                    element.add_id(generator);
+                }
+                if let Some(element_type) = &mut array_literal_expr.element_type {
+                    element_type.add_id(generator);
+                }
+            }
         }
     }
 }
@@ -342,6 +351,7 @@ impl GetId for ExprNode {
             ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.id,
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
             ExprNode::Array(array_expr) => array_expr.id,
+            ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.id,
         }
     }
 }

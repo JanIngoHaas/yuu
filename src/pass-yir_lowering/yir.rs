@@ -135,12 +135,20 @@ pub enum UnaryOp {
 }
 
 #[derive(Clone, Debug)]
+pub enum ArrayInit {
+    Zero,                           // Zero-initialize all elements
+    Splat(Operand),                // Fill all elements with same value
+    Elements(Vec<Operand>),        // Explicit element values
+}
+
+#[derive(Clone, Debug)]
 pub enum Instruction {
     // Declares a variable on the stack, returns a pointer to it
     Alloca {
-        target: Variable,   // The variable being declared
-        count: u64,     // Number of elements (must be u64)
-        align: Option<u64>, // Optional alignment requirement
+        target: Variable, // The variable being declared
+        count: u64,
+        align: Option<u64>,
+        init: Option<ArrayInit>,
     },
 
     // Simple assignment or from constant to variable
@@ -222,13 +230,20 @@ pub enum Instruction {
     // Heap allocation - returns a pointer to allocated memory
     HeapAlloc {
         target: Variable,   // Pointer variable to store the heap address
-        size: Operand,     // size (bytes)
+        size: Operand,      // Size in bytes (must be u64)
         align: Option<u64>, // Optional alignment requirement
     },
 
     // Heap deallocation - frees previously allocated memory
     HeapFree {
         ptr: Operand, // Pointer to memory to free (must be heap-allocated)
+    },
+
+    // Get pointer to array element at index
+    GetElementPtr {
+        target: Variable, // Result pointer to element
+        base: Operand,    // Base array pointer
+        index: Operand,   // Index operand (must be u64/i64)
     },
 
     // Marks that multiple stack variables are being killed (e.g., leaving scope)
@@ -288,6 +303,7 @@ impl BasicBlock {
                 Instruction::StoreActiveVariantIdx { .. } => {}
                 Instruction::IntToPtr { .. } => {}
                 Instruction::HeapFree { .. } => {}
+                Instruction::GetElementPtr { .. } => {}
                 Instruction::KillSet { .. } => {}
             };
             None
@@ -450,34 +466,70 @@ impl Function {
         target
     }
 
-    // Builder method for DeclareVar
+    // Unified alloca builder method
     pub fn make_alloca(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+        init: Option<ArrayInit>,
+    ) -> Variable {
+        let dest_ty = element_ty.ptr_to();
+        let target = self.fresh_variable(name_hint, dest_ty);
+        let instr = Instruction::Alloca { target, count, align: None, init };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Convenience method for single variable allocation
+    pub fn make_alloca_single(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Variable {
-        let dest_ty = ty.ptr_to();
-        let target = self.fresh_variable(name_hint, dest_ty);
-        let count = 1; // Default count of 1 element
-        let instr = Instruction::Alloca { target, count, align: None };
-        self.get_current_block_mut().instructions.push(instr);
-
-        if let Some(value_ptr) = init_value {
-            self.make_store(target, value_ptr);
-        };
-
-        target
+        let init = init_value.map(ArrayInit::Splat);
+        self.make_alloca(name_hint, ty, 1, init)
     }
 
-    // Helper function to allocate only for valid types (not Inactive or pointers to Inactive)
+    // Convenience method for array allocation with count
+    pub fn make_alloca_array(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+    ) -> Variable {
+        self.make_alloca(name_hint, element_ty, count, None)
+    }
+
+    // Convenience method for zero-initialized array
+    pub fn make_alloca_zeroed(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+    ) -> Variable {
+        self.make_alloca(name_hint, element_ty, count, Some(ArrayInit::Zero))
+    }
+
+    // Convenience method for array with explicit values
+    pub fn make_alloca_with_values(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        values: Vec<Operand>,
+    ) -> Variable {
+        let count = values.len() as u64;
+        self.make_alloca(name_hint, element_ty, count, Some(ArrayInit::Elements(values)))
+    }
+
+    // Convenience method that checks for valid types
     pub fn make_alloca_if_valid_type(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Option<Variable> {
-        // Don't allocate for inactive types following the same pattern as make_store
         if matches!(
             ty,
             TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
@@ -485,7 +537,7 @@ impl Function {
             return None;
         }
 
-        Some(self.make_alloca(name_hint, ty, init_value))
+        Some(self.make_alloca_single(name_hint, ty, init_value))
     }
 
     // Helper function to store only for valid types (not Inactive or pointers to Inactive)
@@ -726,7 +778,7 @@ impl Function {
         debug_assert_eq!(
             size.ty(),
             primitive_u64(),
-            "HeapAlloc count must be u64, got {}",
+            "HeapAlloc size must be u64, got {}",
             size.ty()
         );
 
@@ -754,6 +806,34 @@ impl Function {
             let instr = Instruction::KillSet { vars };
             self.get_current_block_mut().instructions.push(instr);
         }
+    }
+
+    // Builder method for array element pointer access
+    pub fn make_get_element_ptr(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        index: Operand,
+    ) -> Variable {
+        let base_ty = base.ty();
+        debug_assert!(
+            base_ty.is_ptr(),
+            "Array base must be pointer, got {}",
+            base_ty
+        );
+
+        debug_assert!(
+            matches!(index.ty(), TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::I64) | TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::U64)),
+            "Array index must be i64 or u64, got {}",
+            index.ty()
+        );
+
+        let element_ty = base_ty.deref_ptr();
+        let target = self.fresh_variable(name_hint, element_ty.ptr_to());
+
+        let instr = Instruction::GetElementPtr { target, base, index };
+        self.get_current_block_mut().instructions.push(instr);
+        target
     }
 
     // pub fn make_enum(

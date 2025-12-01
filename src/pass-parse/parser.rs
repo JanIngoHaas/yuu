@@ -1009,46 +1009,133 @@ impl Parser {
     }
 
     pub fn parse_array_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
-        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
-
         let lbracket_token = self.lexer.expect(&[TokenKind::LBracket], &mut self.errors)?;
 
-        let (init_value, element_type) = if self.lexer.peek().kind == TokenKind::Colon {
-            // Pattern: [:type; count] - uninitialized
-            self.lexer.next_token(); // consume ':'
-            let type_node = self.parse_type()?;
-            (None, Some(Box::new(type_node)))
-        } else {
-            // Parse expression first
-            let (_, first_expr) = self.parse_expr()?;
-            if self.lexer.peek().kind == TokenKind::Colon {
-                // Pattern: [value:type; count] - initialized with explicit type
+        // Check for uninitialized array [:type; count]
+        if self.lexer.peek().kind == TokenKind::Colon {
+            return self.parse_uninitialized_array(lbracket_token);
+        }
+
+        // Parse first expression to determine pattern
+        let (_, first_expr) = self.parse_expr()?;
+
+        match self.lexer.peek().kind {
+            TokenKind::Comma | TokenKind::RBracket => {
+                // Array literal: [1, 2, 3] or [42]
+                self.parse_array_literal_with_first(lbracket_token, first_expr)
+            }
+            TokenKind::Semicolon => {
+                // Array repeat: [value; count]
+                self.parse_array_repeat(lbracket_token, first_expr, None)
+            }
+            TokenKind::Colon => {
+                // Array repeat with type: [value:type; count]
                 self.lexer.next_token(); // consume ':'
                 let type_node = self.parse_type()?;
-                (Some(Box::new(first_expr)), Some(Box::new(type_node)))
-            } else {
-                // Pattern: [value; count] - initialized with inferred type
-                (Some(Box::new(first_expr)), None)
+                self.parse_array_repeat(lbracket_token, first_expr, Some(Box::new(type_node)))
             }
-        };
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        self.lexer.peek().span.clone(),
+                        "a comma ',', semicolon ';', colon ':', or closing bracket ']'".to_string(),
+                        self.lexer.peek().kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help("Expected array literal [1,2,3] or array repeat [value; count]".to_string()),
+                );
+                Err(self.lexer.synchronize())
+            }
+        }
+    }
 
-        // Expect semicolon
+    fn parse_uninitialized_array(&mut self, lbracket_token: Token) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
+
+        self.lexer.next_token(); // consume ':'
+        let type_node = self.parse_type()?;
         self.lexer.expect(&[TokenKind::Semicolon], &mut self.errors)?;
-
-        // Parse size expression
         let (_, size_expr) = self.parse_expr()?;
-
         let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
 
         let span = lbracket_token.span.start..rbracket_token.span.end;
         let array_expr = ArrayExpr {
-            init_value,
+            init_value: None,
+            element_type: Some(Box::new(type_node)),
+            size: Box::new(size_expr),
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::Array(array_expr)))
+    }
+
+    fn parse_array_literal_with_first(
+        &mut self,
+        lbracket_token: Token,
+        first_expr: ExprNode,
+    ) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayLiteralExpr, ExprNode};
+
+        let mut elements = vec![first_expr];
+
+        // Handle single element case
+        if self.lexer.peek().kind == TokenKind::RBracket {
+            let rbracket_token = self.lexer.next_token();
+            let span = lbracket_token.span.start..rbracket_token.span.end;
+            let array_literal = ArrayLiteralExpr {
+                elements,
+                element_type: None,
+                span: span.clone(),
+                id: 0,
+            };
+            return Ok((span, ExprNode::ArrayLiteral(array_literal)));
+        }
+
+        // Parse remaining elements
+        while self.lexer.peek().kind == TokenKind::Comma {
+            self.lexer.next_token(); // consume comma
+
+            // Allow trailing comma
+            if self.lexer.peek().kind == TokenKind::RBracket {
+                break;
+            }
+
+            let (_, element) = self.parse_expr()?;
+            elements.push(element);
+        }
+
+        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_literal = ArrayLiteralExpr {
+            elements,
+            element_type: None,
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::ArrayLiteral(array_literal)))
+    }
+
+    fn parse_array_repeat(
+        &mut self,
+        lbracket_token: Token,
+        first_expr: ExprNode,
+        element_type: Option<Box<TypeNode>>,
+    ) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
+
+        self.lexer.expect(&[TokenKind::Semicolon], &mut self.errors)?;
+        let (_, size_expr) = self.parse_expr()?;
+        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_expr = ArrayExpr {
+            init_value: Some(Box::new(first_expr)),
             element_type,
             size: Box::new(size_expr),
             span: span.clone(),
             id: 0,
         };
-
         Ok((span, ExprNode::Array(array_expr)))
     }
 

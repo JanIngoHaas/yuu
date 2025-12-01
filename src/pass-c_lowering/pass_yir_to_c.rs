@@ -151,16 +151,16 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca { target, count, align } => {
+            Instruction::Alloca { target, count, align, .. } => {
 
                 if let Some(align) = align {
-                    write!(data.output, "alignas({align}) ");
+                    write!(data.output, "alignas({align}) ")?;
                 }
 
                 self.gen_variable_decl(data, target)?;
 
                 if *count > 1 {
-                    write!(data.output, "[{count}]");
+                    write!(data.output, "[{count}]")?;
                 }
 
                 write!(data.output, ";")?;
@@ -318,6 +318,14 @@ impl CLowering {
                 write!(data.output, "free(")?;
                 self.gen_operand(data, ptr)?;
                 write!(data.output, ");")?;
+            }
+            Instruction::GetElementPtr { target, base, index } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, "=&(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, ")[")?;
+                self.gen_operand(data, index)?;
+                write!(data.output, "];")?;
             }
             Instruction::KillSet { vars: _ } => {
                 // No code generation needed for stack variable kills in C

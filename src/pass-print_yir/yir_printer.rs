@@ -336,13 +336,20 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::Alloca { target } => {
+        Instruction::Alloca { target, count, align, .. } => {
+            let align_str = align
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "natural".to_string());
+
             writeln!(
                 f,
-                "{} := {}{}",
+                "{} := {}[{}; {}], {} {}",
                 format_variable(target, do_color),
                 colorize("ALLOCA", "keyword", do_color),
                 format_type(target.ty().deref_ptr(), do_color),
+                colorize(&count.to_string(), "constant", do_color),
+                colorize("ALIGN", "keyword", do_color),
+                colorize(&align_str, "constant", do_color)
             )
         }
         Instruction::StoreImmediate { target, value } => {
@@ -498,6 +505,16 @@ pub fn format_instruction(
                 "{} {}",
                 format_keyword("HEAP_FREE", do_color),
                 format_operand(ptr, do_color)
+            )
+        }
+        Instruction::GetElementPtr { target, base, index } => {
+            writeln!(
+                f,
+                "{} := {} {}[{}]",
+                format_variable(target, do_color),
+                format_keyword("ELEM_PTR", do_color),
+                format_operand(base, do_color),
+                format_operand(index, do_color)
             )
         }
         Instruction::KillSet { vars } => {

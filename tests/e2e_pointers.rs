@@ -17,7 +17,8 @@ fn main() -> i64:
     return result1 + result2 .
     "#;
 
-    let executable = run_to_executable(source, "test_basic_pointer_arithmetic.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_basic_pointer_arithmetic.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: (12 * 4 / 2 + 12 % 4) + ((12 + 4) * (12 - 4) / 4) = (24 + 0) + (16 * 8 / 4) = 24 + 32 = 56
     assert_eq!(result, 56);
@@ -36,7 +37,8 @@ fn main() -> i64:
     return ptr3.*** * ptr2.** / ptr1.* + ptr3.*** % 5 .
     "#;
 
-    let executable = run_to_executable(source, "test_multi_level_pointer_arithmetic.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_multi_level_pointer_arithmetic.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 8 * 8 / 8 + 8 % 5 = 8 + 3 = 11
     assert_eq!(result, 11);
@@ -55,7 +57,8 @@ fn main() -> i64:
     return accumulator .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_assignment_with_arithmetic.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_pointer_assignment_with_arithmetic.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 100 * 2 / 3 + 15 = 66 + 15 = 81, then 81 - 81 % 7 = 81 - 4 = 77
     assert_eq!(result, 77);
@@ -76,7 +79,8 @@ fn main() -> i64:
     return calculate(ptr_a.* * 2, ptr_b.* + 1) .
     "#;
 
-    let executable = run_to_executable(source, "test_function_with_pointer_arithmetic.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_function_with_pointer_arithmetic.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: calculate(15 * 2, 3 + 1) = calculate(30, 4) = 30 * 4 + 30 / 4 - 30 % 4 = 120 + 7 - 2 = 125
     assert_eq!(result, 125);
@@ -117,7 +121,8 @@ fn main() -> i64:
     return deep_value .
     "#;
 
-    let executable = run_to_executable(source, "test_quadruple_pointer_arithmetic.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_quadruple_pointer_arithmetic.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 6 * 6 / 2 + 6 % 3 = 18 + 0 = 18
     assert_eq!(result, 18);
@@ -140,7 +145,8 @@ fn main() -> i64:
     return val1 + val2 .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_arithmetic_swap.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_pointer_arithmetic_swap.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: after swap val1=18, val2=45, so 18 + 45 = 63
     assert_eq!(result, 63);
@@ -164,7 +170,8 @@ fn main() -> i64:
     return (px.* * ppy.** / pz.* + px.* % ppy.**) * (pz.* + 1) .
     "#;
 
-    let executable = run_to_executable(source, "test_complex_pointer_expression.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_complex_pointer_expression.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: (10 * 5 / 2 + 10 % 5) * (2 + 1) = (25 + 0) * 3 = 75
     assert_eq!(result, 75);
@@ -185,7 +192,8 @@ fn main() -> i64:
     return value .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_function_modification.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_pointer_function_modification.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 20 * 7 / 2 + 7 % 3 = 70 + 1 = 71
     assert_eq!(result, 71);
@@ -219,7 +227,8 @@ fn main() -> i64:
     return result1 + result2 .
     "#;
 
-    let executable = run_to_executable(source, "test_enum_containing_pointers.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_enum_containing_pointers.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: (15 * 2) + (25 + 10) = 30 + 35 = 65
     assert_eq!(result, 65);
@@ -250,7 +259,8 @@ fn main() -> i64:
     return compute_through_pointers(pair) .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_containing_pointers.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_struct_containing_pointers.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 10 + 20 + 5 = 35
     assert_eq!(result, 35);
@@ -289,7 +299,8 @@ fn main() -> i64:
     return r1 + r2 + r3 .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_to_enum.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_pointer_to_enum.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 0 + 50 + (42 + 100) = 0 + 50 + 142 = 192
     assert_eq!(result, 192);
@@ -313,7 +324,8 @@ fn main() -> i64:
     return distance_squared(ptr) .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_to_struct.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_pointer_to_struct.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 3*3 + 4*4 = 9 + 16 = 25
     assert_eq!(result, 25);
@@ -358,7 +370,8 @@ fn main() -> i64:
     return r1 + r2 + r3 .
     "#;
 
-    let executable = run_to_executable(source, "test_struct_enum_with_pointers.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_struct_enum_with_pointers.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 0 + (6 * 7) + (10 + 3) = 0 + 42 + 13 = 55
     assert_eq!(result, 55);
@@ -398,7 +411,8 @@ fn main() -> i64:
     return r1 + r2 .
     "#;
 
-    let executable = run_to_executable(source, "test_complex_nested_pointer_structures.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_complex_nested_pointer_structures.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 100 + (10 + 20) = 100 + 30 = 130
     assert_eq!(result, 130);
@@ -424,7 +438,8 @@ fn main() -> i64:
     return calc.accumulator .
     "#;
 
-    let executable = run_to_executable(source, "test_pointer_arithmetic_with_structs.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_pointer_arithmetic_with_structs.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 5 * 3 + 7 = 15 + 7 = 22
     assert_eq!(result, 22);
@@ -467,7 +482,11 @@ fn main() -> i64:
     return r1 + r2 + r3 .
     "#;
 
-    let executable = run_to_executable(source, "test_enum_variants_with_different_pointer_types.yuu").expect("Failed to compile");
+    let executable = run_to_executable(
+        source,
+        "test_enum_variants_with_different_pointer_types.yuu",
+    )
+    .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 42 + (10 + 15) + (-1) = 42 + 25 - 1 = 66
     assert_eq!(result, 66);
@@ -484,7 +503,8 @@ fn main() -> i64:
     return check_pointer_validity(null_ptr) .
     "#;
 
-    let executable = run_to_executable(source, "test_null_pointer_basics.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_null_pointer_basics.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 42);
 }

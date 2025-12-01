@@ -9,7 +9,8 @@ fn main() -> i64:
     return heap_ptr.* .
     "#;
 
-    let executable = run_to_executable(source, "test_basic_heap_allocation.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_basic_heap_allocation.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 42);
 }
@@ -23,7 +24,8 @@ fn main() -> i64:
     return heap_ptr.* .
     "#;
 
-    let executable = run_to_executable(source, "test_heap_allocation_with_expressions.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_heap_allocation_with_expressions.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 10 * 4 + 2 = 42
     assert_eq!(result, 42);
@@ -42,7 +44,8 @@ fn main() -> i64:
     return heap_point.*.x + heap_point.*.y .
     "#;
 
-    let executable = run_to_executable(source, "test_heap_allocation_struct.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_heap_allocation_struct.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 15 + 25 = 40
     assert_eq!(result, 40);
@@ -58,7 +61,8 @@ fn main() -> i64:
     return heap_ptr.* .
     "#;
 
-    let executable = run_to_executable(source, "test_heap_allocation_modification.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_heap_allocation_modification.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: (100 + 50) / 3 = 150 / 3 = 50
     assert_eq!(result, 50);
@@ -75,7 +79,8 @@ fn main() -> i64:
     return ptr1.* + ptr2.* + ptr3.* .
     "#;
 
-    let executable = run_to_executable(source, "test_multiple_heap_allocations.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_multiple_heap_allocations.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     // Expected: 10 + 20 + 30 = 60
     assert_eq!(result, 60);
@@ -98,7 +103,8 @@ fn main() -> i64:
 end
     "#;
 
-    let executable = run_to_executable(source, "test_heap_allocation_with_enum.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_heap_allocation_with_enum.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 42);
 }
@@ -114,7 +120,8 @@ fn main() -> i64:
     return ptr.* .
     "#;
 
-    let executable = run_to_executable(source, "test_heap_allocation_in_function.yuu").expect("Failed to compile");
+    let executable = run_to_executable(source, "test_heap_allocation_in_function.yuu")
+        .expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 99);
 }
@@ -127,7 +134,8 @@ fn main() -> i64:
     return ptr_to_ptr.*.* .
     "#;
 
-    let executable = run_to_executable(source, "test_nested_heap_allocations.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_nested_heap_allocations.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 42);
 }

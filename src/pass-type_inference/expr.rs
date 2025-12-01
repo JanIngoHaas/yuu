@@ -699,6 +699,7 @@ pub fn infer_expr(
         ExprNode::PointerInstantiation(pointer_inst_expr) => infer_pointer_instantiation_expr(pointer_inst_expr, block, data),
         ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block, data),
         ExprNode::Array(array_expr) => infer_array_expr(array_expr, block, data),
+        ExprNode::ArrayLiteral(array_literal_expr) => infer_array_literal_expr(array_literal_expr, block, data),
     }
 }
 
@@ -866,6 +867,53 @@ fn infer_array_expr(
     data.type_registry
         .type_info_table
         .insert(array_expr.id, result_type);
+
+    result_type
+}
+
+fn infer_array_literal_expr(
+    array_literal_expr: &crate::pass_parse::ast::ArrayLiteralExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    use crate::pass_type_inference::types::infer_type;
+
+    debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+
+    // Determine element type
+    let element_type = if let Some(explicit_type) = &array_literal_expr.element_type {
+        // Explicit type provided: [1:i64, 2, 3]
+        infer_type(explicit_type, data)
+    } else {
+        // Type inferred from first element: [1, 2, 3]
+        infer_expr(&array_literal_expr.elements[0], block, data, None)
+    };
+
+    // Type check remaining elements against the determined element type
+    for (i, element) in array_literal_expr.elements.iter().enumerate().skip(1) {
+        let element_type_inferred = infer_expr(element, block, data, None);
+
+        if element_type_inferred != element_type {
+            data.errors.push(
+                crate::pass_diagnostics::error::YuuError::builder()
+                    .kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
+                    .message(format!(
+                        "Array element {} has type {}, but expected {}",
+                        i, element_type_inferred, element_type
+                    ))
+                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .span(element.span(), &format!("element {} has wrong type", i))
+                    .build(),
+            );
+        }
+    }
+
+    // Array literals are treated as pointers to the element type
+    let result_type = element_type.ptr_to();
+
+    data.type_registry
+        .type_info_table
+        .insert(array_literal_expr.id, result_type);
 
     result_type
 }

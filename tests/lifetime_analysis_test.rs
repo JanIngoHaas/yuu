@@ -4,15 +4,15 @@ use yuu::pass_lifetime_analysis::LifetimeAnalysis;
 use yuu::utils::pipeline::Pipeline;
 
 fn run_lifetime_analysis(source: &str, filename: &str) -> Pipeline {
-     let mut pipeline = Pipeline::new(source.to_string(), filename.to_string())
-        .expect("Failed to create pipeline");
+    let mut pipeline =
+        Pipeline::new(source.to_string(), filename.to_string()).expect("Failed to create pipeline");
     pipeline = pipeline.yir_lowering().unwrap();
     let mut module = pipeline.module.take().unwrap();
     let type_registry = pipeline.type_registry.as_ref().unwrap();
 
     let lifetime_pass = LifetimeAnalysis::new();
     lifetime_pass.run(&mut module, type_registry);
-    
+
     pipeline.module = Some(module);
     pipeline
 }
@@ -68,11 +68,10 @@ end
 
     let mut pipeline = run_lifetime_analysis(source, "test.yir");
     let module = pipeline.module.as_ref().unwrap();
-    
+
     let mut m = String::new();
     module.format_yir(true, &mut m).unwrap();
     println!("{m}");
-
 }
 
 #[test]
@@ -136,7 +135,6 @@ fn main() -> i64:
 
     let out = run_to_yir(source, "test.yir").unwrap();
     println!("{out}");
-
 }
 
 #[test]
@@ -268,5 +266,8 @@ end
     module.format_yir(false, &mut m).unwrap();
     println!("{m}");
 
-    assert!(m.contains("CALL _drop"), "Generated YIR should contain a call to _drop");
+    assert!(
+        m.contains("CALL _drop"),
+        "Generated YIR should contain a call to _drop"
+    );
 }
