@@ -166,3 +166,65 @@ fn main() -> i64:
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 75);
 }
+
+#[test]
+fn test_heap_allocated_array_pointer_arithmetic() {
+    let source = r#"
+fn main() -> i64:
+    // Create heap-allocated array
+    let heap_arr = @[100, 200, 300, 400, 500];
+
+    // Use pointer arithmetic on heap-allocated array
+    let ptr0 = heap_arr @ 0;   // points to heap_arr[0] = 100
+    let ptr1 = heap_arr @ 1;   // points to heap_arr[1] = 200
+    let ptr2 = heap_arr @ 2;   // points to heap_arr[2] = 300
+    let ptr4 = heap_arr @ 4;   // points to heap_arr[4] = 500
+
+    // Sum values accessed through pointer arithmetic
+    let sum = ptr0.* + ptr1.* + ptr2.* + ptr4.*;
+
+    // Free the heap memory
+    ~heap_arr;
+
+    return sum .  // Should be 100 + 200 + 300 + 500 = 1100
+    "#;
+
+    let executable = run_to_executable(source, "test_heap_allocated_array_pointer_arithmetic.yuu")
+        .expect("Failed to compile");
+    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    assert_eq!(result, 1100);
+}
+
+#[test]
+fn test_heap_allocated_struct_array_pointer_arithmetic() {
+    let source = r#"
+struct Point:
+    x: i64,
+    y: i64,
+end
+
+fn main() -> i64:
+    // Create heap-allocated array of structs
+    let heap_points = @[Point { x: 10, y: 20 }; 4];
+
+    // Use pointer arithmetic to access different elements
+    let p0 = heap_points @ 0;
+    let p1 = heap_points @ 1;
+    let p2 = heap_points @ 2;
+    let p3 = heap_points @ 3;
+
+    // Access struct fields through pointers
+    let total_x = p0.*.x + p1.*.x + p2.*.x + p3.*.x;  // 10 * 4 = 40
+    let total_y = p0.*.y + p1.*.y + p2.*.y + p3.*.y;  // 20 * 4 = 80
+
+    // Free the heap memory
+    ~heap_points;
+
+    return total_x + total_y .  // Should be 40 + 80 = 120
+    "#;
+
+    let executable = run_to_executable(source, "test_heap_allocated_struct_array_pointer_arithmetic.yuu")
+        .expect("Failed to compile");
+    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    assert_eq!(result, 120);
+}

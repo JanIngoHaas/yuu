@@ -480,20 +480,88 @@ impl<'a> TransientData<'a> {
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);
 
-                let value_type = self.get_type(heap_alloc_expr.value.node_id());
-                let layout = calculate_type_layout(value_type, self.tr);
-                let size_operand = Operand::U64Const(layout.size as u64);
+                let expr_type = self.get_type(heap_alloc_expr.id);
 
-                // Check if we can initialize directly on heap (for struct literals)
+                // Check if we can initialize directly on heap
                 match &*heap_alloc_expr.value {
+                    ExprNode::Array(array_expr) => {
+                        // Get the size operand (can be dynamic for heap allocation)
+                        let count_operand = self.lower_expr(&array_expr.size, ContextKind::AsIs);
+
+                        // Get element type
+                        let element_type = expr_type.deref_ptr(); // Arrays are stored as pointers
+                        let element_layout = calculate_type_layout(element_type, self.tr);
+
+                        // Calculate total size: element_size * count
+                        let total_size_var = self.function.make_binary(
+                            "array_total_size".intern(),
+                            crate::pass_yir_lowering::yir::BinOp::Mul,
+                            Operand::U64Const(element_layout.size as u64),
+                            count_operand,
+                            primitive_u64()
+                        );
+                        self.add_temporary(total_size_var);
+
+                        // Create ArrayInit based on init_value
+                        let init = if let Some(init_value) = &array_expr.init_value {
+                            let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
+                            Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(init_operand))
+                        } else {
+                            None
+                        };
+
+                        let ptr_var = self.function.make_heap_alloc(
+                            "heap_array".intern(),
+                            expr_type,
+                            element_layout.size as u64, // element_size
+                            Operand::Variable(total_size_var), // total_size
+                            None, // No alignment requirement for now
+                            init,
+                        );
+                        self.add_temporary(ptr_var);
+                        Operand::Variable(ptr_var)
+                    }
+                    ExprNode::ArrayLiteral(array_literal_expr) => {
+                        debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+
+                        // Lower all elements to operands
+                        let element_operands: Vec<Operand> = array_literal_expr.elements
+                            .iter()
+                            .map(|elem| self.lower_expr(elem, ContextKind::AsIs))
+                            .collect();
+
+                        // Get element type
+                        let element_type = expr_type.deref_ptr(); // Arrays decay to pointers
+                                                                   // IMMEDIATELY
+                        let element_layout = calculate_type_layout(element_type, self.tr);
+                        let total_size = Operand::U64Const(element_layout.size as u64 * array_literal_expr.elements.len() as u64);
+
+                        let init = crate::pass_yir_lowering::yir::ArrayInit::Elements(element_operands);
+                        let ptr_var = self.function.make_heap_alloc(
+                            "heap_array_literal".intern(),
+                            expr_type,
+                            element_layout.size as u64, // element_size
+                            total_size, // total_size
+                            None, // No alignment requirement for now
+                            Some(init),
+                        );
+                        self.add_temporary(ptr_var);
+                        Operand::Variable(ptr_var)
+                    }
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                        
+                        let value_type = self.get_type(struct_instantiation_expr.id);
+                        let layout = calculate_type_layout(value_type, self.tr);
+                        let size_operand = Operand::U64Const(layout.size as u64);
+
                         // Allocate memory on heap first
                         let ptr_var = self.function.make_heap_alloc(
                             "heap_ptr".intern(),
-                            value_type,
-                            size_operand,
+                            expr_type,
+                            layout.size as u64, // element_size
+                            size_operand, // total_size
                             None, // No alignment requirement for now
-                            false, // No zero init for struct instantiation as we fill fields
+                            None, // No init for struct instantiation as we fill fields
                         );
                         self.add_temporary(ptr_var);
 
@@ -522,150 +590,6 @@ impl<'a> TransientData<'a> {
                         }
                         Operand::Variable(ptr_var)
                     }
-                    ExprNode::Array(array_expr) => {
-                        let ty = self.get_type(array_expr.id).deref_ptr();
-                        let layout_info = calculate_type_layout(ty, self.tr);
-                        let count_op = self.lower_expr(&array_expr.size, ContextKind::AsIs);
-                        let size_op_bytes = self.function.make_binary(
-                            "elem_bytes".intern(),
-                            YirBinOp::Mul,
-                            Operand::U64Const(layout_info.size as u64),
-                            count_op,
-                            primitive_u64()
-                        );
-                        self.add_temporary(size_op_bytes);
-
-                        // Determine if we should zero-initialize
-                        let is_zero_init = if let Some(init_val) = &array_expr.init_value {
-                            match &init_val.as_ref() {
-                                ExprNode::Literal(lit) => match &lit.lit {
-                                    Token { kind: TokenKind::Integer(Integer::I64(0)), .. } => true,
-                                    Token { kind: TokenKind::Integer(Integer::U64(0)), .. } => true,
-                                    Token { kind: TokenKind::F32(f), .. } if *f == 0.0 => true,
-                                    Token { kind: TokenKind::F64(f), .. } if *f == 0.0 => true,
-                                    Token { kind: TokenKind::NilKw, .. } => true,
-                                    _ => false,
-                                },
-                                _ => false,
-                            }
-                        } else {
-                            false // Uninitialized array doesn't need zeroing
-                        };
-
-                        let heap_ptr = self.function.make_heap_alloc(
-                            "array_heap_alloc".intern(),
-                            ty.ptr_to(),
-                            Operand::Variable(size_op_bytes),
-                            None,
-                            is_zero_init
-                        );
-                        self.add_temporary(heap_ptr);
-                        
-                        // If we have a non-zero init value, we need to loop and set elements
-                        if !is_zero_init {
-                            if let Some(init_val) = &array_expr.init_value {
-                                let init_op = self.lower_expr(init_val, ContextKind::AsIs);
-                                
-                                // Generate loop to initialize array
-                                // i = 0
-                                let index_var = self.function.make_alloca_single(
-                                    "loop_idx".intern(), 
-                                    primitive_u64(), 
-                                    Some(Operand::U64Const(0))
-                                );
-                                self.add_temporary(index_var);
-
-                                let loop_head = self.function.add_block("init_loop_head".intern());
-                                let loop_body = self.function.add_block("init_loop_body".intern());
-                                let loop_end = self.function.add_block("init_loop_end".intern());
-
-                                self.function.make_jump(loop_head);
-                                self.function.set_current_block(&loop_head);
-
-                                // if i < count
-                                let current_idx = self.function.make_load("idx_val".intern(), Operand::Variable(index_var));
-                                self.add_temporary(current_idx);
-                                
-                                let cond = self.function.make_binary(
-                                    "loop_cond".intern(), 
-                                    YirBinOp::LessThan, 
-                                    Operand::Variable(current_idx), 
-                                    count_op, 
-                                    primitive_bool()
-                                );
-                                self.add_temporary(cond);
-                                
-                                self.function.make_branch_to_existing(
-                                    Operand::Variable(cond),
-                                    loop_body,
-                                    loop_end
-                                );
-
-                                self.function.set_current_block(&loop_body);
-                                
-                                // ptr[i] = init_val
-                                let elem_ptr = self.function.make_get_element_ptr(
-                                    "elem_init_ptr".intern(), 
-                                    Operand::Variable(heap_ptr), 
-                                    Operand::Variable(current_idx)
-                                );
-                                self.add_temporary(elem_ptr);
-                                self.function.make_store(elem_ptr, init_op);
-
-                                // i++
-                                let next_idx = self.function.make_binary(
-                                    "idx_next".intern(), 
-                                    YirBinOp::Add, 
-                                    Operand::Variable(current_idx), 
-                                    Operand::U64Const(1), 
-                                    primitive_u64()
-                                );
-                                self.add_temporary(next_idx);
-                                self.function.make_store(index_var, Operand::Variable(next_idx));
-
-                                self.function.make_jump(loop_head);
-                                self.function.set_current_block(&loop_end);
-                            }
-                        }
-
-                        Operand::Variable(heap_ptr)
-                    }
-                    ExprNode::ArrayLiteral(array_literal_expr) => {
-                        debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
-
-                        // Get element type from type registry
-                        let array_type = self.get_type(array_literal_expr.id);
-                        let element_type = array_type.deref_ptr(); 
-                        let layout_info = calculate_type_layout(element_type, self.tr);
-                        
-                        let count = array_literal_expr.elements.len() as u64;
-                        let total_size = count * layout_info.size as u64;
-
-                        let heap_ptr = self.function.make_heap_alloc(
-                            "array_lit_heap".intern(),
-                            element_type.ptr_to(),
-                            Operand::U64Const(total_size),
-                            None,
-                            false // Explicitly initialized below
-                        );
-                        self.add_temporary(heap_ptr);
-
-                        // Store elements
-                        for (i, elem) in array_literal_expr.elements.iter().enumerate() {
-                            let val = self.lower_expr(elem, ContextKind::AsIs);
-                            
-                            let elem_ptr = self.function.make_get_element_ptr(
-                                "lit_elem_ptr".intern(), 
-                                Operand::Variable(heap_ptr), 
-                                Operand::U64Const(i as u64)
-                            );
-                            self.add_temporary(elem_ptr);
-                            
-                            self.function.make_store(elem_ptr, val);
-                        }
-
-                        Operand::Variable(heap_ptr)
-                    }
                     _ => {
                         let value_type = self.get_type(heap_alloc_expr.value.node_id());
                         let layout = calculate_type_layout(value_type, self.tr);
@@ -674,10 +598,11 @@ impl<'a> TransientData<'a> {
                         // For non-struct/array literals, fall back to stack-then-copy
                         let ptr_var = self.function.make_heap_alloc(
                             "heap_ptr".intern(),
-                            value_type,
-                            size_operand,
+                            expr_type,
+                            layout.size as u64, // element_size
+                            size_operand, // total_size
                             None, // No alignment requirement for now
-                            false,
+                            None, // No init
                         );
                         self.add_temporary(ptr_var);
 

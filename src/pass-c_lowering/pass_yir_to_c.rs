@@ -338,35 +338,73 @@ impl CLowering {
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
             }
-            Instruction::HeapAlloc { target, size, align, zero_init } => {
-                // type *var = malloc(size);
+            Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
+                // Generate heap allocation
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = ")?;
-                if *zero_init {
-                     if let Some(align_val) = align {
-                        write!(data.output, "aligned_alloc({}, ", align_val)?;
-                        self.gen_operand(data, size)?;
-                        write!(data.output, "); memset(")?;
-                        Self::write_var_name(target, &mut data.output)?;
-                        write!(data.output, ", 0, ")?;
-                        self.gen_operand(data, size)?;
-                        write!(data.output, ");")?;
-                    } else {
-                        write!(data.output, "calloc(1, ")?;
-                        self.gen_operand(data, size)?;
-                        write!(data.output, ");")?;
+
+                // Choose allocation strategy based on initialization
+                match init {
+                    Some(crate::pass_yir_lowering::yir::ArrayInit::Zero) => {
+                        // Use calloc for zero initialization
+                        if let Some(align_val) = align {
+                            write!(data.output, "aligned_alloc({}, ", align_val)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, "); memset(")?;
+                            Self::write_var_name(target, &mut data.output)?;
+                            write!(data.output, ", 0, ")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        } else {
+                            write!(data.output, "calloc(")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, " / {}, {});", element_size, element_size)?;
+                        }
                     }
-                } else {
-                    if let Some(align_val) = align {
-                        write!(data.output, "aligned_alloc({}, ", align_val)?;
-                        self.gen_operand(data, size)?;
-                        write!(data.output, ");")?;
-                    } else {
-                        write!(data.output, "malloc(")?;
-                        self.gen_operand(data, size)?;
-                        write!(data.output, ");")?;
+                    _ => {
+                        // Regular malloc for non-zero or no initialization
+                        if let Some(align_val) = align {
+                            write!(data.output, "aligned_alloc({}, ", align_val)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        } else {
+                            write!(data.output, "malloc(")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        }
+                    }
+                }
+
+                // Handle non-zero array initialization after allocation
+                if let Some(array_init) = init {
+                    match array_init {
+                        crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                            // Already handled above
+                        }
+                        crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                            // Use template_fill helper function
+                            write!(data.output, " ")?;
+                            Self::gen_type(data, target.ty().deref_ptr())?; // Element type
+                            write!(data.output, " __template = ")?;
+                            self.gen_operand(data, operand)?;
+                            write!(data.output, "; __yuu_template_fill(")?;
+                            Self::write_var_name(target, &mut data.output)?;
+                            write!(data.output, ", &__template, {}, (", element_size)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ") / {});", element_size)?;
+                        }
+                        crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                            // Generate individual stores
+                            for (i, element) in elements.iter().enumerate() {
+                                write!(data.output, " ")?;
+                                Self::write_var_name(target, &mut data.output)?;
+                                write!(data.output, "[{}] = ", i)?;
+                                self.gen_operand(data, element)?;
+                                write!(data.output, ";")?;
+                            }
+                        }
                     }
                 }
             }
@@ -556,8 +594,19 @@ impl CLowering {
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         write!(
             data.output,
-            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n#include<string.h>\n"
+            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n#include<string.h>\n#include<stdalign.h>\n"
         )?;
+
+        // Generate helper functions for array initialization
+        write!(data.output, r#"static inline void __yuu_template_fill(void* dest, const void* template_val, size_t element_size, size_t count) {{
+  char* d = (char*)dest;
+  for (size_t i = 0; i < count; i++) {{
+    memcpy(d + i * element_size, template_val, element_size);
+  }}
+}}
+"#)?;
+
+        // Note: __yuu_elements_fill will be generated per-type as needed since each call has different element types
 
         for name in data.type_dependency_order.create_topological_order() {
             let soe = data

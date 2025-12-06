@@ -502,29 +502,31 @@ pub fn format_instruction(
                 format_operand(source, do_color)
             )
         }
-        Instruction::HeapAlloc { target, size, align, zero_init } => {
+        Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
             if let Some(alignment) = align {
                 write!(
                     f,
-                    "{} := {} {} {} {}",
+                    "{} := {} {} {} {} {}",
                     format_variable(target, do_color),
                     format_keyword("HEAP_ALLOC", do_color),
-                    format_operand(size, do_color),
+                    colorize(&element_size.to_string(), "constant", do_color),
+                    format_operand(total_size, do_color),
                     format_keyword("ALIGN", do_color),
                     colorize(&alignment.to_string(), "constant", do_color)
                 )?;
             } else {
                 write!(
                     f,
-                    "{} := {} {}",
+                    "{} := {} {} {}",
                     format_variable(target, do_color),
                     format_keyword("HEAP_ALLOC", do_color),
-                    format_operand(size, do_color)
+                    colorize(&element_size.to_string(), "constant", do_color),
+                    format_operand(total_size, do_color)
                 )?;
             }
-            
-            if *zero_init {
-                write!(f, " {}", colorize("ZEROED", "keyword", do_color))?;
+
+            if let Some(array_init) = init {
+                write!(f, " {}", colorize(&format!("{:?}", array_init), "keyword", do_color))?;
             }
             writeln!(f)
         }

@@ -820,11 +820,20 @@ fn infer_heap_alloc_expr(
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    // Infer the type of the expression to be allocated
+    // Always infer the type of the expression to be allocated
     let value_type = infer_expr(&heap_alloc_expr.value, block, data, None);
 
-    // Create a pointer to that type
-    let pointer_type = value_type.ptr_to();
+    // Special case: for array expressions, use the element type directly
+    // REASON: The expression would otherwise immediately decay to a pointer...
+    let pointer_type = match &*heap_alloc_expr.value {
+        ExprNode::Array(_) | ExprNode::ArrayLiteral(_) => {
+            value_type // Here, we already have a pointer, so we just don't do anything...
+        }
+        _ => {
+            // Normal case: heap-allocate space for the value
+            value_type.ptr_to()
+        }
+    };
 
     // Store the result type in the type table
     data.type_registry.type_info_table.insert(heap_alloc_expr.id, pointer_type);
