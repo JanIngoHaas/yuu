@@ -71,9 +71,6 @@ impl CLowering {
                 Self::gen_type(data, type_info)?;
                 write!(data.output, "*")
             }
-            TypeInfo::Inactive => panic!(
-                "Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"
-            ),
             TypeInfo::Error => panic!(
                 "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
             ),
@@ -138,11 +135,8 @@ impl CLowering {
     ) -> Result<(), std::fmt::Error> {
         let ty = var.ty();
         Self::gen_type(data, ty.deref_ptr())?;
-        write!(data.output, " mem_{}_{}", var.name(), var.id())?;
-
-        if count > 1 {
-            write!(data.output, "[{count}]")?;
-        }
+        let mem_location = format!(" mem_{}_{}", var.name(), var.id());
+        write!(data.output, "{mem_location} [{count}]")?;
 
         // Handle initialization on the memory storage
         if let Some(init) = init {
@@ -151,8 +145,14 @@ impl CLowering {
                     write!(data.output, "={{0}}")?;
                 }
                 crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
-                    write!(data.output, "=")?;
-                    self.gen_operand(data, operand)?;
+                    write!(data.output, "={{")?;
+                    for i in 0..count {
+                        if i > 0 {
+                            write!(data.output, ",")?;
+                        }
+                        self.gen_operand(data, operand)?;
+                    }
+                    write!(data.output, "}}")?;
                 }
                 crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
                     write!(data.output, "={{")?;
@@ -168,11 +168,11 @@ impl CLowering {
         }
 
         write!(data.output, ";")?;
-
+        
         Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
-        write!(data.output, "=&mem_{}_{}; ", var.name(), var.id())
+        write!(data.output, "={mem_location};")
     }
 
     fn gen_simple_var_decl(
@@ -209,10 +209,17 @@ impl CLowering {
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, "=&")?;
+                write!(data.output, "=&")?; 
                 Self::write_var_name(source, &mut data.output)?;
                 write!(data.output, ";")?;
             }
+
+            // TODO: This works, but in SOME (probably these can never appear due to the semantics
+            // of Yuu, but need to be aware of it) circumstances, this current code segfaults when
+            // it shouldn't:
+            // Imagine the memory is not reserved, then the deref, i.e. a->b will segfault!
+            // This aligns with current Yuu semantics, but the semantics of YIR are different here
+            // because we are just asking for a pointer, not to deref the pointer first.
             Instruction::GetFieldPtr {
                 target,
                 base,
@@ -226,7 +233,7 @@ impl CLowering {
                 write!(data.output, "->{});", field)?;
             }
             Instruction::Load { target, source } => {
-                self.gen_simple_var_decl(data, target)?;
+                self.gen_simple_var_decl(data, target)?; 
                 write!(data.output, "=*")?;
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
@@ -331,20 +338,36 @@ impl CLowering {
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
             }
-            Instruction::HeapAlloc { target, size, align } => {
+            Instruction::HeapAlloc { target, size, align, zero_init } => {
                 // type *var = malloc(size);
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
                 write!(data.output, " = ")?;
-                if align.is_some() {
-                    write!(data.output, "aligned_alloc({}, ", align.unwrap())?;
-                    self.gen_operand(data, size)?;
-                    write!(data.output, ");")?;
+                if *zero_init {
+                     if let Some(align_val) = align {
+                        write!(data.output, "aligned_alloc({}, ", align_val)?;
+                        self.gen_operand(data, size)?;
+                        write!(data.output, "); memset(")?;
+                        Self::write_var_name(target, &mut data.output)?;
+                        write!(data.output, ", 0, ")?;
+                        self.gen_operand(data, size)?;
+                        write!(data.output, ");")?;
+                    } else {
+                        write!(data.output, "calloc(1, ")?;
+                        self.gen_operand(data, size)?;
+                        write!(data.output, ");")?;
+                    }
                 } else {
-                    write!(data.output, "malloc(")?;
-                    self.gen_operand(data, size)?;
-                    write!(data.output, ");")?;
+                    if let Some(align_val) = align {
+                        write!(data.output, "aligned_alloc({}, ", align_val)?;
+                        self.gen_operand(data, size)?;
+                        write!(data.output, ");")?;
+                    } else {
+                        write!(data.output, "malloc(")?;
+                        self.gen_operand(data, size)?;
+                        write!(data.output, ");")?;
+                    }
                 }
             }
             Instruction::HeapFree { ptr } => {
@@ -354,11 +377,31 @@ impl CLowering {
             }
             Instruction::GetElementPtr { target, base, index } => {
                 self.gen_variable_decl(data, target)?;
-                write!(data.output, "=&(")?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=(")?;
                 self.gen_operand(data, base)?;
-                write!(data.output, ")[")?;
+                write!(data.output, "+")?;
                 self.gen_operand(data, index)?;
-                write!(data.output, "];")?;
+                write!(data.output, ");")?;
+            }
+            Instruction::MemCpy { dest, src, count } => {
+                write!(data.output, "memcpy(")?;
+                self.gen_operand(data, dest)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, src)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, count)?;
+                write!(data.output, ");")?;
+            }
+            Instruction::MemSet { dest, value, count } => {
+                write!(data.output, "memset(")?;
+                self.gen_operand(data, dest)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, value)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, count)?;
+                write!(data.output, ");")?;
             }
             Instruction::KillSet { vars: _ } => {
                 // No code generation needed for stack variable kills in C
@@ -513,7 +556,7 @@ impl CLowering {
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         write!(
             data.output,
-            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n"
+            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n#include<string.h>\n"
         )?;
 
         for name in data.type_dependency_order.create_topological_order() {

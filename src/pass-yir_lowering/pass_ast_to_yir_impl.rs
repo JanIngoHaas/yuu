@@ -4,7 +4,7 @@ use crate::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp
         }, token::{Integer, Token, TokenKind}
     },
-    pass_type_inference::{TypeInfo, TypeRegistry},
+    pass_type_inference::{TypeInfo, TypeRegistry, primitive_bool, primitive_u64, primitive_nil},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     }, utils::calculate_type_layout,
@@ -166,10 +166,12 @@ impl<'a> TransientData<'a> {
                 }
             },
             ExprNode::Binary(bin_expr) => {
-                let lhs = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
-                let rhs = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
-
-                let ty = self.get_type(bin_expr.id);
+                // Determine operands. Note: these are "values", not necessarily storage locations.
+                let lhs_val_operand = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
+                let rhs_val_operand = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
+                
+                // The overall type of the binary expression, as inferred by the type checker.
+                let result_ty = self.get_type(bin_expr.id); 
 
                 let op = match bin_expr.op {
                     BinOp::Add => YirBinOp::Add,
@@ -185,17 +187,22 @@ impl<'a> TransientData<'a> {
                     BinOp::GtEq => YirBinOp::GreaterThanEq,
                 };
 
-                let result = self
+                let result_var = self
                     .function
-                    .make_binary("bin_result".intern(), op, lhs, rhs, ty);
-                self.add_temporary(result);
+                    .make_binary("bin_result".intern(), op, lhs_val_operand, rhs_val_operand, result_ty);
+                self.add_temporary(result_var);
+                let result_operand = Operand::Variable(result_var);
 
                 match context {
-                    ContextKind::AsIs => Operand::Variable(result),
+                    ContextKind::AsIs => result_operand,
                     ContextKind::StorageLocation => {
-                        let storage = self.function.make_alloca_single("bin_storage".intern(), ty, Some(Operand::Variable(result)));
-                        self.add_temporary(storage);
-                        Operand::Variable(storage)
+                        if result_operand == Operand::NoOp {
+                             unreachable!("Compiler bug: Cannot get storage location for NoOp operand from binary expression");
+                        }
+                        let storage_var = self.function.make_alloca_single("bin_result_storage".intern(), result_ty, None);
+                        self.add_temporary(storage_var);
+                        self.function.make_store(storage_var, result_operand);
+                        Operand::Variable(storage_var)
                     }
                 }
             }
@@ -203,7 +210,7 @@ impl<'a> TransientData<'a> {
                 let operand = self.lower_expr(&un_expr.operand, ContextKind::AsIs);
                 let ty = self.get_type(un_expr.id);
 
-                let result = match un_expr.op {
+                let result_operand = match un_expr.op {
                     UnaryOp::Negate => {
                         let temp = self.function.make_unary(
                             "neg_result".intern(),
@@ -212,26 +219,32 @@ impl<'a> TransientData<'a> {
                             operand,
                         );
                         self.add_temporary(temp);
-                        temp
+                        Operand::Variable(temp)
                     }
-                    UnaryOp::Pos => match operand {
-                        Operand::Variable(var) => var,
-                        _ => unreachable!("Compiler bug: Unary plus operand should be a variable"),
-                    },
+                    UnaryOp::Pos => {
+                        // Nothing really happens here, so we just return the variable itself or if
+                        // not a variable, we just create a temp one and return that... 
+                        if let Operand::Variable(var) = operand {
+                            Operand::Variable(var)
+                        } else {
+                            let temp = self.function.make_alloca_single("pos_temp".intern(), ty, Some(operand));
+                            self.add_temporary(temp);
+                            Operand::Variable(temp)
+                        }
+                    }
                     UnaryOp::Free => {
                         self.function.make_heap_free(operand);
-                        // Free doesn't return a meaningful value, but we need to return something
-                        // Create a dummy variable of the expected type
-                        let dummy = self.function.make_alloca_single("free_dummy".intern(), ty, None);
-                        self.add_temporary(dummy);
-                        dummy
+                        Operand::NoOp
                     }
                 };
 
                 match context {
-                    ContextKind::AsIs => Operand::Variable(result),
+                    ContextKind::AsIs => result_operand,
                     ContextKind::StorageLocation => {
-                        let storage = self.function.make_alloca_single("unary_storage".intern(), ty, Some(Operand::Variable(result)));
+                        if result_operand == Operand::NoOp {
+                            unreachable!("Compiler bug: Cannot get storage location for NoOp operand from unary expression");
+                        }
+                        let storage = self.function.make_alloca_single("unary_storage".intern(), ty, Some(result_operand));
                         self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
@@ -463,25 +476,7 @@ impl<'a> TransientData<'a> {
                 debug_assert_eq!(context, ContextKind::AsIs);
                 self.lower_expr(&address_of_expr.operand, ContextKind::StorageLocation)
             }
-            ExprNode::PointerInstantiation(pointer_inst_expr) => {
-                debug_assert_eq!(context, ContextKind::AsIs);
 
-                // Get the address operand (should be u64)
-                let address_operand = self.lower_expr(&pointer_inst_expr.address, ContextKind::AsIs);
-
-                // Get the target pointer type
-                let pointer_type = self.get_type(pointer_inst_expr.id);
-
-                // Create the IntToPtr instruction
-                let ptr_var = self.function.make_int_to_ptr(
-                    "ptr_from_int".intern(),
-                    pointer_type,
-                    address_operand,
-                );
-                self.add_temporary(ptr_var);
-
-                Operand::Variable(ptr_var)
-            }
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);
 
@@ -489,18 +484,19 @@ impl<'a> TransientData<'a> {
                 let layout = calculate_type_layout(value_type, self.tr);
                 let size_operand = Operand::U64Const(layout.size as u64);
 
-                // Allocate memory on heap first
-                let ptr_var = self.function.make_heap_alloc(
-                    "heap_ptr".intern(),
-                    value_type,
-                    size_operand,
-                    None, // No alignment requirement for now
-                );
-                self.add_temporary(ptr_var);
-
                 // Check if we can initialize directly on heap (for struct literals)
                 match &*heap_alloc_expr.value {
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                        // Allocate memory on heap first
+                        let ptr_var = self.function.make_heap_alloc(
+                            "heap_ptr".intern(),
+                            value_type,
+                            size_operand,
+                            None, // No alignment requirement for now
+                            false, // No zero init for struct instantiation as we fill fields
+                        );
+                        self.add_temporary(ptr_var);
+
                         // Initialize struct fields directly in heap memory
                         let sinfo = self
                             .tr
@@ -524,21 +520,172 @@ impl<'a> TransientData<'a> {
 
                             self.function.make_store(field_var, field_op);
                         }
+                        Operand::Variable(ptr_var)
                     }
                     ExprNode::Array(array_expr) => {
-                        todo!("TODO: Need to implement C packing for arrays first..")
+                        let ty = self.get_type(array_expr.id).deref_ptr();
+                        let layout_info = calculate_type_layout(ty, self.tr);
+                        let count_op = self.lower_expr(&array_expr.size, ContextKind::AsIs);
+                        let size_op_bytes = self.function.make_binary(
+                            "elem_bytes".intern(),
+                            YirBinOp::Mul,
+                            Operand::U64Const(layout_info.size as u64),
+                            count_op,
+                            primitive_u64()
+                        );
+                        self.add_temporary(size_op_bytes);
+
+                        // Determine if we should zero-initialize
+                        let is_zero_init = if let Some(init_val) = &array_expr.init_value {
+                            match &init_val.as_ref() {
+                                ExprNode::Literal(lit) => match &lit.lit {
+                                    Token { kind: TokenKind::Integer(Integer::I64(0)), .. } => true,
+                                    Token { kind: TokenKind::Integer(Integer::U64(0)), .. } => true,
+                                    Token { kind: TokenKind::F32(f), .. } if *f == 0.0 => true,
+                                    Token { kind: TokenKind::F64(f), .. } if *f == 0.0 => true,
+                                    Token { kind: TokenKind::NilKw, .. } => true,
+                                    _ => false,
+                                },
+                                _ => false,
+                            }
+                        } else {
+                            false // Uninitialized array doesn't need zeroing
+                        };
+
+                        let heap_ptr = self.function.make_heap_alloc(
+                            "array_heap_alloc".intern(),
+                            ty.ptr_to(),
+                            Operand::Variable(size_op_bytes),
+                            None,
+                            is_zero_init
+                        );
+                        self.add_temporary(heap_ptr);
+                        
+                        // If we have a non-zero init value, we need to loop and set elements
+                        if !is_zero_init {
+                            if let Some(init_val) = &array_expr.init_value {
+                                let init_op = self.lower_expr(init_val, ContextKind::AsIs);
+                                
+                                // Generate loop to initialize array
+                                // i = 0
+                                let index_var = self.function.make_alloca_single(
+                                    "loop_idx".intern(), 
+                                    primitive_u64(), 
+                                    Some(Operand::U64Const(0))
+                                );
+                                self.add_temporary(index_var);
+
+                                let loop_head = self.function.add_block("init_loop_head".intern());
+                                let loop_body = self.function.add_block("init_loop_body".intern());
+                                let loop_end = self.function.add_block("init_loop_end".intern());
+
+                                self.function.make_jump(loop_head);
+                                self.function.set_current_block(&loop_head);
+
+                                // if i < count
+                                let current_idx = self.function.make_load("idx_val".intern(), Operand::Variable(index_var));
+                                self.add_temporary(current_idx);
+                                
+                                let cond = self.function.make_binary(
+                                    "loop_cond".intern(), 
+                                    YirBinOp::LessThan, 
+                                    Operand::Variable(current_idx), 
+                                    count_op, 
+                                    primitive_bool()
+                                );
+                                self.add_temporary(cond);
+                                
+                                self.function.make_branch_to_existing(
+                                    Operand::Variable(cond),
+                                    loop_body,
+                                    loop_end
+                                );
+
+                                self.function.set_current_block(&loop_body);
+                                
+                                // ptr[i] = init_val
+                                let elem_ptr = self.function.make_get_element_ptr(
+                                    "elem_init_ptr".intern(), 
+                                    Operand::Variable(heap_ptr), 
+                                    Operand::Variable(current_idx)
+                                );
+                                self.add_temporary(elem_ptr);
+                                self.function.make_store(elem_ptr, init_op);
+
+                                // i++
+                                let next_idx = self.function.make_binary(
+                                    "idx_next".intern(), 
+                                    YirBinOp::Add, 
+                                    Operand::Variable(current_idx), 
+                                    Operand::U64Const(1), 
+                                    primitive_u64()
+                                );
+                                self.add_temporary(next_idx);
+                                self.function.make_store(index_var, Operand::Variable(next_idx));
+
+                                self.function.make_jump(loop_head);
+                                self.function.set_current_block(&loop_end);
+                            }
+                        }
+
+                        Operand::Variable(heap_ptr)
                     }
                     ExprNode::ArrayLiteral(array_literal_expr) => {
-                        todo!("TODO: Need to implement C packing for arrays first...")
+                        debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+
+                        // Get element type from type registry
+                        let array_type = self.get_type(array_literal_expr.id);
+                        let element_type = array_type.deref_ptr(); 
+                        let layout_info = calculate_type_layout(element_type, self.tr);
+                        
+                        let count = array_literal_expr.elements.len() as u64;
+                        let total_size = count * layout_info.size as u64;
+
+                        let heap_ptr = self.function.make_heap_alloc(
+                            "array_lit_heap".intern(),
+                            element_type.ptr_to(),
+                            Operand::U64Const(total_size),
+                            None,
+                            false // Explicitly initialized below
+                        );
+                        self.add_temporary(heap_ptr);
+
+                        // Store elements
+                        for (i, elem) in array_literal_expr.elements.iter().enumerate() {
+                            let val = self.lower_expr(elem, ContextKind::AsIs);
+                            
+                            let elem_ptr = self.function.make_get_element_ptr(
+                                "lit_elem_ptr".intern(), 
+                                Operand::Variable(heap_ptr), 
+                                Operand::U64Const(i as u64)
+                            );
+                            self.add_temporary(elem_ptr);
+                            
+                            self.function.make_store(elem_ptr, val);
+                        }
+
+                        Operand::Variable(heap_ptr)
                     }
                     _ => {
-                        // For non-struct literals, fall back to stack-then-copy
+                        let value_type = self.get_type(heap_alloc_expr.value.node_id());
+                        let layout = calculate_type_layout(value_type, self.tr);
+                        let size_operand = Operand::U64Const(layout.size as u64);
+
+                        // For non-struct/array literals, fall back to stack-then-copy
+                        let ptr_var = self.function.make_heap_alloc(
+                            "heap_ptr".intern(),
+                            value_type,
+                            size_operand,
+                            None, // No alignment requirement for now
+                            false,
+                        );
+                        self.add_temporary(ptr_var);
+
                         let value_operand = self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
                         self.function.make_store(ptr_var, value_operand);
+                        Operand::Variable(ptr_var)
                     }
                 }
-
-                Operand::Variable(ptr_var)
             }
             ExprNode::Array(array_expr) => {
                 // Get the size operand
@@ -592,6 +739,40 @@ impl<'a> TransientData<'a> {
 
                 self.add_temporary(ptr_var);
                 Operand::Variable(ptr_var)
+            }
+            ExprNode::PointerOp(pointer_op_expr) => {
+                debug_assert_eq!(context, ContextKind::AsIs);
+
+                let lhs_operand = self.lower_expr(&pointer_op_expr.left, ContextKind::AsIs);
+                let rhs_operand = self.lower_expr(&pointer_op_expr.right, ContextKind::AsIs);
+                let result_ty = self.get_type(pointer_op_expr.id);
+
+                let result_var = self.function.make_get_element_ptr(
+                    "ptr_offset".intern(),
+                    lhs_operand,
+                    rhs_operand
+                );
+                self.add_temporary(result_var);
+                Operand::Variable(result_var)
+            }
+            ExprNode::Cast(cast_expr) => {
+                debug_assert_eq!(context, ContextKind::AsIs);
+
+                let expr_operand = self.lower_expr(&cast_expr.expr, ContextKind::AsIs);
+                let target_type = self.get_type(cast_expr.id);
+
+                // For now, only support int to pointer casting
+                if target_type.is_ptr() {
+                    let result_var = self.function.make_int_to_ptr(
+                        "cast_result".intern(),
+                        target_type,
+                        expr_operand
+                    );
+                    self.add_temporary(result_var);
+                    Operand::Variable(result_var)
+                } else {
+                    panic!("Cast expressions other than int-to-pointer not yet implemented in YIR lowering")
+                }
             }
         }
     }

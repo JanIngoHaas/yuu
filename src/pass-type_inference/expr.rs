@@ -1,16 +1,15 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
-use crate::pass_parse::{AddressOfExpr, DerefExpr, PointerInstantiationExpr, HeapAllocExpr};
-use crate::{
-    pass_parse::ast::{
-        AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
-        IdentExpr, LiteralExpr, LValueKind, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
-    },
-    pass_type_inference::type_info::{
-        TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64,
-    },
-    pass_yir_lowering::block::Block,
+use crate::pass_parse::{AddressOfExpr, DerefExpr, HeapAllocExpr};
+use crate::pass_parse::ast::{
+    AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr,
+    IdentExpr, LiteralExpr, LValueKind, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr, UnaryOp,
 };
+use crate::pass_type_inference::type_info::{
+    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, PrimitiveType,
+};
+use crate::pass_yir_lowering::block::Block;
+
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
@@ -44,43 +43,172 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
     out
 }
 
+fn try_infer_pointer_instantiation(
+    lhs: &ExprNode,
+    rhs_type: &'static TypeInfo,
+    rhs_span: logos::Span,
+    data: &mut TransientData,
+) -> Option<&'static TypeInfo> {
+    // Check if LHS is an identifier
+    let ident_name = if let ExprNode::Ident(ident_expr) = lhs {
+        ident_expr.ident
+    } else {
+        return None;
+    };
+
+    // Check if that identifier resolves to a type
+    let target_type = data.type_registry.resolve_type(ident_name)?;
+
+    // It is a pointer instantiation! Type @ Addr
+
+    // Validate RHS is u64
+    if let Err(err) = rhs_type.unify(primitive_u64()) {
+        let err_msg = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "Pointer address must be of type 'u64', got '{}'",
+                err.left
+            ))
+            .source(
+                data.src_code.source.clone(),
+                data.src_code.file_name.clone(),
+            )
+            .span(rhs_span, "address expression has wrong type")
+            .help("Pointer addresses must be u64 values. Consider casting your expression to u64.".to_string())
+            .build();
+        data.errors.push(err_msg);
+        // We return error type here because we matched the structural pattern (Type @ Expr), so we know it WAS intended as instantiation
+        return Some(error_type());
+    }
+
+    Some(target_type.ptr_to())
+}
+
+fn infer_pointer_op_expr(
+    pointer_op_expr: &crate::pass_parse::ast::PointerOpExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let lhs_type = infer_expr(&pointer_op_expr.left, block, data, None);
+    let rhs_type = infer_expr(&pointer_op_expr.right, block, data, None);
+
+    // Check if LHS is a pointer and RHS is integer
+    if let TypeInfo::Pointer(_) = lhs_type {
+        if matches!(
+            rhs_type,
+            TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
+                | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
+        ) {
+            // Pointer arithmetic: returns same pointer type
+            data.type_registry.type_info_table.insert(pointer_op_expr.id, lhs_type);
+            return lhs_type;
+        }
+    }
+
+    // Error case - invalid pointer arithmetic
+    let err = YuuError::builder()
+        .kind(ErrorKind::TypeMismatch)
+        .message(format!(
+            "Invalid pointer arithmetic: '{}' @ '{}'",
+            lhs_type, rhs_type
+        ))
+        .source(
+            data.src_code.source.clone(),
+            data.src_code.file_name.clone(),
+        )
+        .span(pointer_op_expr.span.clone(), "invalid pointer operation")
+        .help("The @ operator requires a pointer on the left and an integer offset on the right. Note: @ is not overloadable")
+        .build();
+    data.errors.push(err);
+    data.type_registry.type_info_table.insert(pointer_op_expr.id, error_type());
+    error_type()
+}
+
+fn infer_cast_expr(
+    cast_expr: &crate::pass_parse::ast::CastExpr,
+    block: &mut Block,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    let _expr_type = infer_expr(&cast_expr.expr, block, data, None);
+    let target_type = crate::pass_type_inference::types::infer_type(&cast_expr.target_type, data);
+    data.type_registry.type_info_table.insert(cast_expr.id, target_type);
+    target_type
+}
+
+fn infer_free_op(
+    unary_expr: &UnaryExpr,
+    operand_type: &'static TypeInfo,
+    data: &mut TransientData,
+) -> &'static TypeInfo {
+    if let TypeInfo::Pointer(_) = operand_type {
+        primitive_nil()
+    } else {
+        let err = YuuError::builder()
+            .kind(ErrorKind::TypeMismatch)
+            .message(format!(
+                "Cannot free a non-pointer type: '{}'",
+                operand_type
+            ))
+            .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+            .span(unary_expr.operand.span().clone(), "expected a pointer type")
+            .help("The `~` operator (free) can only be applied to pointer types.")
+            .build();
+        data.errors.push(err);
+        error_type()
+    }
+}
+
 fn infer_binary_expr(
     binary_expr: &BinaryExpr,
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let lhs = infer_expr(&binary_expr.left, block, data, None);
-    let rhs = infer_expr(&binary_expr.right, block, data, None);
-
+    let expr_id = binary_expr.id;
+    let expr_span = binary_expr.span.clone();
     let op_name = binary_expr.op.static_name();
 
-    let resolution = match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
-        Ok(res) => res,
-        Err(err) => {
+    // Standard logic for all binary ops
+    let lhs_type_actual = infer_expr(&binary_expr.left, block, data, None);
+    let rhs_type_actual = infer_expr(&binary_expr.right, block, data, None);
+    let resolved_type = resolve_binary_overload(op_name, lhs_type_actual, rhs_type_actual, expr_span, data, expr_id);
+
+    data.type_registry
+        .type_info_table
+        .insert(expr_id, resolved_type);
+    resolved_type
+}
+
+fn resolve_binary_overload(
+    op_name: ustr::Ustr,
+    lhs: &'static TypeInfo,
+    rhs: &'static TypeInfo,
+    span: logos::Span,
+    data: &mut TransientData,
+    expr_id: i64,
+) -> &'static TypeInfo {
+    match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
+        Ok(res) => {
+            data.type_registry
+                .bindings
+                .insert(expr_id, res.binding_info.id);
+            res.ty.ret
+        }
+        Err(candidates) => {
             let err = create_no_overload_error(
                 &op_name,
-                err,
+                candidates,
                 &[lhs, rhs],
                 data.type_registry,
                 &data.src_code,
-                binary_expr.span.clone(),
+                span,
             );
-
             data.errors.push(err);
             data.type_registry
                 .type_info_table
-                .insert(binary_expr.id, error_type());
-            return error_type();
+                .insert(expr_id, error_type());
+            error_type()
         }
-    };
-
-    data.type_registry
-        .bindings
-        .insert(binary_expr.id, resolution.binding_info.id);
-    data.type_registry
-        .type_info_table
-        .insert(binary_expr.id, resolution.ty.ret);
-    resolution.ty.ret
+    }
 }
 
 fn infer_unary_expr(
@@ -91,33 +219,32 @@ fn infer_unary_expr(
     let ty = infer_expr(&unary_expr.operand, block, data, None);
     let op_name = unary_expr.op.static_name();
 
-    // Replace resolve_function with resolve_function_call
-    let resolution = match data.type_registry.resolve_function(op_name, &[ty]) {
-        Ok(res) => res,
-        Err(err) => {
-            let err = create_no_overload_error(
-                &op_name,
-                err,
-                &[ty],
-                data.type_registry,
-                &data.src_code,
-                unary_expr.span.clone(),
-            );
-            data.errors.push(err);
-            data.type_registry
-                .type_info_table
-                .insert(unary_expr.id, error_type());
-            return error_type();
+    let resolved_type = match unary_expr.op {
+        UnaryOp::Free => infer_free_op(unary_expr, ty, data),
+        _ => {
+            let resolution = match data.type_registry.resolve_function(op_name, &[ty]) {
+                Ok(res) => res.ty.ret,
+                Err(err) => {
+                    let err = create_no_overload_error(
+                        &op_name,
+                        err,
+                        &[ty],
+                        data.type_registry,
+                        &data.src_code,
+                        unary_expr.span.clone(),
+                    );
+                    data.errors.push(err);
+                    error_type()
+                }
+            };
+            resolution
         }
     };
 
     data.type_registry
-        .bindings
-        .insert(unary_expr.id, resolution.binding_info.id);
-    data.type_registry
         .type_info_table
-        .insert(unary_expr.id, resolution.ty.ret);
-    resolution.ty.ret
+        .insert(unary_expr.id, resolved_type);
+    resolved_type
 }
 
 fn infer_ident_expr(
@@ -221,10 +348,7 @@ fn infer_func_call_expr(
             data.errors.push(err);
             error_type()
         }
-        TypeInfo::Inactive => {
-            // This is a compiler bug - kinda weird...
-            panic!("Compiler bug: Inactive type as return type of function")
-        }
+
         TypeInfo::Struct(_struct_type) => {
             let err = YuuError::builder()
                 .kind(ErrorKind::InvalidExpression)
@@ -281,23 +405,7 @@ fn infer_assignment(
     let ty_rhs = infer_expr(&assignment_expr.rhs, block, data, None);
 
     // Prevent binding inactive types
-    if matches!(ty_rhs, TypeInfo::Inactive) {
-        let err = YuuError::builder()
-            .kind(ErrorKind::InvalidExpression)
-            .message("Cannot bind a value-less expression to a variable")
-            .source(
-                data.src_code.source.clone(),
-                data.src_code.file_name.clone(),
-            )
-            .span(
-                assignment_expr.rhs.span().clone(),
-                "this expression doesn't produce a value",
-            )
-            .help("This happens when all paths in the expression return or break")
-            .build();
-        data.errors.push(err);
-        return error_type();
-    }
+
 
     // First unify to check compatibility
     let _unified = match ty_lhs.unify(ty_rhs) {
@@ -696,73 +804,16 @@ pub fn infer_expr(
         ExprNode::AddressOf(address_of_expr) => {
             infer_address_of_expr(address_of_expr, block, data)
         }
-        ExprNode::PointerInstantiation(pointer_inst_expr) => infer_pointer_instantiation_expr(pointer_inst_expr, block, data),
+
         ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block, data),
         ExprNode::Array(array_expr) => infer_array_expr(array_expr, block, data),
         ExprNode::ArrayLiteral(array_literal_expr) => infer_array_literal_expr(array_literal_expr, block, data),
+        ExprNode::PointerOp(pointer_op_expr) => infer_pointer_op_expr(pointer_op_expr, block, data),
+        ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block, data),
     }
 }
 
-fn infer_pointer_instantiation_expr(
-    pointer_inst_expr: &PointerInstantiationExpr,
-    block: &mut Block,
-    data: &mut TransientData,
-) -> &'static TypeInfo {
 
-    let address_type = infer_expr(&pointer_inst_expr.address, block, data, None);
-
-    // Verify that address expression is actually a U64
-    if let Err(err) = address_type.unify(primitive_u64()) {
-        let err_msg = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
-            .message(format!(
-                "Pointer address must be of type 'u64', got '{}'",
-                err.left
-            ))
-            .source(
-                data.src_code.source.clone(),
-                data.src_code.file_name.clone(),
-            )
-            .span(
-                pointer_inst_expr.address.span(),
-                "address expression has wrong type"
-            )
-            .help("Pointer addresses must be u64 values. Consider casting your expression to u64.".to_string())
-            .build();
-        data.errors.push(err_msg);
-        data.type_registry.type_info_table.insert(pointer_inst_expr.id, error_type());
-        return error_type();
-    }
-
-    let target_type = data.type_registry.resolve_type(pointer_inst_expr.type_name);
-
-    // Verify that the target type exists
-    if let Some(target_type) = target_type {
-        let pointer_type = target_type.ptr_to();
-        data.type_registry.type_info_table.insert(pointer_inst_expr.id, pointer_type);
-        pointer_type
-    } else {
-        let err_msg = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
-            .message(format!(
-                "Unknown type '{}' in pointer instantiation",
-                pointer_inst_expr.type_name
-            ))
-            .source(
-                data.src_code.source.clone(),
-                data.src_code.file_name.clone(),
-            )
-            .span(
-                pointer_inst_expr.span.clone(),
-                "unknown type"
-            )
-            .help(format!("Make sure the type '{}' is defined before using it in a pointer instantiation.", pointer_inst_expr.type_name))
-            .build();
-        data.errors.push(err_msg);
-        data.type_registry.type_info_table.insert(pointer_inst_expr.id, error_type());
-        error_type()
-    }
-}
 
 fn infer_heap_alloc_expr(
     heap_alloc_expr: &HeapAllocExpr,

@@ -140,18 +140,37 @@ fn main() -> i64:
     assert_eq!(result, 42);
 }
 
-// TODO: Add free() function tests once we implement it
-// #[test]
-// fn test_heap_allocation_with_free() {
-//     let source = r#"
-// fn main() -> i64:
-//     let heap_ptr = @42;
-//     let result = heap_ptr.*;
-//     free(heap_ptr);
-//     return result .
-//     "#;
-//
-//     let executable = run_to_executable(source, "test_heap_allocation_with_free.yuu").expect("Failed to compile");
-//     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
-//     assert_eq!(result, 42);
-// }
+#[test]
+fn test_heap_free() {
+    let source = r#"
+fn main() -> i64:
+    let heap_ptr = @42;
+    let result = heap_ptr.*;
+    ~heap_ptr;
+    return result .
+    "#;
+
+    let executable = run_to_executable(source, "test_heap_free.yuu").expect("Failed to compile");
+    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn test_heap_free_struct() {
+    let source = r#"
+struct Point:
+    x: i64,
+    y: i64,
+end
+
+fn main() -> i64:
+    let p = @Point { x: 10, y: 20 };
+    let val = p.*.x + p.*.y;
+    ~p;
+    return val .
+    "#;
+
+    let executable = run_to_executable(source, "test_heap_free_struct.yuu").expect("Failed to compile");
+    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    assert_eq!(result, 30);
+}

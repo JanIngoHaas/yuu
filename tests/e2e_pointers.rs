@@ -399,7 +399,7 @@ fn process_list_operation(op: ListOperation) -> i64:
 end
 
 fn main() -> i64:
-    let mut node2 = Node { value: 20, next: Node@0ptr };
+    let mut node2 = Node { value: 20, next: 0 as *Node };
     let mut node1 = Node { value: 10, next: node2.& };
 
     let op1 = ListOperation::Sum(100);
@@ -499,7 +499,7 @@ fn check_pointer_validity(ptr: *i64) -> i64:
     return 42 .
 
 fn main() -> i64:
-    let null_ptr: *i64 = i64@0ptr;
+    let null_ptr: *i64 = 0 as *i64;
     return check_pointer_validity(null_ptr) .
     "#;
 

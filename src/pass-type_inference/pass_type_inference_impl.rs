@@ -5,7 +5,7 @@ use crate::{
     pass_type_inference::{
         EnumVariantInfo,
         binding_info::BindingInfo,
-        error_type, inactive_type,
+        error_type,
         type_info::TypeInfo,
         type_registry::{FieldsMap, StructFieldInfo, TypeRegistry},
     },
@@ -31,7 +31,7 @@ impl<'a> TransientData<'a> {
             ast,
             errors: Vec::default(),
             src_code,
-            current_function_return_type: inactive_type(),
+            current_function_return_type: error_type(),
         }
     }
 
@@ -60,7 +60,7 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
             let mut struct_defs = FieldsMap::default();
 
             for field in &struct_def.fields {
-                let ty = inactive_type(); //later: infer_type(&field.ty, data); See below for reason
+                let ty = error_type(); //later: infer_type(&field.ty, data); See below for reason
                 let sfi = StructFieldInfo {
                     name: field.name,
                     ty,

@@ -18,23 +18,7 @@ use super::{
 fn infer_let_stmt(let_stmt: &LetStmt, block: &mut Block, data: &mut TransientData) {
     let ty_expr = infer_expr(&let_stmt.expr, block, data, None);
 
-    // Prevent binding value-less expressions (Inactive)
-    if matches!(ty_expr, TypeInfo::Inactive) {
-        let err = YuuError::builder()
-            .kind(ErrorKind::InvalidExpression)
-            .message("Cannot bind a value-less expression to a variable".to_string())
-            .source(
-                data.src_code.source.clone(),
-                data.src_code.file_name.clone(),
-            )
-            .span(
-                let_stmt.expr.span().clone(),
-                "this expression doesn't produce a value",
-            )
-            .help("This happens when you try to bind to a statement. Expressions should generally evaluate to a value.".to_string())
-            .build();
-        data.errors.push(err);
-    }
+
 
     // If the expression already has an error type, don't emit another
     // diagnostic here, because the original error has already been reported.

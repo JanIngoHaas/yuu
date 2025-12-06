@@ -502,9 +502,9 @@ pub fn format_instruction(
                 format_operand(source, do_color)
             )
         }
-        Instruction::HeapAlloc { target, size, align } => {
+        Instruction::HeapAlloc { target, size, align, zero_init } => {
             if let Some(alignment) = align {
-                writeln!(
+                write!(
                     f,
                     "{} := {} {} {} {}",
                     format_variable(target, do_color),
@@ -512,16 +512,21 @@ pub fn format_instruction(
                     format_operand(size, do_color),
                     format_keyword("ALIGN", do_color),
                     colorize(&alignment.to_string(), "constant", do_color)
-                )
+                )?;
             } else {
-                writeln!(
+                write!(
                     f,
                     "{} := {} {}",
                     format_variable(target, do_color),
                     format_keyword("HEAP_ALLOC", do_color),
                     format_operand(size, do_color)
-                )
+                )?;
             }
+            
+            if *zero_init {
+                write!(f, " {}", colorize("ZEROED", "keyword", do_color))?;
+            }
+            writeln!(f)
         }
         Instruction::HeapFree { ptr } => {
             writeln!(
@@ -539,6 +544,26 @@ pub fn format_instruction(
                 format_keyword("ELEM_PTR", do_color),
                 format_operand(base, do_color),
                 format_operand(index, do_color)
+            )
+        }
+        Instruction::MemCpy { dest, src, count } => {
+            writeln!(
+                f,
+                "{} {}, {}, {}",
+                format_keyword("MEMCPY", do_color),
+                format_operand(dest, do_color),
+                format_operand(src, do_color),
+                format_operand(count, do_color)
+            )
+        }
+        Instruction::MemSet { dest, value, count } => {
+            writeln!(
+                f,
+                "{} {}, {}, {}",
+                format_keyword("MEMSET", do_color),
+                format_operand(dest, do_color),
+                format_operand(value, do_color),
+                format_operand(count, do_color)
             )
         }
         Instruction::KillSet { vars } => {

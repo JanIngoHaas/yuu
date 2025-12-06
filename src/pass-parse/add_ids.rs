@@ -89,7 +89,7 @@ impl AddId for ExprNode {
                 address_of_expr.id = generator.next();
                 address_of_expr.operand.add_id(generator);
             }
-            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.address.add_id(generator),
+
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 heap_alloc_expr.id = generator.next();
                 heap_alloc_expr.value.add_id(generator);
@@ -112,6 +112,16 @@ impl AddId for ExprNode {
                 if let Some(element_type) = &mut array_literal_expr.element_type {
                     element_type.add_id(generator);
                 }
+            }
+            ExprNode::PointerOp(pointer_op_expr) => {
+                pointer_op_expr.id = generator.next();
+                pointer_op_expr.left.add_id(generator);
+                pointer_op_expr.right.add_id(generator);
+            }
+            ExprNode::Cast(cast_expr) => {
+                cast_expr.id = generator.next();
+                cast_expr.expr.add_id(generator);
+                cast_expr.target_type.add_id(generator);
             }
         }
     }
@@ -348,10 +358,12 @@ impl GetId for ExprNode {
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
             ExprNode::Deref(deref_expr) => deref_expr.id,
             ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
-            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.id,
+
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
             ExprNode::Array(array_expr) => array_expr.id,
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.id,
+            ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.id,
+            ExprNode::Cast(cast_expr) => cast_expr.id,
         }
     }
 }

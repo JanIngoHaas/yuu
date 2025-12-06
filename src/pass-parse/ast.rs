@@ -213,13 +213,7 @@ pub struct AddressOfExpr {
     pub id: NodeId,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PointerInstantiationExpr {
-    pub type_name: Ustr,
-    pub address: Box<ExprNode>, // Expression that evaluates to usize
-    pub span: Span,
-    pub id: NodeId,
-}
+
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HeapAllocExpr {
@@ -290,25 +284,70 @@ pub struct EnumInstantiationExpr {
     pub data: Option<Box<ExprNode>>, // None for unit variants
 }
 
-/// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
+
+pub struct PointerOpExpr {
+
+    pub left: Box<ExprNode>,
+
+    pub right: Box<ExprNode>,
+
+    pub span: Span,
+
+    pub id: NodeId,
+
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CastExpr {
+    pub expr: Box<ExprNode>,
+    pub target_type: TypeNode,
+    pub span: Span,
+    pub id: NodeId,
+}
+
+
+
+/// Represents an expression in the AST
+
+#[derive(Serialize, Deserialize, Clone)]
+
 pub enum ExprNode {
+
     Literal(LiteralExpr),
+
     Binary(BinaryExpr),
+
     Unary(UnaryExpr),
+
     Ident(IdentExpr),
+
     FuncCall(FuncCallExpr),
+
     Assignment(AssignmentExpr),
+
     StructInstantiation(StructInstantiationExpr),
+
     EnumInstantiation(EnumInstantiationExpr),
+
     MemberAccess(MemberAccessExpr),
+
     Deref(DerefExpr),
+
     AddressOf(AddressOfExpr),
-    PointerInstantiation(PointerInstantiationExpr),
+
+    PointerOp(PointerOpExpr),
+
     HeapAlloc(HeapAllocExpr),
+
     Array(ArrayExpr),
+
     ArrayLiteral(ArrayLiteralExpr),
+
+    Cast(CastExpr),
+
     //Error,
+
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -585,11 +624,12 @@ impl Spanned for ExprNode {
             }
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
-            ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
-            ExprNode::PointerInstantiation(pointer_inst_expr) => pointer_inst_expr.span.clone(),
-            ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
+                        ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
+                        ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.span.clone(),
+                        ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
             ExprNode::Array(array_expr) => array_expr.span.clone(),
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.span.clone(),
+            ExprNode::Cast(cast_expr) => cast_expr.span.clone(),
         }
     }
 }

@@ -23,7 +23,6 @@ fn parse_u64(s: &str) -> Option<Integer> {
     // first try u64, then ptr
     let number_part = s
         .strip_suffix("u64")
-        .or_else(|| s.strip_suffix("ptr"))
         .expect("regex guarantees suffix");
 
     match number_part.get(..2) {
@@ -95,7 +94,7 @@ pub enum TokenKind {
     #[logos(priority = 2)]
     F64(f64),
 
-    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)(u64|ptr)", |lex| parse_u64(lex.slice()))]
+    #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)(u64)", |lex| parse_u64(lex.slice()))]
     #[logos(priority = 3)]
     // Plain integers (no suffix) default to i64
     #[regex(r"(0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)(i64)?", |lex| parse_i64(lex.slice()))]
@@ -119,6 +118,9 @@ pub enum TokenKind {
 
     #[token("fn")]
     FnKw,
+
+    #[token("as")]
+    AsKw,
 
     #[token("->")]
     Arrow,
@@ -223,6 +225,7 @@ pub enum TokenKind {
     Tilde,
 
     EOF,
+
 }
 
 impl TokenKind {
@@ -250,6 +253,7 @@ impl Display for TokenKind {
             TokenKind::LetKw => "'let'".fmt(f),
             TokenKind::MutKw => "'mut'".fmt(f),
             TokenKind::FnKw => "'fn'".fmt(f),
+            TokenKind::AsKw => "'as'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
             TokenKind::FatArrow => "'=>'".fmt(f),
             TokenKind::Return => "'return'".fmt(f),

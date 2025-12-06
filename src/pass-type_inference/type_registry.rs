@@ -648,8 +648,12 @@ impl TypeRegistry {
             "bool" => Some(crate::pass_type_inference::type_info::primitive_bool()),
             "nil" => Some(crate::pass_type_inference::type_info::primitive_nil()),
             _ => {
-                // Fall back to user-defined types
-                self.resolve_struct_or_enum(name).map(|info| info.ty())
+                let resolved_user_type = self.resolve_struct_or_enum(name).map(|info| info.ty());
+                debug_assert!(
+                    name.as_str() != "i64" && name.as_str() != "Node" || resolved_user_type.is_some(),
+                    "Expected type '{}' to resolve, but it didn't!", name
+                );
+                resolved_user_type
             }
         }
     }

@@ -92,7 +92,7 @@ static PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
 static PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
 static PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
 static PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
-static INACTIVE_TYPE: TypeInfo = TypeInfo::Inactive;
+
 
 pub fn primitive_i64() -> &'static TypeInfo {
     &PRIMITIVE_I64
@@ -119,9 +119,7 @@ pub fn primitive_bool() -> &'static TypeInfo {
     &PRIMITIVE_BOOL
 }
 
-pub fn inactive_type() -> &'static TypeInfo {
-    &INACTIVE_TYPE
-}
+
 
 pub fn ptr_to(ty: &'static TypeInfo) -> &'static TypeInfo {
     TYPE_CACHE.ptr_to(ty)
@@ -223,7 +221,6 @@ impl TypeInterner {
             TypeInfo::Pointer(inner) => inner,
             TypeInfo::BuiltInPrimitive(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Function(_) => panic!("Cannot dereference non-pointer type: {}", ty),
-            TypeInfo::Inactive => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Struct(struct_type) => {
                 panic!("Cannot dereference non-pointer type: {}", struct_type.name)
@@ -382,9 +379,7 @@ pub enum TypeInfo {
     BuiltInPrimitive(PrimitiveType),
     Function(FunctionType),
     Pointer(&'static TypeInfo),
-    Inactive, // Used to represent a 'inactive' type, i.e. a an expression which produces __no__ value and thus has no type
-    // This happens for example when you 'unwind' in a block - the block does not have a value.
-    // Example: Return in some child block - the block itself has no value, intrinsically it's the value of the top-most block.
+    // TODO: Implement AnyPtr for type-erased pointers (e.g., void* in C)
     Error,
     Struct(StructType),
     Enum(EnumType),
@@ -407,9 +402,7 @@ impl TypeInfo {
         matches!(self, TypeInfo::Struct(_))
     }
 
-    pub fn is_inactive(&self) -> bool {
-        matches!(self, TypeInfo::Inactive)
-    }
+
 
     pub fn is_struct_or_ptr_to_struct(&self) -> bool {
         match self {
@@ -424,7 +417,6 @@ impl TypeInfo {
             TypeInfo::BuiltInPrimitive(_) => true,
             TypeInfo::Pointer(inner) => inner.is_primitive(),
             TypeInfo::Function(_) => false,
-            TypeInfo::Inactive => false,
             TypeInfo::Error => false,
             TypeInfo::Struct(_) => false,
             TypeInfo::Enum(_) => false,
@@ -453,7 +445,6 @@ impl TypeInfo {
     ) -> Result<&'static TypeInfo, UnificationError> {
         // Unification with inactive yields the other type
         match (self, target) {
-            (TypeInfo::Inactive, x) | (x, TypeInfo::Inactive) => Ok(x),
             _ if self.is_exact_same_type(target) => Ok(target),
             _ => Err(UnificationError {
                 left: self.to_string(),
@@ -473,7 +464,6 @@ impl Display for TypeInfo {
             TypeInfo::BuiltInPrimitive(built_in) => write!(f, "{}", built_in),
             TypeInfo::Function(function_type) => write!(f, "{}", function_type),
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
-            TypeInfo::Inactive => write!(f, "<no value>"),
             TypeInfo::Error => write!(f, "<error>"),
             TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
             TypeInfo::Enum(enum_type) => write!(f, "{}", enum_type.name),

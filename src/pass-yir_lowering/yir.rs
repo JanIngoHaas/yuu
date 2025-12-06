@@ -232,11 +232,26 @@ pub enum Instruction {
         target: Variable,   // Pointer variable to store the heap address
         size: Operand,      // Size in bytes (must be u64)
         align: Option<u64>, // Optional alignment requirement
+        zero_init: bool,    // Whether to zero-initialize the memory (calloc vs malloc)
     },
 
     // Heap deallocation - frees previously allocated memory
     HeapFree {
         ptr: Operand, // Pointer to memory to free (must be heap-allocated)
+    },
+
+    // MemCpy intrinsic
+    MemCpy {
+        dest: Operand,  // Destination pointer
+        src: Operand,   // Source pointer
+        count: Operand, // Number of bytes to copy
+    },
+
+    // MemSet intrinsic
+    MemSet {
+        dest: Operand,  // Destination pointer
+        value: Operand, // Value to set (u8)
+        count: Operand, // Number of bytes to set
     },
 
     // Get pointer to array element at index
@@ -303,6 +318,8 @@ impl BasicBlock {
                 Instruction::StoreActiveVariantIdx { .. } => {}
                 Instruction::IntToPtr { .. } => {}
                 Instruction::HeapFree { .. } => {}
+                Instruction::MemCpy { .. } => {}
+                Instruction::MemSet { .. } => {}
                 Instruction::GetElementPtr { .. } => {}
                 Instruction::KillSet { .. } => {}
             };
@@ -532,7 +549,7 @@ impl Function {
     ) -> Option<Variable> {
         if matches!(
             ty,
-            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
         ) {
             return None;
         }
@@ -546,7 +563,7 @@ impl Function {
         let value_type = value.ty();
         if matches!(
             value_type,
-            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
         ) {
             return false;
         }
@@ -668,9 +685,9 @@ impl Function {
         debug_assert!(
             !matches!(
                 dest_ty,
-                TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+                TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
             ),
-            "Store destination cannot be an inactive type, got {}",
+            "Store destination cannot be an error type, got {}",
             dest_ty
         );
 
@@ -774,6 +791,7 @@ impl Function {
         ty: &'static TypeInfo,
         size: Operand,
         align: Option<u64>,
+        zero_init: bool,
     ) -> Variable {
         debug_assert_eq!(
             size.ty(),
@@ -783,7 +801,7 @@ impl Function {
         );
 
         let target = self.fresh_variable(name_hint, ty.ptr_to());
-        let instr = Instruction::HeapAlloc { target, size, align };
+        let instr = Instruction::HeapAlloc { target, size, align, zero_init };
         self.get_current_block_mut().instructions.push(instr);
         target
     }
@@ -797,6 +815,26 @@ impl Function {
         );
 
         let instr = Instruction::HeapFree { ptr };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for MemCpy
+    pub fn make_memcpy(&mut self, dest: Operand, src: Operand, count: Operand) {
+        debug_assert!(dest.ty().is_ptr(), "MemCpy dest must be a pointer");
+        debug_assert!(src.ty().is_ptr(), "MemCpy src must be a pointer");
+        debug_assert_eq!(count.ty(), primitive_u64(), "MemCpy count must be u64");
+
+        let instr = Instruction::MemCpy { dest, src, count };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for MemSet
+    pub fn make_memset(&mut self, dest: Operand, value: Operand, count: Operand) {
+        debug_assert!(dest.ty().is_ptr(), "MemSet dest must be a pointer");
+        // Value typically treated as u8 in memset, but we accept any operand and backend handles it
+        debug_assert_eq!(count.ty(), primitive_u64(), "MemSet count must be u64");
+
+        let instr = Instruction::MemSet { dest, value, count };
         self.get_current_block_mut().instructions.push(instr);
     }
 

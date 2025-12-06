@@ -63,7 +63,7 @@ pub fn calculate_type_layout(ty: &TypeInfo, type_registry: &TypeRegistry) -> Lay
             let layout = calculate_enum_layout(enum_info, type_registry);
             LayoutInfo::new(layout.total_size, layout.total_alignment)
         },
-        TypeInfo::Inactive | TypeInfo::Error => LayoutInfo::new(0, 1),
+        TypeInfo::Error => LayoutInfo::new(0, 1),
     }
 }
 
@@ -93,6 +93,12 @@ pub fn calculate_struct_layout(struct_info: &StructInfo, type_registry: &TypeReg
         total_size,
         total_alignment: struct_alignment,
     }
+}
+
+pub fn calculate_array_layout(element_type: &TypeInfo, count: u64, type_registry: &TypeRegistry) -> LayoutInfo {
+    let element_layout = calculate_type_layout(element_type, type_registry);
+    let total_size = element_layout.size * count as usize;
+    LayoutInfo::new(total_size, element_layout.alignment)
 }
 
 pub fn calculate_enum_layout(enum_info: &EnumInfo, type_registry: &TypeRegistry) -> EnumLayout {
