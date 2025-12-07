@@ -74,6 +74,9 @@ impl CLowering {
             TypeInfo::Error => panic!(
                 "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
             ),
+            TypeInfo::Unknown => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Unknown - type inference not complete"
+            ),
             TypeInfo::Struct(struct_type) => {
                 write!(data.output, "struct {}", struct_type.name)
             }

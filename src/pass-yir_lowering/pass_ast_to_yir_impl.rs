@@ -4,7 +4,7 @@ use crate::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp
         }, token::{Integer, Token, TokenKind}
     },
-    pass_type_inference::{TypeInfo, TypeRegistry, primitive_bool, primitive_u64, primitive_nil},
+    pass_type_inference::{TypeInfo, TypeRegistry, primitive_u64},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     }, utils::calculate_type_layout,
@@ -386,14 +386,29 @@ impl<'a> TransientData<'a> {
             }
 
             ExprNode::MemberAccess(member_access_expr) => {
-                let lhs = self.lower_expr(&member_access_expr.lhs, ContextKind::StorageLocation);
-                let field_name = member_access_expr.field.name;
-
                 let lhs_type = self.get_type(member_access_expr.lhs.node_id());
-                let struct_type = match lhs_type {
-                    TypeInfo::Struct(sinfo) => sinfo,
+
+                // Determine the appropriate context and extract struct type info
+                let (lhs, struct_type) = match lhs_type {
+                    TypeInfo::Struct(sinfo) => {
+                        // Direct struct access: we need the storage location to get a pointer to the struct
+                        let lhs = self.lower_expr(&member_access_expr.lhs, ContextKind::StorageLocation);
+                        (lhs, sinfo)
+                    },
+                    TypeInfo::Pointer(inner_type) => {
+                        match inner_type {
+                            TypeInfo::Struct(sinfo) => {
+                                // Pointer to struct access: we need the pointer value itself
+                                let lhs = self.lower_expr(&member_access_expr.lhs, ContextKind::AsIs);
+                                (lhs, sinfo)
+                            },
+                            _ => unreachable!("Member access on pointer to non-struct type: {:#?}", inner_type),
+                        }
+                    }
                     _ => unreachable!("Member access on non-struct type: {:#?}", lhs_type),
                 };
+
+                let field_name = member_access_expr.field.name;
 
                 let field_info = self
                     .tr
@@ -670,7 +685,6 @@ impl<'a> TransientData<'a> {
 
                 let lhs_operand = self.lower_expr(&pointer_op_expr.left, ContextKind::AsIs);
                 let rhs_operand = self.lower_expr(&pointer_op_expr.right, ContextKind::AsIs);
-                let result_ty = self.get_type(pointer_op_expr.id);
 
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
@@ -936,6 +950,36 @@ impl<'a> TransientData<'a> {
                 self.lower_block_body(block_stmt);
                 StmtRes::Proceed
             }
+            StmtNode::Decl(decl_stmt) => {
+                let binding_id = decl_stmt.ident.id;
+                let name_hint = decl_stmt.ident.name;
+                let var_type = self.get_type(decl_stmt.ident.id);
+                let yir_var = self.function.make_alloca(name_hint, var_type, 1, None);
+                self.var_map.insert(binding_id, yir_var);
+                self.add_variable_to_current_scope(yir_var);
+                StmtRes::Proceed
+            },
+            StmtNode::Def(def_stmt) => {
+                let rhs_value = self.lower_expr(&def_stmt.expr, ContextKind::AsIs);
+
+                // Find the YIR variable that was created during the decl
+                let binding_id = *self.tr.bindings.get(&def_stmt.ident.id).unwrap_or_else(|| {
+                    panic!(
+                        "Compiler bug: No binding found for def ident '{}': {} -> Span: {:#?}",
+                        def_stmt.ident.name, def_stmt.ident.id, def_stmt.ident.span
+                    )
+                });
+                let yir_var = *self.var_map.get(&binding_id).unwrap_or_else(|| {
+                    panic!(
+                        "Compiler bug: No YIR variable found for def binding ID {} (ident: {})",
+                        binding_id, def_stmt.ident.name
+                    )
+                });
+
+                // Store the RHS value into the already-allocated variable
+                self.function.make_store(yir_var, rhs_value);
+                StmtRes::Proceed
+            },
         };
 
         self.kill_current_temporaries();

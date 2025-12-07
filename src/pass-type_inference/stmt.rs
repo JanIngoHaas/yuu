@@ -1,12 +1,11 @@
 use crate::{
     pass_diagnostics::{ErrorKind, YuuError},
     pass_parse::{
-        BlockStmt, IfStmt, LetStmt, MatchStmt, RefutablePatternNode, ReturnStmt, Spanned, StmtNode,
-        WhileStmt,
+        BindingNode, BlockStmt, DeclStmt, DefStmt, IfStmt, LetStmt, MatchStmt, RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt
     },
     pass_type_inference::{
         BindingInfo,
-        type_info::{TypeInfo, error_type, primitive_bool, primitive_nil},
+        type_info::{TypeInfo, error_type, primitive_bool, primitive_nil, unknown_type},
     },
     pass_yir_lowering::block::Block,
 };
@@ -18,13 +17,55 @@ use super::{
 fn infer_let_stmt(let_stmt: &LetStmt, block: &mut Block, data: &mut TransientData) {
     let ty_expr = infer_expr(&let_stmt.expr, block, data, None);
 
-
-
     // If the expression already has an error type, don't emit another
     // diagnostic here, because the original error has already been reported.
     // We simply propagate the error type to the binding.
 
     infer_binding(block, &let_stmt.binding, ty_expr, data);
+}
+
+fn infer_decl_stmt(decl_stmt: &DeclStmt, block: &mut Block, data: &mut TransientData) {
+    infer_binding(block, &BindingNode::Ident(decl_stmt.ident.clone()), unknown_type(), data);
+}
+
+fn infer_def_stmt(def_stmt: &DefStmt, block: &mut Block, data: &mut TransientData) {
+    let expr_type = infer_expr(&def_stmt.expr, block, data, None);
+    let var = block.resolve_variable(def_stmt.ident.name, &data.src_code, def_stmt.ident.span.clone());
+
+    match var {
+        Ok(var) =>  {
+            // Check if the variable was already properly defined (i.e., has a non-unknown type)
+            let current_type = data.type_registry
+                .type_info_table
+                .get(var.binding_info.id)
+                .unwrap_or(unknown_type());
+
+            if !matches!(current_type, TypeInfo::Unknown) {
+                let err = YuuError::builder()
+                    .kind(ErrorKind::InvalidStatement)
+                    .message(format!(
+                        "Variable '{}' is already defined",
+                        def_stmt.ident.name
+                    ))
+                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .span(def_stmt.ident.span.clone(), "variable already defined here")
+                    .help("Use 'def' only once after 'dec'. For rebinding/reassignment, use 'let' or assignment operator")
+                    .build();
+                data.errors.push(err);
+                return;
+            }
+
+            data.type_registry
+                .type_info_table
+                .insert(var.binding_info.id, expr_type); // Update the "unknown" type of the variable
+            data.type_registry
+                .bindings
+                .insert(def_stmt.ident.id, var.binding_info.id); // Map def statement ident to original binding
+        }
+        Err(err) => {
+            data.errors.push(*err);
+        }
+    }
 }
 
 fn infer_return_stmt(return_stmt: &ReturnStmt, block: &mut Block, data: &mut TransientData) {
@@ -77,6 +118,14 @@ pub fn infer_stmt(stmt: &StmtNode, block: &mut Block, data: &mut TransientData) 
         }
         StmtNode::Atomic(expr) => {
             let _ = infer_expr(expr, block, data, None);
+        }
+
+        StmtNode::Decl(decl_stmt) => {
+            infer_decl_stmt(decl_stmt, block, data);
+        }
+
+        StmtNode::Def(def_stmt) => {
+            infer_def_stmt(def_stmt, block, data);
         }
 
         StmtNode::Break(_exit) => {

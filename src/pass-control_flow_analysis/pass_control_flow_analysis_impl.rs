@@ -175,7 +175,7 @@ impl<'a> ControlFlowAnalyzer<'a> {
             }
 
             // Other statements don't affect control flow
-            StmtNode::Let(_) | StmtNode::Atomic(_) | StmtNode::Break(_) | StmtNode::Defer(_) | StmtNode::Error(_) => {
+            StmtNode::Let(_) | StmtNode::Atomic(_) | StmtNode::Break(_) | StmtNode::Defer(_) | StmtNode::Decl(_) | StmtNode::Def(_) | StmtNode::Error(_) => {
                 FlowState::CouldContinue
             }
         }

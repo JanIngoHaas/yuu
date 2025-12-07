@@ -37,6 +37,11 @@ pub fn error_type() -> &'static TypeInfo {
     &ERROR_TYPE
 }
 
+pub fn unknown_type() -> &'static TypeInfo {
+    const UNKNOWN_TYPE: TypeInfo = TypeInfo::Unknown;
+    &UNKNOWN_TYPE
+}
+
 impl<T> Eq for GiveMePtrHashes<T> {}
 pub enum TypeCombination {
     Pointer(GiveMePtrHashes<TypeInfo>),
@@ -93,7 +98,6 @@ static PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
 static PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
 static PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
 
-
 pub fn primitive_i64() -> &'static TypeInfo {
     &PRIMITIVE_I64
 }
@@ -101,7 +105,6 @@ pub fn primitive_i64() -> &'static TypeInfo {
 pub fn primitive_u64() -> &'static TypeInfo {
     &PRIMITIVE_U64
 }
-
 
 pub fn primitive_f32() -> &'static TypeInfo {
     &PRIMITIVE_F32
@@ -118,8 +121,6 @@ pub fn primitive_nil() -> &'static TypeInfo {
 pub fn primitive_bool() -> &'static TypeInfo {
     &PRIMITIVE_BOOL
 }
-
-
 
 pub fn ptr_to(ty: &'static TypeInfo) -> &'static TypeInfo {
     TYPE_CACHE.ptr_to(ty)
@@ -222,6 +223,7 @@ impl TypeInterner {
             TypeInfo::BuiltInPrimitive(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Function(_) => panic!("Cannot dereference non-pointer type: {}", ty),
             TypeInfo::Error => panic!("Cannot dereference non-pointer type: {}", ty),
+            TypeInfo::Unknown => panic!("Cannot dereference unknown type"),
             TypeInfo::Struct(struct_type) => {
                 panic!("Cannot dereference non-pointer type: {}", struct_type.name)
             }
@@ -363,7 +365,6 @@ impl From<FunctionType> for &'static TypeInfo {
     }
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructType {
     pub name: Ustr,
@@ -381,6 +382,7 @@ pub enum TypeInfo {
     Pointer(&'static TypeInfo),
     // TODO: Implement AnyPtr for type-erased pointers (e.g., void* in C)
     Error,
+    Unknown, // When we haven't yet determined the type
     Struct(StructType),
     Enum(EnumType),
 }
@@ -402,8 +404,6 @@ impl TypeInfo {
         matches!(self, TypeInfo::Struct(_))
     }
 
-
-
     pub fn is_struct_or_ptr_to_struct(&self) -> bool {
         match self {
             TypeInfo::Struct(_) => true,
@@ -420,6 +420,7 @@ impl TypeInfo {
             TypeInfo::Error => false,
             TypeInfo::Struct(_) => false,
             TypeInfo::Enum(_) => false,
+            TypeInfo::Unknown => false,
         }
     }
 
@@ -445,6 +446,7 @@ impl TypeInfo {
     ) -> Result<&'static TypeInfo, UnificationError> {
         // Unification with inactive yields the other type
         match (self, target) {
+            (TypeInfo::Unknown, _) => Ok(target),
             _ if self.is_exact_same_type(target) => Ok(target),
             _ => Err(UnificationError {
                 left: self.to_string(),
@@ -465,6 +467,7 @@ impl Display for TypeInfo {
             TypeInfo::Function(function_type) => write!(f, "{}", function_type),
             TypeInfo::Pointer(inner) => write!(f, "*{}", inner),
             TypeInfo::Error => write!(f, "<error>"),
+            TypeInfo::Unknown => write!(f, "<unknown>"),
             TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
             TypeInfo::Enum(enum_type) => write!(f, "{}", enum_type.name),
         }

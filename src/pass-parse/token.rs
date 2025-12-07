@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use ustr::{Ustr, ustr};
 
 // Helper function for parsing i64 with different bases
-fn parse_i64(s: &str) -> Option<Integer> { 
+fn parse_i64(s: &str) -> Option<Integer> {
     // Remove i64 suffix if present
     let number_part = s.strip_suffix("i64").unwrap_or(s);
 
@@ -21,14 +21,18 @@ fn parse_i64(s: &str) -> Option<Integer> {
 
 fn parse_u64(s: &str) -> Option<Integer> {
     // first try u64, then ptr
-    let number_part = s
-        .strip_suffix("u64")
-        .expect("regex guarantees suffix");
+    let number_part = s.strip_suffix("u64").expect("regex guarantees suffix");
 
     match number_part.get(..2) {
-        Some("0b") => u64::from_str_radix(&number_part[2..], 2).ok().map(Integer::U64),
-        Some("0o") => u64::from_str_radix(&number_part[2..], 8).ok().map(Integer::U64),
-        Some("0x") => u64::from_str_radix(&number_part[2..], 16).ok().map(Integer::U64),
+        Some("0b") => u64::from_str_radix(&number_part[2..], 2)
+            .ok()
+            .map(Integer::U64),
+        Some("0o") => u64::from_str_radix(&number_part[2..], 8)
+            .ok()
+            .map(Integer::U64),
+        Some("0x") => u64::from_str_radix(&number_part[2..], 16)
+            .ok()
+            .map(Integer::U64),
         _ => number_part.parse().ok().map(Integer::U64),
     }
 }
@@ -81,6 +85,12 @@ pub enum TokenKind {
     #[token("match")]
     MatchKw,
 
+    #[token("dec")]
+    DecKw,
+
+    #[token("def")]
+    DefKw,
+
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
         lex.slice().trim_end_matches('f').parse().ok()
@@ -129,7 +139,7 @@ pub enum TokenKind {
     FatArrow,
 
     #[token("return")]
-    Return,
+    ReturnKw,
 
     #[token(":")]
     Colon,
@@ -225,13 +235,12 @@ pub enum TokenKind {
     Tilde,
 
     EOF,
-
 }
 
 impl TokenKind {
     pub fn from_keyword(keyword: &str) -> Option<TokenKind> {
         match keyword {
-            "return" => Some(TokenKind::Return),
+            "return" => Some(TokenKind::ReturnKw),
             "break" => Some(TokenKind::BreakKw),
             _ => None,
         }
@@ -256,7 +265,7 @@ impl Display for TokenKind {
             TokenKind::AsKw => "'as'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
             TokenKind::FatArrow => "'=>'".fmt(f),
-            TokenKind::Return => "'return'".fmt(f),
+            TokenKind::ReturnKw => "'return'".fmt(f),
             TokenKind::Colon => "':'".fmt(f),
             TokenKind::DoubleColon => "'::'".fmt(f),
             TokenKind::Equal => "'='".fmt(f),
@@ -297,6 +306,8 @@ impl Display for TokenKind {
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),
+            TokenKind::DecKw => "'dec'".fmt(f),
+            TokenKind::DefKw => "'def'".fmt(f),
         }
     }
 }

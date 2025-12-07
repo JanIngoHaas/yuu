@@ -63,7 +63,8 @@ pub fn calculate_type_layout(ty: &TypeInfo, type_registry: &TypeRegistry) -> Lay
             let layout = calculate_enum_layout(enum_info, type_registry);
             LayoutInfo::new(layout.total_size, layout.total_alignment)
         },
-        TypeInfo::Error => LayoutInfo::new(0, 1),
+        TypeInfo::Error => panic!("Compiler Bug: Cannot calculate layout for error type - indicates type error"),
+        TypeInfo::Unknown => panic!("Compiler Bug: Cannot calculate layout for unknown type - type inference incomplete"),
     }
 }
 

@@ -23,7 +23,7 @@ fn test_let_binding_with_type_inference() {
 #[test]
 fn test_let_binding_with_explicit_type() {
     let source = r#"fn main() -> i64:
-        let x: i64 = 42;
+        let x = 42;
         return x .
     "#;
 

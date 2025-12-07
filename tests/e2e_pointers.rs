@@ -5,14 +5,14 @@ use common::*;
 fn test_basic_pointer_arithmetic() {
     let source = r#"
 fn main() -> i64:
-    let x: i64 = 12;
-    let y: i64 = 4;
-    let ptr_x: *i64 = x.&;
-    let ptr_y: *i64 = y.&;
+    let x = 12;
+    let y = 4;
+    let ptr_x = x.&;
+    let ptr_y = y.&;
 
     // Mixed arithmetic operations through pointers
-    let result1: i64 = ptr_x.* * ptr_y.* / 2 + ptr_x.* % ptr_y.*;
-    let result2: i64 = (ptr_x.* + ptr_y.*) * (ptr_x.* - ptr_y.*) / ptr_y.*;
+    let result1 = ptr_x.* * ptr_y.* / 2 + ptr_x.* % ptr_y.*;
+    let result2 = (ptr_x.* + ptr_y.*) * (ptr_x.* - ptr_y.*) / ptr_y.*;
 
     return result1 + result2 .
     "#;
@@ -28,10 +28,10 @@ fn main() -> i64:
 fn test_multi_level_pointer_arithmetic() {
     let source = r#"
 fn main() -> i64:
-    let base: i64 = 8;
-    let ptr1: *i64 = base.&;
-    let ptr2: **i64 = ptr1.&;
-    let ptr3: ***i64 = ptr2.&;
+    let base = 8;
+    let ptr1 = base.&;
+    let ptr2 = ptr1.&;
+    let ptr3 = ptr2.&;
 
     // Complex nested arithmetic
     return ptr3.*** * ptr2.** / ptr1.* + ptr3.*** % 5 .
@@ -48,8 +48,8 @@ fn main() -> i64:
 fn test_pointer_assignment_with_arithmetic() {
     let source = r#"
 fn main() -> i64:
-    let mut accumulator: i64 = 100;
-    let acc_ptr: *i64 = accumulator.&;
+    let mut accumulator = 100;
+    let acc_ptr = accumulator.&;
 
     acc_ptr.* = acc_ptr.* * 2 / 3 + 15;
     acc_ptr.* = acc_ptr.* - acc_ptr.* % 7;
@@ -71,10 +71,10 @@ fn calculate(a: i64, b: i64) -> i64:
     return a * b + a / b - a % b .
 
 fn main() -> i64:
-    let a: i64 = 15;
-    let b: i64 = 3;
-    let ptr_a: *i64 = a.&;
-    let ptr_b: *i64 = b.&;
+    let a = 15;
+    let b = 3;
+    let ptr_a = a.&;
+    let ptr_b = b.&;
 
     return calculate(ptr_a.* * 2, ptr_b.* + 1) .
     "#;
@@ -95,7 +95,7 @@ fn main() -> i64:
 //     let option2: i64 = 30;
 //     let multiplier: i64 = 3;
 
-//     let selected_ptr: *i64 = if flag: option1.& . else { option2.& }
+//     let selected_ptr = if flag: option1.& . else { option2.& }
 //     return selected_ptr.* * multiplier / 2 + selected_ptr.* % multiplier .
 //     "#;
 
@@ -109,11 +109,11 @@ fn main() -> i64:
 fn test_quadruple_pointer_arithmetic() {
     let source = r#"
 fn main() -> i64:
-    let mut deep_value: i64 = 6;
-    let level1: *i64 = deep_value.&;
-    let level2: **i64 = level1.&;
-    let level3: ***i64 = level2.&;
-    let level4: ****i64 = level3.&;
+    let mut deep_value = 6;
+    let level1 = deep_value.&;
+    let level2 = level1.&;
+    let level3 = level2.&;
+    let level4 = level3.&;
 
     // Deep arithmetic assignment
     level4.**** = level4.**** * level4.**** / 2 + level4.**** % 3;
@@ -132,10 +132,10 @@ fn main() -> i64:
 fn test_pointer_arithmetic_swap() {
     let source = r#"
 fn main() -> i64:
-    let mut val1: i64 = 45;
-    let mut val2: i64 = 18;
-    let p1: *i64 = val1.&;
-    let p2: *i64 = val2.&;
+    let mut val1 = 45;
+    let mut val2 = 18;
+    let p1 = val1.&;
+    let p2 = val2.&;
 
     // Arithmetic swap
     p1.* = p1.* + p2.*;
@@ -156,15 +156,15 @@ fn main() -> i64:
 fn test_complex_pointer_expression() {
     let source = r#"
 fn main() -> i64:
-    let x: i64 = 10;
-    let y: i64 = 5;
-    let z: i64 = 2;
+    let x = 10;
+    let y = 5;
+    let z = 2;
 
-    let px: *i64 = x.&;
-    let py: *i64 = y.&;
-    let pz: *i64 = z.&;
+    let px = x.&;
+    let py = y.&;
+    let pz = z.&;
 
-    let ppy: **i64 = py.&;
+    let ppy = py.&;
 
     // Complex expression mixing single and double pointers
     return (px.* * ppy.** / pz.* + px.* % ppy.**) * (pz.* + 1) .
@@ -184,8 +184,8 @@ fn modify_through_pointer(ptr: *i64, factor: i64):
     ptr.* = ptr.* * factor / 2 + factor % 3 .
 
 fn main() -> i64:
-    let mut value: i64 = 20;
-    let ptr: *i64 = value.&;
+    let mut value = 20;
+    let ptr = value.&;
 
     modify_through_pointer(ptr, 7);
 
@@ -215,8 +215,8 @@ fn process_container(c: Container) -> i64:
 end
 
 fn main() -> i64:
-    let mut x: i64 = 15;
-    let ptr: *i64 = x.&;
+    let mut x = 15;
+    let ptr = x.&;
 
     let container1 = Container::IntPtr(ptr);
     let container2 = Container::Value(25);
@@ -247,8 +247,8 @@ fn compute_through_pointers(pp: PointerPair) -> i64:
     return pp.ptr1.* + pp.ptr2.* + pp.offset .
 
 fn main() -> i64:
-    let mut a: i64 = 10;
-    let mut b: i64 = 20;
+    let mut a = 10;
+    let mut b = 20;
 
     let pair = PointerPair {
         ptr1: a.&,
@@ -288,9 +288,9 @@ fn main() -> i64:
     let mut status2 = Status::Processing(50);
     let mut status3 = Status::Done(42);
 
-    let ptr1: *Status = status1.&;
-    let ptr2: *Status = status2.&;
-    let ptr3: *Status = status3.&;
+    let ptr1 = status1.&;
+    let ptr2 = status2.&;
+    let ptr3 = status3.&;
 
     let r1 = get_status_value(ptr1);
     let r2 = get_status_value(ptr2);
@@ -319,7 +319,7 @@ fn distance_squared(p_ptr: *Point) -> i64:
 
 fn main() -> i64:
     let mut point = Point { x: 3, y: 4 };
-    let ptr: *Point = point.&;
+    let ptr = point.&;
 
     return distance_squared(ptr) .
     "#;
@@ -357,7 +357,7 @@ end
 
 fn main() -> i64:
     let mut data = Data { value: 6, multiplier: 7 };
-    let data_ptr: *Data = data.&;
+    let data_ptr = data.&;
 
     let container1 = DataContainer::Empty;
     let container2 = DataContainer::Reference(data_ptr);
@@ -431,7 +431,7 @@ fn operate_through_pointer(calc_ptr: *Calculator, operand: i64):
 
 fn main() -> i64:
     let mut calc = Calculator { accumulator: 5, multiplier: 3 };
-    let ptr: *Calculator = calc.&;
+    let ptr = calc.&;
 
     operate_through_pointer(ptr, 7);
 
@@ -468,7 +468,7 @@ fn extract_value(pv: PointerVariants) -> i64:
 end
 
 fn main() -> i64:
-    let mut num: i64 = 42;
+    let mut num = 42;
     let mut point = Point { x: 10, y: 15 };
 
     let variant1 = PointerVariants::IntPtr(num.&);
@@ -499,7 +499,7 @@ fn check_pointer_validity(ptr: *i64) -> i64:
     return 42 .
 
 fn main() -> i64:
-    let null_ptr: *i64 = 0 as *i64;
+    let null_ptr = 0 as *i64;
     return check_pointer_validity(null_ptr) .
     "#;
 

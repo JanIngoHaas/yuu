@@ -125,7 +125,6 @@ impl Parser {
                 Ok(self.make_literal_expr(t))
             }
 
-
             TokenKind::Ident(_) => {
                 // Check if this identifier is followed by a double colon (enum instantiation)
                 let peek_next = self.lexer.peek_at(1);
@@ -662,7 +661,7 @@ impl Parser {
         Ok((final_span, StmtNode::Atomic(expr)))
     }
 
-    pub fn parse_binding(&mut self) -> ParseResult<BindingNode> {
+    pub fn parse_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
         // Check if we have a mut keyword
         let mut_tkn = self.lexer.peek();
         let is_mut = if mut_tkn.kind == TokenKind::MutKw {
@@ -674,12 +673,12 @@ impl Parser {
 
         let t = self.lexer.next_token();
         match t.kind {
-            TokenKind::Ident(ident) => Ok(BindingNode::Ident(IdentBinding {
+            TokenKind::Ident(ident) => Ok((t.span.clone(), BindingNode::Ident(IdentBinding {
                 span: t.span.clone(),
                 name: ident,
                 id: 0,
                 is_mut,
-            })),
+            }))),
             _ => {
                 self.errors.push(
                     YuuError::unexpected_token(
@@ -698,15 +697,15 @@ impl Parser {
 
     pub fn parse_let_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let let_tkn = self.lexer.expect(&[TokenKind::LetKw], &mut self.errors)?;
-        let binding = self.parse_binding()?;
-        let la = self.lexer.peek();
-        let ty = if la.kind == TokenKind::Colon {
-            let _ = self.lexer.next_token();
-            let out = self.parse_type()?;
-            Some(out)
-        } else {
-            None
-        };
+        let (_span, binding) = self.parse_binding()?;
+        // let la = self.lexer.peek();
+        // let ty = if la.kind == TokenKind::Colon {
+        //     let _ = self.lexer.next_token();
+        //     let out = self.parse_type()?;
+        //     Some(out)
+        // } else {
+        //     None
+        // };
         let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
         let (expr_span, expr) = self.parse_expr()?;
 
@@ -718,7 +717,7 @@ impl Parser {
                 span,
                 binding: Box::new(binding),
                 expr: Box::new(expr),
-                ty,
+                //ty,
                 id: 0,
             }),
         ))
@@ -1011,10 +1010,10 @@ impl Parser {
         }
     }
 
-
-
     pub fn parse_array_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
-        let lbracket_token = self.lexer.expect(&[TokenKind::LBracket], &mut self.errors)?;
+        let lbracket_token = self
+            .lexer
+            .expect(&[TokenKind::LBracket], &mut self.errors)?;
 
         // Check for uninitialized array [:type; count]
         if self.lexer.peek().kind == TokenKind::Colon {
@@ -1048,21 +1047,29 @@ impl Parser {
                         self.lexer.code_info.source.clone(),
                         self.lexer.code_info.file_name.clone(),
                     )
-                    .with_help("Expected array literal [1,2,3] or array repeat [value; count]".to_string()),
+                    .with_help(
+                        "Expected array literal [1,2,3] or array repeat [value; count]".to_string(),
+                    ),
                 );
                 Err(self.lexer.synchronize())
             }
         }
     }
 
-    fn parse_uninitialized_array(&mut self, lbracket_token: Token) -> ParseResult<(Span, ExprNode)> {
+    fn parse_uninitialized_array(
+        &mut self,
+        lbracket_token: Token,
+    ) -> ParseResult<(Span, ExprNode)> {
         use crate::pass_parse::ast::{ArrayExpr, ExprNode};
 
         self.lexer.next_token(); // consume ':'
         let type_node = self.parse_type()?;
-        self.lexer.expect(&[TokenKind::Semicolon], &mut self.errors)?;
+        self.lexer
+            .expect(&[TokenKind::Semicolon], &mut self.errors)?;
         let (_, size_expr) = self.parse_expr()?;
-        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
 
         let span = lbracket_token.span.start..rbracket_token.span.end;
         let array_expr = ArrayExpr {
@@ -1110,7 +1117,9 @@ impl Parser {
             elements.push(element);
         }
 
-        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
         let span = lbracket_token.span.start..rbracket_token.span.end;
         let array_literal = ArrayLiteralExpr {
             elements,
@@ -1129,9 +1138,12 @@ impl Parser {
     ) -> ParseResult<(Span, ExprNode)> {
         use crate::pass_parse::ast::{ArrayExpr, ExprNode};
 
-        self.lexer.expect(&[TokenKind::Semicolon], &mut self.errors)?;
+        self.lexer
+            .expect(&[TokenKind::Semicolon], &mut self.errors)?;
         let (_, size_expr) = self.parse_expr()?;
-        let rbracket_token = self.lexer.expect(&[TokenKind::RBracket], &mut self.errors)?;
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
 
         let span = lbracket_token.span.start..rbracket_token.span.end;
         let array_expr = ArrayExpr {
@@ -1143,8 +1155,6 @@ impl Parser {
         };
         Ok((span, ExprNode::Array(array_expr)))
     }
-
-
 
     pub fn parse_enum_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
         // First token should be the enum name (identifier)
@@ -1270,7 +1280,7 @@ impl Parser {
                     TokenKind::LParen => {
                         // We have data associated with the binding
                         let _ = self.lexer.next_token();
-                        let binding = self.parse_binding()?;
+                        let (_, binding) = self.parse_binding()?;
                         let last_tkn = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
                         let full_span = span.start..last_tkn.span.end;
                         let enum_pattern = EnumPattern {
@@ -1660,9 +1670,11 @@ impl Parser {
         let peek = self.lexer.peek();
         match peek.kind {
             TokenKind::LetKw => self.parse_let_stmt(),
+            TokenKind::DecKw => self.parse_decl_stmt(),
+            TokenKind::DefKw => self.parse_def_stmt(),
             //TokenKind::OutKw => self.parse_out_stmt(),
             TokenKind::BreakKw => self.parse_break_stmt(),
-            TokenKind::Return => self.parse_return_stmt(),
+            TokenKind::ReturnKw => self.parse_return_stmt(),
             TokenKind::DeferKw => self.parse_defer_stmt(),
             TokenKind::IfKw => self.parse_if_stmt(),
             TokenKind::WhileKw => self.parse_while_stmt(),
@@ -1672,8 +1684,89 @@ impl Parser {
         }
     }
 
+    // parses: "dec <name>;"
+    fn parse_decl_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let dec_kw = self.lexer.expect(&[TokenKind::DecKw], &mut self.errors)?;
+        let ident = self.lexer.next_token();
+
+        let name = match ident.kind {
+            TokenKind::Ident(name) => IdentBinding {
+                span: ident.span.clone(),
+                name,
+                id: 0,
+                is_mut: true
+            }, 
+            _ => {
+                let mut error = YuuError::unexpected_token(
+                    ident.span.clone(),
+                    "an identifier".to_string(),
+                    ident.kind,
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                );
+                error = error
+                    .with_help("Grammar: 'dec <name>;'".to_string());
+                self.errors.push(error);
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        let final_span = self.expect_semicolon_or_block_terminator(dec_kw.span.clone(), ident.span.clone())?;
+        let decl_stmt = DeclStmt {
+            id: 0,
+            ident: name,
+            span: final_span.clone(),
+        };
+
+        Ok((final_span, StmtNode::Decl(decl_stmt)))
+    }
+
+    // parses: "def <name> = <expr>;"
+    fn parse_def_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let def_kw = self.lexer.expect(&[TokenKind::DefKw], &mut self.errors)?;
+
+        let ident = self.lexer.next_token();
+        let name = match ident.kind {
+            TokenKind::Ident(name) => IdentBinding {
+                id: 0,
+                name,
+                span: ident.span.clone(),
+                is_mut: true
+            }, 
+            _ => {
+                let mut error = YuuError::unexpected_token(
+                    ident.span.clone(),
+                    "an identifier".to_string(),
+                    ident.kind,
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                );
+                error = error
+                    .with_help("Grammar: 'def <name> = <expr>;'".to_string());
+                self.errors.push(error);
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        let _eq_token = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
+        let (expr_span, expr) = self.parse_expr()?;
+
+        let final_span = self.expect_semicolon_or_block_terminator(def_kw.span.clone(), expr_span.clone())?;
+        let def_stmt = DefStmt {
+            id: 0,
+            ident: name,
+            expr: Box::new(expr),
+            span: final_span.clone(),
+        };
+
+        Ok((final_span, StmtNode::Def(def_stmt)))
+
+    }
+
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let ret_token = self.lexer.expect(&[TokenKind::Return], &mut self.errors)?;
+        let ret_token = self
+            .lexer
+            .expect(&[TokenKind::ReturnKw], &mut self.errors)?;
 
         // Check if there's an expression or if we hit a semicolon/block terminator
         let peek_kind = self.lexer.peek().kind;
@@ -1701,14 +1794,15 @@ impl Parser {
 
         // Parse the expression - defer always requires an expression
         let (expr_span, expr) = self.parse_expr()?;
-        let span = self.expect_semicolon_or_block_terminator(defer_token.span.clone(), expr_span)?;
+        let span =
+            self.expect_semicolon_or_block_terminator(defer_token.span.clone(), expr_span)?;
 
         Ok((
             span.clone(),
             StmtNode::Defer(DeferStmt {
                 span,
                 expr: Box::new(expr),
-                id: 0
+                id: 0,
             }),
         ))
     }

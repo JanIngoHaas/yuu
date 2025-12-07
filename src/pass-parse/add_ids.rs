@@ -134,9 +134,6 @@ impl AddId for StmtNode {
                 let_stmt.id = generator.next();
                 let_stmt.binding.add_id(generator);
                 let_stmt.expr.add_id(generator);
-                if let Some(ty) = &mut let_stmt.ty {
-                    ty.add_id(generator);
-                }
             }
             StmtNode::Atomic(expr) => expr.add_id(generator),
             StmtNode::Break(exit_stmt) => {
@@ -195,6 +192,15 @@ impl AddId for StmtNode {
                     default_case.add_id(generator);
                 }
             }
+            StmtNode::Decl(decl_stmt) => {
+                decl_stmt.id = generator.next();
+                decl_stmt.ident.add_id(generator);
+            }
+            StmtNode::Def(def_stmt) => {
+                def_stmt.id = generator.next();
+                def_stmt.ident.add_id(generator);
+                def_stmt.expr.add_id(generator);
+            }
             StmtNode::Error(e) => *e = generator.next(),
         }
     }
@@ -229,6 +235,12 @@ impl AddId for BindingNode {
                 i.id = generator.next();
             }
         }
+    }
+}
+
+impl AddId for IdentBinding {
+    fn add_id(&mut self, generator: &mut IdGenerator) {
+        self.id = generator.next();
     }
 }
 
@@ -380,6 +392,8 @@ impl GetId for StmtNode {
             StmtNode::While(while_stmt) => while_stmt.id,
             StmtNode::Block(block_stmt) => block_stmt.id,
             StmtNode::Match(match_stmt) => match_stmt.id,
+            StmtNode::Decl(decl_stmt) => decl_stmt.id,
+            StmtNode::Def(def_stmt) => def_stmt.id,
             StmtNode::Error(x) => *x,
         }
     }

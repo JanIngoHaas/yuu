@@ -5,7 +5,7 @@ use crate::pass_type_inference::pass_type_inference_impl::TransientData;
 use crate::{
     pass_parse::ast::TypeNode,
     pass_type_inference::type_info::{
-        TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
+        TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_u64,
     },
 };
 
@@ -23,6 +23,7 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
             // First check if it's a built-in type identifier
             match ident.name.as_str() {
                 "i64" => primitive_i64(),
+                "u64" => primitive_u64(),
                 "f32" => primitive_f32(),
                 "f64" => primitive_f64(),
                 "bool" => primitive_bool(),
