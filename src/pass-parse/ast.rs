@@ -73,6 +73,7 @@ impl BinOp {
 pub enum UnaryOp {
     Pos, // Meaningless, but included for completeness
     Negate,
+    Free,
 }
 
 impl UnaryOp {
@@ -80,6 +81,7 @@ impl UnaryOp {
         match self {
             UnaryOp::Pos => "_pos",
             UnaryOp::Negate => "_neg",
+            UnaryOp::Free => "_free",
         }
         .intern()
     }
@@ -90,6 +92,7 @@ impl Display for UnaryOp {
         match self {
             UnaryOp::Pos => write!(f, "+"),
             UnaryOp::Negate => write!(f, "-"),
+            UnaryOp::Free => write!(f, "~"),
         }
     }
 }
@@ -210,6 +213,30 @@ pub struct AddressOfExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HeapAllocExpr {
+    pub value: Box<ExprNode>, // Expression to allocate on heap
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayExpr {
+    pub init_value: Option<Box<ExprNode>>, // None for uninitialized (_)
+    pub element_type: Option<Box<TypeNode>>, // None for inferred type
+    pub size: Box<ExprNode>,               // Array size expression
+    pub span: Span,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayLiteralExpr {
+    pub elements: Vec<ExprNode>,             // [1, 2, 3, 4]
+    pub element_type: Option<Box<TypeNode>>, // None for inferred type
+    pub span: Span,
+    pub id: NodeId,
+}
+
 // Unified enum pattern
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumPattern {
@@ -255,20 +282,61 @@ pub struct EnumInstantiationExpr {
     pub data: Option<Box<ExprNode>>, // None for unit variants
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+
+pub struct PointerOpExpr {
+    pub left: Box<ExprNode>,
+
+    pub right: Box<ExprNode>,
+
+    pub span: Span,
+
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CastExpr {
+    pub expr: Box<ExprNode>,
+    pub target_type: TypeNode,
+    pub span: Span,
+    pub id: NodeId,
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
+
 pub enum ExprNode {
     Literal(LiteralExpr),
+
     Binary(BinaryExpr),
+
     Unary(UnaryExpr),
+
     Ident(IdentExpr),
+
     FuncCall(FuncCallExpr),
+
     Assignment(AssignmentExpr),
+
     StructInstantiation(StructInstantiationExpr),
+
     EnumInstantiation(EnumInstantiationExpr),
+
     MemberAccess(MemberAccessExpr),
+
     Deref(DerefExpr),
+
     AddressOf(AddressOfExpr),
+
+    PointerOp(PointerOpExpr),
+
+    HeapAlloc(HeapAllocExpr),
+
+    Array(ArrayExpr),
+
+    ArrayLiteral(ArrayLiteralExpr),
+
+    Cast(CastExpr),
     //Error,
 }
 
@@ -277,8 +345,23 @@ pub struct LetStmt {
     pub span: Span,
     pub id: NodeId,
     pub expr: Box<ExprNode>,
-    pub ty: Option<TypeNode>,
+    //pub ty: Option<TypeNode>,
     pub binding: Box<BindingNode>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DeclStmt {
+    pub span: Span,
+    pub id: NodeId,
+    pub ident: IdentBinding,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DefStmt {
+    pub span: Span,
+    pub id: NodeId,
+    pub ident: IdentBinding,
+    pub expr: Box<ExprNode>,
 }
 
 // #[derive(Serialize, Deserialize, Clone)]
@@ -358,10 +441,19 @@ pub struct PointerType {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct ArrayType {
+    pub id: NodeId,
+    pub span: Span,
+    pub element_type: Box<TypeNode>,
+    pub size: Box<ExprNode>, // Array size expression
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum TypeNode {
     BuiltIn(BuiltInType),
     Ident(IdentType),
     Pointer(PointerType),
+    Array(ArrayType),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -460,17 +552,27 @@ pub struct ReturnStmt {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct DeferStmt {
+    pub span: Span,
+    pub expr: Box<ExprNode>,
+    pub id: NodeId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum StmtNode {
     Let(LetStmt),
     Atomic(ExprNode),
     //Return(ReturnStmt),
     Break(BreakStmt),
     Return(ReturnStmt),
+    Defer(DeferStmt),
     Match(MatchStmt),
     If(IfStmt),
     While(WhileStmt),
     Block(BlockStmt),
     Error(NodeId),
+    Decl(DeclStmt),
+    Def(DefStmt),
 }
 
 /// Represents a node in the AST
@@ -530,6 +632,11 @@ impl Spanned for ExprNode {
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
             ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
+            ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.span.clone(),
+            ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
+            ExprNode::Array(array_expr) => array_expr.span.clone(),
+            ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.span.clone(),
+            ExprNode::Cast(cast_expr) => cast_expr.span.clone(),
         }
     }
 }
@@ -542,10 +649,13 @@ impl Spanned for StmtNode {
             //StmtNode::Return(return_stmt) => return_stmt.span.clone(),
             StmtNode::Break(exit_stmt) => exit_stmt.span.clone(),
             StmtNode::Return(return_stmt) => return_stmt.span.clone(),
+            StmtNode::Defer(defer_stmt) => defer_stmt.span.clone(),
             StmtNode::If(if_stmt) => if_stmt.span.clone(),
             StmtNode::While(while_stmt) => while_stmt.span.clone(),
             StmtNode::Block(block_stmt) => block_stmt.span.clone(),
             StmtNode::Match(match_stmt) => match_stmt.span.clone(),
+            StmtNode::Decl(decl_stmt) => decl_stmt.span.clone(),
+            StmtNode::Def(def_stmt) => def_stmt.span.clone(),
             StmtNode::Error(_) => 0..0,
         }
     }
@@ -557,6 +667,7 @@ impl Spanned for TypeNode {
             TypeNode::Ident(ident_type) => ident_type.span.clone(),
             TypeNode::BuiltIn(built_in_type) => built_in_type.span.clone(),
             TypeNode::Pointer(pointer_type) => pointer_type.span.clone(),
+            TypeNode::Array(array_type) => array_type.span.clone(),
         }
     }
 }

@@ -24,8 +24,8 @@ fn test_type_inference_basic() {
 #[test]
 fn test_explicit_type_annotations() {
     let source = r#"fn main() -> i64:
-        let x: i64 = 42;
-        let y: f32 = 3.14;
+        let x = 42;
+        let y = 3.14;
         return x .
     "#;
 
@@ -114,8 +114,8 @@ fn test_struct_type_checking() {
 #[test]
 fn test_mixed_arithmetic_types() {
     let source = r#"fn main() -> i64:
-        let a: i64 = 10;
-        let b: i64 = 3;
+        let a = 10;
+        let b = 3;
         let result = a + b * 2;
         return result .
     "#;

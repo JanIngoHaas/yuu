@@ -336,14 +336,45 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::Alloca { target } => {
-            writeln!(
+        Instruction::Alloca { target, count, align, init } => {
+            let align_str = align
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "natural".to_string());
+
+            write!(
                 f,
-                "{} := {}{}",
+                "{} := {}[{}; {}], {} {}",
                 format_variable(target, do_color),
                 colorize("ALLOCA", "keyword", do_color),
                 format_type(target.ty().deref_ptr(), do_color),
-            )
+                colorize(&count.to_string(), "constant", do_color),
+                colorize("ALIGN", "keyword", do_color),
+                colorize(&align_str, "constant", do_color)
+            )?;
+
+            if let Some(init) = init {
+                write!(f, "\n    ^--{} ", colorize("INIT", "keyword", do_color))?;
+                match init {
+                    crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                        write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                        write!(f, "{}", format_operand(operand, do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                        write!(f, "{{")?;
+                        for (i, element) in elements.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", format_operand(element, do_color))?;
+                        }
+                        write!(f, "}}")?;
+                    }
+                }
+            }
+
+            writeln!(f)
         }
         Instruction::StoreImmediate { target, value } => {
             writeln!(
@@ -461,6 +492,91 @@ pub fn format_instruction(
                 format_operand(base, do_color),
                 colorize(variant, "literal", do_color)
             )
+        }
+        Instruction::IntToPtr { target, source } => {
+            writeln!(
+                f,
+                "{} := {} {}",
+                format_variable(target, do_color),
+                format_keyword("INT_TO_PTR", do_color),
+                format_operand(source, do_color)
+            )
+        }
+        Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
+            if let Some(alignment) = align {
+                write!(
+                    f,
+                    "{} := {} {} {} {} {}",
+                    format_variable(target, do_color),
+                    format_keyword("HEAP_ALLOC", do_color),
+                    colorize(&element_size.to_string(), "constant", do_color),
+                    format_operand(total_size, do_color),
+                    format_keyword("ALIGN", do_color),
+                    colorize(&alignment.to_string(), "constant", do_color)
+                )?;
+            } else {
+                write!(
+                    f,
+                    "{} := {} {} {}",
+                    format_variable(target, do_color),
+                    format_keyword("HEAP_ALLOC", do_color),
+                    colorize(&element_size.to_string(), "constant", do_color),
+                    format_operand(total_size, do_color)
+                )?;
+            }
+
+            if let Some(array_init) = init {
+                write!(f, " {}", colorize(&format!("{:?}", array_init), "keyword", do_color))?;
+            }
+            writeln!(f)
+        }
+        Instruction::HeapFree { ptr } => {
+            writeln!(
+                f,
+                "{} {}",
+                format_keyword("HEAP_FREE", do_color),
+                format_operand(ptr, do_color)
+            )
+        }
+        Instruction::GetElementPtr { target, base, index } => {
+            writeln!(
+                f,
+                "{} := {} {}[{}]",
+                format_variable(target, do_color),
+                format_keyword("ELEM_PTR", do_color),
+                format_operand(base, do_color),
+                format_operand(index, do_color)
+            )
+        }
+        Instruction::MemCpy { dest, src, count } => {
+            writeln!(
+                f,
+                "{} {}, {}, {}",
+                format_keyword("MEMCPY", do_color),
+                format_operand(dest, do_color),
+                format_operand(src, do_color),
+                format_operand(count, do_color)
+            )
+        }
+        Instruction::MemSet { dest, value, count } => {
+            writeln!(
+                f,
+                "{} {}, {}, {}",
+                format_keyword("MEMSET", do_color),
+                format_operand(dest, do_color),
+                format_operand(value, do_color),
+                format_operand(count, do_color)
+            )
+        }
+        Instruction::KillSet { vars } => {
+            write!(f, "{} {{", colorize("KILLSET", "keyword", do_color))?;
+            for (i, var) in vars.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", format_variable(var, do_color))?;
+            }
+            writeln!(f, "}}")
         } // Instruction::MakeStruct {
           //     target,
           //     type_ident,

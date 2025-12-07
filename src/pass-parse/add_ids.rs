@@ -89,6 +89,40 @@ impl AddId for ExprNode {
                 address_of_expr.id = generator.next();
                 address_of_expr.operand.add_id(generator);
             }
+
+            ExprNode::HeapAlloc(heap_alloc_expr) => {
+                heap_alloc_expr.id = generator.next();
+                heap_alloc_expr.value.add_id(generator);
+            }
+            ExprNode::Array(array_expr) => {
+                array_expr.id = generator.next();
+                if let Some(init_value) = &mut array_expr.init_value {
+                    init_value.add_id(generator);
+                }
+                if let Some(element_type) = &mut array_expr.element_type {
+                    element_type.add_id(generator);
+                }
+                array_expr.size.add_id(generator);
+            }
+            ExprNode::ArrayLiteral(array_literal_expr) => {
+                array_literal_expr.id = generator.next();
+                for element in &mut array_literal_expr.elements {
+                    element.add_id(generator);
+                }
+                if let Some(element_type) = &mut array_literal_expr.element_type {
+                    element_type.add_id(generator);
+                }
+            }
+            ExprNode::PointerOp(pointer_op_expr) => {
+                pointer_op_expr.id = generator.next();
+                pointer_op_expr.left.add_id(generator);
+                pointer_op_expr.right.add_id(generator);
+            }
+            ExprNode::Cast(cast_expr) => {
+                cast_expr.id = generator.next();
+                cast_expr.expr.add_id(generator);
+                cast_expr.target_type.add_id(generator);
+            }
         }
     }
 }
@@ -100,9 +134,6 @@ impl AddId for StmtNode {
                 let_stmt.id = generator.next();
                 let_stmt.binding.add_id(generator);
                 let_stmt.expr.add_id(generator);
-                if let Some(ty) = &mut let_stmt.ty {
-                    ty.add_id(generator);
-                }
             }
             StmtNode::Atomic(expr) => expr.add_id(generator),
             StmtNode::Break(exit_stmt) => {
@@ -113,6 +144,10 @@ impl AddId for StmtNode {
                 if let Some(expr) = return_stmt
                     .expr
                     .as_deref_mut() { expr.add_id(generator) }
+            }
+            StmtNode::Defer(defer_stmt) => {
+                defer_stmt.id = generator.next();
+                defer_stmt.expr.add_id(generator);
             }
             StmtNode::If(if_stmt) => {
                 if_stmt.id = generator.next();
@@ -157,6 +192,15 @@ impl AddId for StmtNode {
                     default_case.add_id(generator);
                 }
             }
+            StmtNode::Decl(decl_stmt) => {
+                decl_stmt.id = generator.next();
+                decl_stmt.ident.add_id(generator);
+            }
+            StmtNode::Def(def_stmt) => {
+                def_stmt.id = generator.next();
+                def_stmt.ident.add_id(generator);
+                def_stmt.expr.add_id(generator);
+            }
             StmtNode::Error(e) => *e = generator.next(),
         }
     }
@@ -175,6 +219,11 @@ impl AddId for TypeNode {
                 pointer_type.id = generator.next();
                 pointer_type.pointee.add_id(generator);
             }
+            TypeNode::Array(array_type) => {
+                array_type.id = generator.next();
+                array_type.element_type.add_id(generator);
+                array_type.size.add_id(generator);
+            }
         }
     }
 }
@@ -186,6 +235,12 @@ impl AddId for BindingNode {
                 i.id = generator.next();
             }
         }
+    }
+}
+
+impl AddId for IdentBinding {
+    fn add_id(&mut self, generator: &mut IdGenerator) {
+        self.id = generator.next();
     }
 }
 
@@ -315,6 +370,12 @@ impl GetId for ExprNode {
             ExprNode::EnumInstantiation(enum_instantiation_expr) => enum_instantiation_expr.id,
             ExprNode::Deref(deref_expr) => deref_expr.id,
             ExprNode::AddressOf(address_of_expr) => address_of_expr.id,
+
+            ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
+            ExprNode::Array(array_expr) => array_expr.id,
+            ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.id,
+            ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.id,
+            ExprNode::Cast(cast_expr) => cast_expr.id,
         }
     }
 }
@@ -326,10 +387,13 @@ impl GetId for StmtNode {
             StmtNode::Atomic(expr) => expr.node_id(),
             StmtNode::Break(exit_stmt) => exit_stmt.id,
             StmtNode::Return(return_stmt) => return_stmt.id,
+            StmtNode::Defer(defer_stmt) => defer_stmt.id,
             StmtNode::If(if_stmt) => if_stmt.id,
             StmtNode::While(while_stmt) => while_stmt.id,
             StmtNode::Block(block_stmt) => block_stmt.id,
             StmtNode::Match(match_stmt) => match_stmt.id,
+            StmtNode::Decl(decl_stmt) => decl_stmt.id,
+            StmtNode::Def(def_stmt) => def_stmt.id,
             StmtNode::Error(x) => *x,
         }
     }
@@ -341,6 +405,7 @@ impl GetId for TypeNode {
             TypeNode::Ident(i) => i.id,
             TypeNode::BuiltIn(built_in_type) => built_in_type.id,
             TypeNode::Pointer(pointer_type) => pointer_type.id,
+            TypeNode::Array(array_type) => array_type.id,
         }
     }
 }

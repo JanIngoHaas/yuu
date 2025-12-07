@@ -130,7 +130,7 @@ impl Pipeline {
         let ast = self.ast.as_ref().unwrap();
         let type_registry = self.type_registry.as_ref().unwrap();
 
-        let module = YirLowering::new().run(ast, type_registry)?;
+        let module = YirLowering::new().run(ast, type_registry, false)?;
         self.module = Some(module);
 
         Ok(self)
@@ -230,6 +230,16 @@ impl Pipeline {
 
         self.module
             .as_ref()
+            .ok_or_else(|| miette::miette!("Module not available"))
+    }
+
+    pub fn get_module_mut(&mut self) -> Result<&mut Module> {
+        if self.module.is_none() {
+            *self = std::mem::take(self).yir_lowering()?;
+        }
+
+        self.module
+            .as_mut()
             .ok_or_else(|| miette::miette!("Module not available"))
     }
 

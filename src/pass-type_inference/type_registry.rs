@@ -637,6 +637,23 @@ impl TypeRegistry {
         }
     }
 
+    pub fn resolve_type(&self, name: Ustr) -> Option<&'static TypeInfo> {
+        // First try primitive types
+        let name_str = name.as_str();
+        match name_str {
+            "i64" => Some(crate::pass_type_inference::type_info::primitive_i64()),
+            "u64" => Some(crate::pass_type_inference::type_info::primitive_u64()),
+            "f32" => Some(crate::pass_type_inference::type_info::primitive_f32()),
+            "f64" => Some(crate::pass_type_inference::type_info::primitive_f64()),
+            "bool" => Some(crate::pass_type_inference::type_info::primitive_bool()),
+            "nil" => Some(crate::pass_type_inference::type_info::primitive_nil()),
+            _ => {
+                let resolved_user_type = self.resolve_struct_or_enum(name).map(|info| info.ty());
+                resolved_user_type
+            }
+        }
+    }
+
     pub fn get_similar_names_func(&self, name: Ustr, max_dst: usize) -> Vec<Ustr> {
         self.functions
             .keys()

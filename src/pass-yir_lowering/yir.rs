@@ -24,19 +24,20 @@ pub struct Variable {
 
 impl Hash for Variable {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
         self.id.hash(state);
     }
 }
 
 impl PartialEq for Variable {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.name == other.name && self.id == other.id
     }
 }
 
 impl Eq for Variable {}
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct Label {
     name: Ustr,
     id: i64,
@@ -113,7 +114,7 @@ impl Operand {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinOp {
     Add,
     Sub,
@@ -128,16 +129,26 @@ pub enum BinOp {
     GreaterThanEq,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum UnaryOp {
     Neg,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+pub enum ArrayInit {
+    Zero,                           // Zero-initialize all elements
+    Splat(Operand),                // Fill all elements with same value
+    Elements(Vec<Operand>),        // Explicit element values
+}
+
+#[derive(Clone, Debug)]
 pub enum Instruction {
     // Declares a variable on the stack, returns a pointer to it
     Alloca {
         target: Variable, // The variable being declared
+        count: u64,
+        align: Option<u64>,
+        init: Option<ArrayInit>,
     },
 
     // Simple assignment or from constant to variable
@@ -209,9 +220,55 @@ pub enum Instruction {
         dest: Variable, // Destination pointer operand (the enum itself, not the data ptr!)
         value: Operand, // Must be of type u64
     },
+
+    // Convert integer to pointer
+    IntToPtr {
+        target: Variable, // Result pointer variable
+        source: Operand,  // Source integer operand (must be u64)
+    },
+
+    // Heap allocation - returns a pointer to allocated memory
+    HeapAlloc {
+        target: Variable,            // Pointer variable to store the heap address
+        element_size: u64,           // Size of each element in bytes (static)
+        total_size: Operand,         // Total allocation size in bytes (can be dynamic)
+        align: Option<u64>,          // Optional alignment requirement
+        init: Option<ArrayInit>,     // Array initialization (None for uninitialized)
+    },
+
+    // Heap deallocation - frees previously allocated memory
+    HeapFree {
+        ptr: Operand, // Pointer to memory to free (must be heap-allocated)
+    },
+
+    // MemCpy intrinsic
+    MemCpy {
+        dest: Operand,  // Destination pointer
+        src: Operand,   // Source pointer
+        count: Operand, // Number of bytes to copy
+    },
+
+    // MemSet intrinsic
+    MemSet {
+        dest: Operand,  // Destination pointer
+        value: Operand, // Value to set (u8)
+        count: Operand, // Number of bytes to set
+    },
+
+    // Get pointer to array element at index
+    GetElementPtr {
+        target: Variable, // Result pointer to element
+        base: Operand,    // Base array pointer
+        index: Operand,   // Index operand (must be u64/i64)
+    },
+
+    // Marks that multiple stack variables are being killed (e.g., leaving scope)
+    KillSet {
+        vars: Vec<Variable>, // Stack variables being killed
+    },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ControlFlow {
     // Simple unconditional jump
     Jump {
@@ -235,7 +292,7 @@ pub enum ControlFlow {
     Unterminated,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BasicBlock {
     pub label: Label,
     pub instructions: Vec<Instruction>,
@@ -246,7 +303,7 @@ impl BasicBlock {
     pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
         self.instructions.iter().filter_map(|instr| {
             match instr {
-                Instruction::Alloca { target } => {
+                Instruction::Alloca { target, .. } | Instruction::HeapAlloc { target, .. } => {
                     return Some(target);
                 }
                 Instruction::StoreImmediate { .. } => {}
@@ -260,6 +317,12 @@ impl BasicBlock {
                 Instruction::LoadActiveVariantIdx { .. } => {}
                 Instruction::GetVariantDataPtr { .. } => {}
                 Instruction::StoreActiveVariantIdx { .. } => {}
+                Instruction::IntToPtr { .. } => {}
+                Instruction::HeapFree { .. } => {}
+                Instruction::MemCpy { .. } => {}
+                Instruction::MemSet { .. } => {}
+                Instruction::GetElementPtr { .. } => {}
+                Instruction::KillSet { .. } => {}
             };
             None
         })
@@ -308,7 +371,7 @@ impl Function {
         param
     }
 
-    fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
+    pub fn fresh_variable(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
         let id = self.next_reg_id.entry(name).or_insert(0);
         let var = Variable::new(name, *id, ty);
         *id += 1;
@@ -421,41 +484,78 @@ impl Function {
         target
     }
 
-    // Builder method for DeclareVar
+    // Unified alloca builder method
     pub fn make_alloca(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+        init: Option<ArrayInit>,
+    ) -> Variable {
+        let dest_ty = element_ty.ptr_to();
+        let target = self.fresh_variable(name_hint, dest_ty);
+        let instr = Instruction::Alloca { target, count, align: None, init };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Convenience method for single variable allocation
+    pub fn make_alloca_single(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Variable {
-        let dest_ty = ty.ptr_to();
-        let target = self.fresh_variable(name_hint, dest_ty);
-        let instr = Instruction::Alloca { target };
-        self.get_current_block_mut().instructions.push(instr);
-
-        if let Some(value_ptr) = init_value {
-            self.make_store(target, value_ptr);
-        };
-
-        target
+        let init = init_value.map(ArrayInit::Splat);
+        self.make_alloca(name_hint, ty, 1, init)
     }
 
-    // Helper function to allocate only for valid types (not Inactive or pointers to Inactive)
+    // Convenience method for array allocation with count
+    pub fn make_alloca_array(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+    ) -> Variable {
+        self.make_alloca(name_hint, element_ty, count, None)
+    }
+
+    // Convenience method for zero-initialized array
+    pub fn make_alloca_zeroed(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: u64,
+    ) -> Variable {
+        self.make_alloca(name_hint, element_ty, count, Some(ArrayInit::Zero))
+    }
+
+    // Convenience method for array with explicit values
+    pub fn make_alloca_with_values(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        values: Vec<Operand>,
+    ) -> Variable {
+        let count = values.len() as u64;
+        self.make_alloca(name_hint, element_ty, count, Some(ArrayInit::Elements(values)))
+    }
+
+    // Convenience method that checks for valid types
     pub fn make_alloca_if_valid_type(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Option<Variable> {
-        // Don't allocate for inactive types following the same pattern as make_store
         if matches!(
             ty,
-            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
         ) {
             return None;
         }
 
-        Some(self.make_alloca(name_hint, ty, init_value))
+        Some(self.make_alloca_single(name_hint, ty, init_value))
     }
 
     // Helper function to store only for valid types (not Inactive or pointers to Inactive)
@@ -464,7 +564,7 @@ impl Function {
         let value_type = value.ty();
         if matches!(
             value_type,
-            TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
         ) {
             return false;
         }
@@ -586,9 +686,9 @@ impl Function {
         debug_assert!(
             !matches!(
                 dest_ty,
-                TypeInfo::Inactive | TypeInfo::Pointer(TypeInfo::Inactive)
+                TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
             ),
-            "Store destination cannot be an inactive type, got {}",
+            "Store destination cannot be an error type, got {}",
             dest_ty
         );
 
@@ -652,7 +752,6 @@ impl Function {
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return the result directly - no need for pointer wrapping
         target
     } // Builder method for Unary operation
     pub fn make_unary(
@@ -670,7 +769,156 @@ impl Function {
         };
         self.get_current_block_mut().instructions.push(instr);
 
-        // Return the result directly - no need for pointer wrapping
+        target
+    }
+
+    // Builder method for IntToPtr operation
+    pub fn make_int_to_ptr(
+        &mut self,
+        name_hint: Ustr,
+        target_type: &'static TypeInfo,
+        source: Operand,
+    ) -> Variable {
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::IntToPtr { target, source };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Builder method for heap allocation
+    pub fn make_heap_alloc(
+        &mut self,
+        name_hint: Ustr,
+        ty: &'static TypeInfo,
+        element_size: u64,
+        total_size: Operand,
+        align: Option<u64>,
+        init: Option<ArrayInit>,
+    ) -> Variable {
+        debug_assert_eq!(
+            total_size.ty(),
+            primitive_u64(),
+            "HeapAlloc total_size must be u64, got {}",
+            total_size.ty()
+        );
+
+        let target = self.fresh_variable(name_hint, ty);
+        let instr = Instruction::HeapAlloc { target, element_size, total_size, align, init };
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Convenience method for single element heap allocation
+    pub fn make_heap_alloc_single(
+        &mut self,
+        name_hint: Ustr,
+        ptr_ty: &'static TypeInfo,
+        init_value: Option<Operand>,
+        tr: &crate::pass_type_inference::TypeRegistry,
+    ) -> Variable {
+        let element_ty = ptr_ty.deref_ptr();
+        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
+        let element_size = layout.size as u64;
+        let total_size = Operand::U64Const(element_size);
+        let init = init_value.map(ArrayInit::Splat);
+        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, init)
+    }
+
+    // Convenience method for zero-initialized heap array (count must be static for simplicity)
+    pub fn make_heap_alloc_zeroed(
+        &mut self,
+        name_hint: Ustr,
+        ptr_ty: &'static TypeInfo,
+        count: u64,
+        tr: &crate::pass_type_inference::TypeRegistry,
+    ) -> Variable {
+        let element_ty = ptr_ty.deref_ptr();
+        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
+        let element_size = layout.size as u64;
+        let total_size = Operand::U64Const(count * element_size);
+        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, Some(ArrayInit::Zero))
+    }
+
+    // Convenience method for heap array with explicit values
+    pub fn make_heap_alloc_with_values(
+        &mut self,
+        name_hint: Ustr,
+        ptr_ty: &'static TypeInfo,
+        values: Vec<Operand>,
+        tr: &crate::pass_type_inference::TypeRegistry,
+    ) -> Variable {
+        let element_ty = ptr_ty.deref_ptr();
+        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
+        let element_size = layout.size as u64;
+        let total_size = Operand::U64Const(values.len() as u64 * element_size);
+        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, Some(ArrayInit::Elements(values)))
+    }
+
+    // Builder method for heap deallocation
+    pub fn make_heap_free(&mut self, ptr: Operand) {
+        debug_assert!(
+            ptr.ty().is_ptr(),
+            "HeapFree ptr must be a pointer, got {}",
+            ptr.ty()
+        );
+
+        let instr = Instruction::HeapFree { ptr };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for MemCpy
+    pub fn make_memcpy(&mut self, dest: Operand, src: Operand, count: Operand) {
+        debug_assert!(dest.ty().is_ptr(), "MemCpy dest must be a pointer");
+        debug_assert!(src.ty().is_ptr(), "MemCpy src must be a pointer");
+        debug_assert_eq!(count.ty(), primitive_u64(), "MemCpy count must be u64");
+
+        let instr = Instruction::MemCpy { dest, src, count };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for MemSet
+    pub fn make_memset(&mut self, dest: Operand, value: Operand, count: Operand) {
+        debug_assert!(dest.ty().is_ptr(), "MemSet dest must be a pointer");
+        // Value typically treated as u8 in memset, but we accept any operand and backend handles it
+        debug_assert_eq!(count.ty(), primitive_u64(), "MemSet count must be u64");
+
+        let instr = Instruction::MemSet { dest, value, count };
+        self.get_current_block_mut().instructions.push(instr);
+    }
+
+    // Builder method for killing multiple stack variables
+    pub fn make_kill_set(&mut self, vars: Vec<Variable>) {
+        if !vars.is_empty() {
+            let instr = Instruction::KillSet { vars };
+            self.get_current_block_mut().instructions.push(instr);
+        }
+    }
+
+    // Builder method for array element pointer access
+    pub fn make_get_element_ptr(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        index: Operand,
+    ) -> Variable {
+        let base_ty = base.ty();
+        debug_assert!(
+            base_ty.is_ptr(),
+            "Array base must be pointer, got {}",
+            base_ty
+        );
+
+        debug_assert!(
+            matches!(index.ty(), TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::I64) | TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::U64)),
+            "Array index must be i64 or u64, got {}",
+            index.ty()
+        );
+
+        let element_ty = base_ty.deref_ptr();
+        let target = self.fresh_variable(name_hint, element_ty.ptr_to());
+
+        let instr = Instruction::GetElementPtr { target, base, index };
+        self.get_current_block_mut().instructions.push(instr);
         target
     }
 

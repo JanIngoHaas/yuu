@@ -934,6 +934,8 @@ pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
         row[0] = i;
     }
+    
+    #[allow(clippy::needless_range_loop)]
     for j in 0..=len2 {
         matrix[0][j] = j;
     }

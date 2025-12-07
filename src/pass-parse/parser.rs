@@ -33,7 +33,9 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
-            TokenKind::DotStar | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
+            TokenKind::MultiDeref(_) | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
+            TokenKind::At => (12, 11), // Pointer instantiation type@expr (right-associative for chaining: i64@ptr@addr)
+            TokenKind::AsKw => (11, 12), // Type casting expr as Type (left-associative)
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
@@ -45,7 +47,8 @@ impl Parser {
 
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
-            TokenKind::Plus | TokenKind::Minus => 13, // Unary operators bind tighter than * and +
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => 13, // Unary operators bind tighter than * and +
+            TokenKind::At => 13, // Heap allocation operator @expr
             _ => -1,
         }
     }
@@ -56,32 +59,48 @@ impl Parser {
         op: Token,
         span: Span,
     ) -> ParseResult<(Span, ExprNode)> {
-        let unary_op = match op.kind {
-            TokenKind::Plus => UnaryOp::Pos,
-            TokenKind::Minus => UnaryOp::Negate,
+        match op.kind {
+            TokenKind::At => {
+                // Handle heap allocation: @expr
+                let span_copy = span.clone();
+                let heap_alloc = HeapAllocExpr {
+                    value: Box::new(operand),
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::HeapAlloc(heap_alloc)))
+            }
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => {
+                let unary_op = match op.kind {
+                    TokenKind::Plus => UnaryOp::Pos,
+                    TokenKind::Minus => UnaryOp::Negate,
+                    TokenKind::Tilde => UnaryOp::Free,
+                    _ => unreachable!(),
+                };
+                let span_copy = span.clone();
+                let unary = UnaryExpr {
+                    operand: Box::new(operand),
+                    op: unary_op,
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::Unary(unary)))
+            }
             _ => {
                 self.errors.push(
                     YuuError::builder()
                         .kind(ErrorKind::InvalidSyntax)
-                        .message(format!("Expected an unary operator, found {}", op.kind))
+                        .message(format!("Expected a prefix operator, found {}", op.kind))
                         .source(
                             self.lexer.code_info.source.clone(),
                             self.lexer.code_info.file_name.clone(),
                         )
-                        .span(span.clone(), "invalid unary operator")
+                        .span(span.clone(), "invalid prefix operator")
                         .build(),
                 );
-                return Err(self.lexer.synchronize());
+                Err(self.lexer.synchronize())
             }
-        };
-        let span_copy = span.clone();
-        let unary = UnaryExpr {
-            operand: Box::new(operand),
-            op: unary_op,
-            span,
-            id: 0,
-        };
-        Ok((span_copy, ExprNode::Unary(unary)))
+        }
     }
 
     fn make_literal_expr(&mut self, lit: Token) -> (Span, ExprNode) {
@@ -101,7 +120,7 @@ impl Parser {
         let peek = self.lexer.peek();
 
         match &peek.kind {
-            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) => {
+            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) | TokenKind::NilKw => {
                 let t = self.lexer.next_token(); // Consume the token
                 Ok(self.make_literal_expr(t))
             }
@@ -128,13 +147,17 @@ impl Parser {
                 }
             }
 
-            TokenKind::Plus | TokenKind::Minus => {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::At | TokenKind::Tilde => {
                 let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
                 let span = t.span.start..span.end;
                 let unary = self.make_unary_expr(operand, t, span)?;
                 Ok(unary)
+            }
+            TokenKind::LBracket => {
+                // Array expression: [init_value:type; count]
+                self.parse_array_expr()
             }
             TokenKind::LParen => {
                 let t = self.lexer.next_token();
@@ -198,6 +221,7 @@ impl Parser {
         let bin_op = match token.kind {
             TokenKind::Plus => BinOp::Add,
             TokenKind::Minus => BinOp::Subtract,
+
             TokenKind::Asterix => BinOp::Multiply,
             TokenKind::Slash => BinOp::Divide,
             TokenKind::Percent => BinOp::Modulo,
@@ -424,6 +448,43 @@ impl Parser {
             }
         }
     }
+    pub fn parse_pointer_op_expr(
+        &mut self,
+        lhs: ExprNode,
+        _op_token: Token,
+        min_binding_power: i32,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
+        let span = lhs.span().start..rhs_span.end;
+        Ok((
+            span.clone(),
+            ExprNode::PointerOp(PointerOpExpr {
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+                span,
+                id: 0,
+            }),
+        ))
+    }
+
+    pub fn parse_cast_expr(
+        &mut self,
+        lhs: ExprNode,
+        _op_token: Token,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let target_type = self.parse_type()?;
+        let span = lhs.span().start..target_type.span().end;
+        Ok((
+            span.clone(),
+            ExprNode::Cast(CastExpr {
+                expr: Box::new(lhs),
+                target_type,
+                span,
+                id: 0,
+            }),
+        ))
+    }
+
     pub fn parse_expr_chain(&mut self, min_binding_power: i32) -> ParseResult<(Span, ExprNode)> {
         let mut lhs = self.parse_primary_expr()?;
         loop {
@@ -458,6 +519,12 @@ impl Parser {
                 | TokenKind::EqEq => {
                     lhs = self.parse_bin_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
+                TokenKind::At => {
+                    lhs = self.parse_pointer_op_expr(lhs.1, op.clone(), right_binding_power)?;
+                }
+                TokenKind::AsKw => {
+                    lhs = self.parse_cast_expr(lhs.1, op.clone())?;
+                }
                 TokenKind::Equal => {
                     lhs = self.parse_assignment_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
@@ -467,8 +534,8 @@ impl Parser {
                 TokenKind::Dot => {
                     lhs = self.parse_member_access_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
-                TokenKind::DotStar => {
-                    lhs = self.parse_deref_expr(lhs.1, op.clone())?;
+                TokenKind::MultiDeref(count) => {
+                    lhs = self.parse_multi_deref_expr(lhs.1, op.clone(), count)?;
                 }
                 TokenKind::DotAmpersand => {
                     lhs = self.parse_address_of_expr(lhs.1, op.clone())?;
@@ -493,6 +560,27 @@ impl Parser {
         Ok((span, ExprNode::Deref(deref_expr)))
     }
 
+    pub fn parse_multi_deref_expr(
+        &mut self,
+        operand: ExprNode,
+        op_token: Token,
+        count: usize,
+    ) -> ParseResult<(Span, ExprNode)> {
+        let span = operand.span().start..op_token.span.end;
+
+        // Create nested DerefExpr nodes
+        let mut current_expr = operand;
+        for _ in 0..count {
+            current_expr = ExprNode::Deref(DerefExpr {
+                operand: Box::new(current_expr),
+                span: span.clone(),
+                id: 0,
+            });
+        }
+
+        Ok((span, current_expr))
+    }
+
     pub fn parse_address_of_expr(
         &mut self,
         operand: ExprNode,
@@ -514,19 +602,6 @@ impl Parser {
     pub fn parse_type(&mut self) -> ParseResult<TypeNode> {
         let t = self.lexer.next_token();
         let out = match t.kind {
-            TokenKind::I64Kw | TokenKind::F32Kw | TokenKind::F64Kw => (
-                t.span.clone(),
-                TypeNode::BuiltIn(BuiltInType {
-                    span: t.span.clone(),
-                    kind: match t.kind {
-                        TokenKind::I64Kw => BuiltInTypeKind::I64,
-                        TokenKind::F32Kw => BuiltInTypeKind::F32,
-                        TokenKind::F64Kw => BuiltInTypeKind::F64,
-                        _ => unreachable!(),
-                    },
-                    id: 0,
-                }),
-            ),
             TokenKind::Asterix => {
                 // Parse pointer type: *T
                 let pointee = Box::new(self.parse_type()?);
@@ -586,7 +661,7 @@ impl Parser {
         Ok((final_span, StmtNode::Atomic(expr)))
     }
 
-    pub fn parse_binding(&mut self) -> ParseResult<BindingNode> {
+    pub fn parse_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
         // Check if we have a mut keyword
         let mut_tkn = self.lexer.peek();
         let is_mut = if mut_tkn.kind == TokenKind::MutKw {
@@ -598,12 +673,12 @@ impl Parser {
 
         let t = self.lexer.next_token();
         match t.kind {
-            TokenKind::Ident(ident) => Ok(BindingNode::Ident(IdentBinding {
+            TokenKind::Ident(ident) => Ok((t.span.clone(), BindingNode::Ident(IdentBinding {
                 span: t.span.clone(),
                 name: ident,
                 id: 0,
                 is_mut,
-            })),
+            }))),
             _ => {
                 self.errors.push(
                     YuuError::unexpected_token(
@@ -622,15 +697,15 @@ impl Parser {
 
     pub fn parse_let_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
         let let_tkn = self.lexer.expect(&[TokenKind::LetKw], &mut self.errors)?;
-        let binding = self.parse_binding()?;
-        let la = self.lexer.peek();
-        let ty = if la.kind == TokenKind::Colon {
-            let _ = self.lexer.next_token();
-            let out = self.parse_type()?;
-            Some(out)
-        } else {
-            None
-        };
+        let (_span, binding) = self.parse_binding()?;
+        // let la = self.lexer.peek();
+        // let ty = if la.kind == TokenKind::Colon {
+        //     let _ = self.lexer.next_token();
+        //     let out = self.parse_type()?;
+        //     Some(out)
+        // } else {
+        //     None
+        // };
         let _ = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
         let (expr_span, expr) = self.parse_expr()?;
 
@@ -642,7 +717,7 @@ impl Parser {
                 span,
                 binding: Box::new(binding),
                 expr: Box::new(expr),
-                ty,
+                //ty,
                 id: 0,
             }),
         ))
@@ -935,6 +1010,152 @@ impl Parser {
         }
     }
 
+    pub fn parse_array_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
+        let lbracket_token = self
+            .lexer
+            .expect(&[TokenKind::LBracket], &mut self.errors)?;
+
+        // Check for uninitialized array [:type; count]
+        if self.lexer.peek().kind == TokenKind::Colon {
+            return self.parse_uninitialized_array(lbracket_token);
+        }
+
+        // Parse first expression to determine pattern
+        let (_, first_expr) = self.parse_expr()?;
+
+        match self.lexer.peek().kind {
+            TokenKind::Comma | TokenKind::RBracket => {
+                // Array literal: [1, 2, 3] or [42]
+                self.parse_array_literal_with_first(lbracket_token, first_expr)
+            }
+            TokenKind::Semicolon => {
+                // Array repeat: [value; count]
+                self.parse_array_repeat(lbracket_token, first_expr, None)
+            }
+            TokenKind::Colon => {
+                // Array repeat with type: [value:type; count]
+                self.lexer.next_token(); // consume ':'
+                let type_node = self.parse_type()?;
+                self.parse_array_repeat(lbracket_token, first_expr, Some(Box::new(type_node)))
+            }
+            _ => {
+                self.errors.push(
+                    YuuError::unexpected_token(
+                        self.lexer.peek().span.clone(),
+                        "a comma ',', semicolon ';', colon ':', or closing bracket ']'".to_string(),
+                        self.lexer.peek().kind,
+                        self.lexer.code_info.source.clone(),
+                        self.lexer.code_info.file_name.clone(),
+                    )
+                    .with_help(
+                        "Expected array literal [1,2,3] or array repeat [value; count]".to_string(),
+                    ),
+                );
+                Err(self.lexer.synchronize())
+            }
+        }
+    }
+
+    fn parse_uninitialized_array(
+        &mut self,
+        lbracket_token: Token,
+    ) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
+
+        self.lexer.next_token(); // consume ':'
+        let type_node = self.parse_type()?;
+        self.lexer
+            .expect(&[TokenKind::Semicolon], &mut self.errors)?;
+        let (_, size_expr) = self.parse_expr()?;
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
+
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_expr = ArrayExpr {
+            init_value: None,
+            element_type: Some(Box::new(type_node)),
+            size: Box::new(size_expr),
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::Array(array_expr)))
+    }
+
+    fn parse_array_literal_with_first(
+        &mut self,
+        lbracket_token: Token,
+        first_expr: ExprNode,
+    ) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayLiteralExpr, ExprNode};
+
+        let mut elements = vec![first_expr];
+
+        // Handle single element case
+        if self.lexer.peek().kind == TokenKind::RBracket {
+            let rbracket_token = self.lexer.next_token();
+            let span = lbracket_token.span.start..rbracket_token.span.end;
+            let array_literal = ArrayLiteralExpr {
+                elements,
+                element_type: None,
+                span: span.clone(),
+                id: 0,
+            };
+            return Ok((span, ExprNode::ArrayLiteral(array_literal)));
+        }
+
+        // Parse remaining elements
+        while self.lexer.peek().kind == TokenKind::Comma {
+            self.lexer.next_token(); // consume comma
+
+            // Allow trailing comma
+            if self.lexer.peek().kind == TokenKind::RBracket {
+                break;
+            }
+
+            let (_, element) = self.parse_expr()?;
+            elements.push(element);
+        }
+
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_literal = ArrayLiteralExpr {
+            elements,
+            element_type: None,
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::ArrayLiteral(array_literal)))
+    }
+
+    fn parse_array_repeat(
+        &mut self,
+        lbracket_token: Token,
+        first_expr: ExprNode,
+        element_type: Option<Box<TypeNode>>,
+    ) -> ParseResult<(Span, ExprNode)> {
+        use crate::pass_parse::ast::{ArrayExpr, ExprNode};
+
+        self.lexer
+            .expect(&[TokenKind::Semicolon], &mut self.errors)?;
+        let (_, size_expr) = self.parse_expr()?;
+        let rbracket_token = self
+            .lexer
+            .expect(&[TokenKind::RBracket], &mut self.errors)?;
+
+        let span = lbracket_token.span.start..rbracket_token.span.end;
+        let array_expr = ArrayExpr {
+            init_value: Some(Box::new(first_expr)),
+            element_type,
+            size: Box::new(size_expr),
+            span: span.clone(),
+            id: 0,
+        };
+        Ok((span, ExprNode::Array(array_expr)))
+    }
+
     pub fn parse_enum_instantiation_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
         // First token should be the enum name (identifier)
         let enum_token = self.lexer.next_token();
@@ -999,35 +1220,9 @@ impl Parser {
             if next.kind == TokenKind::BlockTerminator {
                 let bt = self.lexer.next_token();
 
-                // Check if there's a label after the block terminator
-                let (label, label_end_span) = if self.lexer.peek().kind == TokenKind::At {
-                    let _ = self.lexer.next_token(); // consume @
-                    let label_token = self.lexer.next_token();
-                    match label_token.kind {
-                        TokenKind::Ident(label) => (Some(label), Some(label_token.span.clone())),
-                        _ => {
-                            self.errors.push(YuuError::unexpected_token(
-                                label_token.span.clone(),
-                                "a label identifier".to_string(),
-                                label_token.kind,
-                                self.lexer.code_info.source.clone(),
-                                self.lexer.code_info.file_name.clone(),
-                            ).with_help("The preceding @ indicates a block label, so an identifier is expected".to_string()));
-                            return Err(self.lexer.synchronize());
-                        }
-                    }
-                } else {
-                    (None, None)
-                };
+                let span = colon.span.start..bt.span.end;
 
-                let span = if let Some(label_span) = label_end_span {
-                    // If there's a label, extend span to include it
-                    colon.span.start..label_span.end
-                } else {
-                    colon.span.start..bt.span.end
-                };
-
-                return Ok(self.make_block_expr(stmts, span, label));
+                return Ok(self.make_block_expr(stmts, span, None));
             }
 
             let stmt_res = self.parse_stmt();
@@ -1085,7 +1280,7 @@ impl Parser {
                     TokenKind::LParen => {
                         // We have data associated with the binding
                         let _ = self.lexer.next_token();
-                        let binding = self.parse_binding()?;
+                        let (_, binding) = self.parse_binding()?;
                         let last_tkn = self.lexer.expect(&[TokenKind::RParen], &mut self.errors)?;
                         let full_span = span.start..last_tkn.span.end;
                         let enum_pattern = EnumPattern {
@@ -1475,9 +1670,12 @@ impl Parser {
         let peek = self.lexer.peek();
         match peek.kind {
             TokenKind::LetKw => self.parse_let_stmt(),
+            TokenKind::DecKw => self.parse_decl_stmt(),
+            TokenKind::DefKw => self.parse_def_stmt(),
             //TokenKind::OutKw => self.parse_out_stmt(),
             TokenKind::BreakKw => self.parse_break_stmt(),
-            TokenKind::Return => self.parse_return_stmt(),
+            TokenKind::ReturnKw => self.parse_return_stmt(),
+            TokenKind::DeferKw => self.parse_defer_stmt(),
             TokenKind::IfKw => self.parse_if_stmt(),
             TokenKind::WhileKw => self.parse_while_stmt(),
             TokenKind::MatchKw => self.parse_match_stmt(),
@@ -1486,8 +1684,89 @@ impl Parser {
         }
     }
 
+    // parses: "dec <name>;"
+    fn parse_decl_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let dec_kw = self.lexer.expect(&[TokenKind::DecKw], &mut self.errors)?;
+        let ident = self.lexer.next_token();
+
+        let name = match ident.kind {
+            TokenKind::Ident(name) => IdentBinding {
+                span: ident.span.clone(),
+                name,
+                id: 0,
+                is_mut: true
+            }, 
+            _ => {
+                let mut error = YuuError::unexpected_token(
+                    ident.span.clone(),
+                    "an identifier".to_string(),
+                    ident.kind,
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                );
+                error = error
+                    .with_help("Grammar: 'dec <name>;'".to_string());
+                self.errors.push(error);
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        let final_span = self.expect_semicolon_or_block_terminator(dec_kw.span.clone(), ident.span.clone())?;
+        let decl_stmt = DeclStmt {
+            id: 0,
+            ident: name,
+            span: final_span.clone(),
+        };
+
+        Ok((final_span, StmtNode::Decl(decl_stmt)))
+    }
+
+    // parses: "def <name> = <expr>;"
+    fn parse_def_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let def_kw = self.lexer.expect(&[TokenKind::DefKw], &mut self.errors)?;
+
+        let ident = self.lexer.next_token();
+        let name = match ident.kind {
+            TokenKind::Ident(name) => IdentBinding {
+                id: 0,
+                name,
+                span: ident.span.clone(),
+                is_mut: true
+            }, 
+            _ => {
+                let mut error = YuuError::unexpected_token(
+                    ident.span.clone(),
+                    "an identifier".to_string(),
+                    ident.kind,
+                    self.lexer.code_info.source.clone(),
+                    self.lexer.code_info.file_name.clone(),
+                );
+                error = error
+                    .with_help("Grammar: 'def <name> = <expr>;'".to_string());
+                self.errors.push(error);
+                return Err(self.lexer.synchronize());
+            }
+        };
+
+        let _eq_token = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
+        let (expr_span, expr) = self.parse_expr()?;
+
+        let final_span = self.expect_semicolon_or_block_terminator(def_kw.span.clone(), expr_span.clone())?;
+        let def_stmt = DefStmt {
+            id: 0,
+            ident: name,
+            expr: Box::new(expr),
+            span: final_span.clone(),
+        };
+
+        Ok((final_span, StmtNode::Def(def_stmt)))
+
+    }
+
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let ret_token = self.lexer.expect(&[TokenKind::Return], &mut self.errors)?;
+        let ret_token = self
+            .lexer
+            .expect(&[TokenKind::ReturnKw], &mut self.errors)?;
 
         // Check if there's an expression or if we hit a semicolon/block terminator
         let peek_kind = self.lexer.peek().kind;
@@ -1507,6 +1786,24 @@ impl Parser {
         Ok((
             span.clone(),
             StmtNode::Return(ReturnStmt { span, expr, id: 0 }),
+        ))
+    }
+
+    fn parse_defer_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        let defer_token = self.lexer.expect(&[TokenKind::DeferKw], &mut self.errors)?;
+
+        // Parse the expression - defer always requires an expression
+        let (expr_span, expr) = self.parse_expr()?;
+        let span =
+            self.expect_semicolon_or_block_terminator(defer_token.span.clone(), expr_span)?;
+
+        Ok((
+            span.clone(),
+            StmtNode::Defer(DeferStmt {
+                span,
+                expr: Box::new(expr),
+                id: 0,
+            }),
         ))
     }
 

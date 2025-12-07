@@ -71,11 +71,11 @@ impl CLowering {
                 Self::gen_type(data, type_info)?;
                 write!(data.output, "*")
             }
-            TypeInfo::Inactive => panic!(
-                "Compiler bug: Attempted to generate C type for TypeInfo::Inactive which represents no value"
-            ),
             TypeInfo::Error => panic!(
                 "Compiler bug: Attempted to generate C type for TypeInfo::Error which represents a type error"
+            ),
+            TypeInfo::Unknown => panic!(
+                "Compiler bug: Attempted to generate C type for TypeInfo::Unknown - type inference not complete"
             ),
             TypeInfo::Struct(struct_type) => {
                 write!(data.output, "struct {}", struct_type.name)
@@ -126,13 +126,56 @@ impl CLowering {
         data: &mut TransientData,
         var: &Variable,
     ) -> Result<(), std::fmt::Error> {
+        self.gen_variable_def(data, var, 1, None)
+    }
+
+    fn gen_variable_def(
+        &self,
+        data: &mut TransientData,
+        var: &Variable,
+        count: u64,
+        init: Option<&crate::pass_yir_lowering::yir::ArrayInit>,
+    ) -> Result<(), std::fmt::Error> {
         let ty = var.ty();
         Self::gen_type(data, ty.deref_ptr())?;
-        write!(data.output, " mem_{}_{};", var.name(), var.id())?;
+        let mem_location = format!(" mem_{}_{}", var.name(), var.id());
+        write!(data.output, "{mem_location} [{count}]")?;
+
+        // Handle initialization on the memory storage
+        if let Some(init) = init {
+            match init {
+                crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                    write!(data.output, "={{0}}")?;
+                }
+                crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                    write!(data.output, "={{")?;
+                    for i in 0..count {
+                        if i > 0 {
+                            write!(data.output, ",")?;
+                        }
+                        self.gen_operand(data, operand)?;
+                    }
+                    write!(data.output, "}}")?;
+                }
+                crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                    write!(data.output, "={{")?;
+                    for (i, element) in elements.iter().enumerate() {
+                        if i > 0 {
+                            write!(data.output, ",")?;
+                        }
+                        self.gen_operand(data, element)?;
+                    }
+                    write!(data.output, "}}")?;
+                }
+            }
+        }
+
+        write!(data.output, ";")?;
+        
         Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
-        write!(data.output, "=&mem_{}_{}; ", var.name(), var.id())
+        write!(data.output, "={mem_location};")
     }
 
     fn gen_simple_var_decl(
@@ -151,9 +194,12 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca { target } => {
-                self.gen_variable_decl(data, target)?;
-                write!(data.output, ";")?;
+            Instruction::Alloca { target, count, align, init } => {
+                if let Some(align) = align {
+                    write!(data.output, "alignas({align}) ")?;
+                }
+
+                self.gen_variable_def(data, target, *count, init.as_ref())?;
             }
             Instruction::StoreImmediate { target, value } => {
                 write!(data.output, "*")?;
@@ -166,10 +212,17 @@ impl CLowering {
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, "=&")?;
+                write!(data.output, "=&")?; 
                 Self::write_var_name(source, &mut data.output)?;
                 write!(data.output, ";")?;
             }
+
+            // TODO: This works, but in SOME (probably these can never appear due to the semantics
+            // of Yuu, but need to be aware of it) circumstances, this current code segfaults when
+            // it shouldn't:
+            // Imagine the memory is not reserved, then the deref, i.e. a->b will segfault!
+            // This aligns with current Yuu semantics, but the semantics of YIR are different here
+            // because we are just asking for a pointer, not to deref the pointer first.
             Instruction::GetFieldPtr {
                 target,
                 base,
@@ -183,7 +236,7 @@ impl CLowering {
                 write!(data.output, "->{});", field)?;
             }
             Instruction::Load { target, source } => {
-                self.gen_simple_var_decl(data, target)?;
+                self.gen_simple_var_decl(data, target)?; 
                 write!(data.output, "=*")?;
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
@@ -277,6 +330,122 @@ impl CLowering {
                     TypeInfo::Pointer(_) => write!(data.output, "->data.{}_data);", variant)?,
                     _ => write!(data.output, ".data.{}_data);", variant)?,
                 }
+            }
+            Instruction::IntToPtr { target, source } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=(")?;
+                Self::gen_type(data, target.ty())?;
+                write!(data.output, ")")?;
+                self.gen_operand(data, source)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
+                // Generate heap allocation
+                Self::gen_type(data, target.ty())?;
+                write!(data.output, " ")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, " = ")?;
+
+                // Choose allocation strategy based on initialization
+                match init {
+                    Some(crate::pass_yir_lowering::yir::ArrayInit::Zero) => {
+                        // Use calloc for zero initialization
+                        if let Some(align_val) = align {
+                            write!(data.output, "aligned_alloc({}, ", align_val)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, "); memset(")?;
+                            Self::write_var_name(target, &mut data.output)?;
+                            write!(data.output, ", 0, ")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        } else {
+                            write!(data.output, "calloc(")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, " / {}, {});", element_size, element_size)?;
+                        }
+                    }
+                    _ => {
+                        // Regular malloc for non-zero or no initialization
+                        if let Some(align_val) = align {
+                            write!(data.output, "aligned_alloc({}, ", align_val)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        } else {
+                            write!(data.output, "malloc(")?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ");")?;
+                        }
+                    }
+                }
+
+                // Handle non-zero array initialization after allocation
+                if let Some(array_init) = init {
+                    match array_init {
+                        crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                            // Already handled above
+                        }
+                        crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                            // Use template_fill helper function
+                            write!(data.output, " ")?;
+                            Self::gen_type(data, target.ty().deref_ptr())?; // Element type
+                            write!(data.output, " __template = ")?;
+                            self.gen_operand(data, operand)?;
+                            write!(data.output, "; __yuu_template_fill(")?;
+                            Self::write_var_name(target, &mut data.output)?;
+                            write!(data.output, ", &__template, {}, (", element_size)?;
+                            self.gen_operand(data, total_size)?;
+                            write!(data.output, ") / {});", element_size)?;
+                        }
+                        crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                            // Generate individual stores
+                            for (i, element) in elements.iter().enumerate() {
+                                write!(data.output, " ")?;
+                                Self::write_var_name(target, &mut data.output)?;
+                                write!(data.output, "[{}] = ", i)?;
+                                self.gen_operand(data, element)?;
+                                write!(data.output, ";")?;
+                            }
+                        }
+                    }
+                }
+            }
+            Instruction::HeapFree { ptr } => {
+                write!(data.output, "free(")?;
+                self.gen_operand(data, ptr)?;
+                write!(data.output, ");")?;
+            }
+            Instruction::GetElementPtr { target, base, index } => {
+                self.gen_variable_decl(data, target)?;
+                write!(data.output, ";")?;
+                Self::write_var_name(target, &mut data.output)?;
+                write!(data.output, "=(")?;
+                self.gen_operand(data, base)?;
+                write!(data.output, "+")?;
+                self.gen_operand(data, index)?;
+                write!(data.output, ");")?;
+            }
+            Instruction::MemCpy { dest, src, count } => {
+                write!(data.output, "memcpy(")?;
+                self.gen_operand(data, dest)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, src)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, count)?;
+                write!(data.output, ");")?;
+            }
+            Instruction::MemSet { dest, value, count } => {
+                write!(data.output, "memset(")?;
+                self.gen_operand(data, dest)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, value)?;
+                write!(data.output, ", ")?;
+                self.gen_operand(data, count)?;
+                write!(data.output, ");")?;
+            }
+            Instruction::KillSet { vars: _ } => {
+                // No code generation needed for stack variable kills in C
             }
         }
         Ok(())
@@ -428,8 +597,19 @@ impl CLowering {
     fn gen_module(&self, data: &mut TransientData) -> Result<(), std::fmt::Error> {
         write!(
             data.output,
-            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n"
+            "#include<stdint.h>\n#include<stdbool.h>\n#include<stdio.h>\n#include<stdlib.h>\n#include<string.h>\n#include<stdalign.h>\n"
         )?;
+
+        // Generate helper functions for array initialization
+        write!(data.output, r#"static inline void __yuu_template_fill(void* dest, const void* template_val, size_t element_size, size_t count) {{
+  char* d = (char*)dest;
+  for (size_t i = 0; i < count; i++) {{
+    memcpy(d + i * element_size, template_val, element_size);
+  }}
+}}
+"#)?;
+
+        // Note: __yuu_elements_fill will be generated per-type as needed since each call has different element types
 
         for name in data.type_dependency_order.create_topological_order() {
             let soe = data

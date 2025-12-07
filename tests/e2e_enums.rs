@@ -112,9 +112,9 @@ fn test_enum_match_data_variants() {
             Some: i64,
         end
         
-        fn unwrap_or(opt: Option, def: i64) -> i64:
+        fn unwrap_or(opt: Option, defi: i64) -> i64:
             match opt:
-                Option::None: return def .
+                Option::None: return defi .
                 Option::Some(value): return value .
             end
         end

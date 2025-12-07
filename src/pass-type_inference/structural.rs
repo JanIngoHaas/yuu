@@ -2,7 +2,7 @@ use crate::{
     pass_parse::ast::{Arg, InternUstr, NodeId, StructuralNode, TypeNode},
     pass_type_inference::{
         binding_info::BindingInfo,
-        inactive_type, infer_stmt,
+        infer_stmt,
         type_info::{TypeInfo, error_type, primitive_nil},
     },
     pass_yir_lowering::block::{Block, FUNC_BLOCK_NAME},
@@ -87,7 +87,7 @@ pub fn infer_structural(structural: &StructuralNode, block: &mut Block, data: &m
             }
 
             // Clear the current function return type after processing
-            data.current_function_return_type = inactive_type();
+            data.current_function_return_type = error_type();
         }
         StructuralNode::Error(estr) => {
             data.type_registry
