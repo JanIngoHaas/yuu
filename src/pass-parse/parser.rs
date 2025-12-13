@@ -79,7 +79,7 @@ impl Parser {
                 };
                 let span_copy = span.clone();
                 let unary = UnaryExpr {
-                    operand: Box::new(operand),
+                    expr: Box::new(operand),
                     op: unary_op,
                     span,
                     id: 0,
@@ -553,7 +553,7 @@ impl Parser {
     ) -> ParseResult<(Span, ExprNode)> {
         let span = operand.span().start..op_token.span.end;
         let deref_expr = DerefExpr {
-            operand: Box::new(operand),
+            expr: Box::new(operand),
             span: span.clone(),
             id: 0,
         };
@@ -572,7 +572,7 @@ impl Parser {
         let mut current_expr = operand;
         for _ in 0..count {
             current_expr = ExprNode::Deref(DerefExpr {
-                operand: Box::new(current_expr),
+                expr: Box::new(current_expr),
                 span: span.clone(),
                 id: 0,
             });
@@ -588,7 +588,7 @@ impl Parser {
     ) -> ParseResult<(Span, ExprNode)> {
         let span = operand.span().start..op_token.span.end;
         let address_of_expr = AddressOfExpr {
-            operand: Box::new(operand),
+            expr: Box::new(operand),
             span: span.clone(),
             id: 0,
         };

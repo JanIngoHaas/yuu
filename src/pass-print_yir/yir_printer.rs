@@ -353,7 +353,7 @@ pub fn format_instruction(
             )?;
 
             if let Some(init) = init {
-                write!(f, "\n    ^--{} ", colorize("INIT", "keyword", do_color))?;
+                write!(f, ", {} ", colorize("INIT", "keyword", do_color))?;
                 match init {
                     crate::pass_yir_lowering::yir::ArrayInit::Zero => {
                         write!(f, "{}", colorize("ZERO", "keyword", do_color))?;

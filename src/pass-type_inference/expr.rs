@@ -120,7 +120,7 @@ fn infer_free_op(
                 data.src_code.source.clone(),
                 data.src_code.file_name.clone(),
             )
-            .span(unary_expr.operand.span().clone(), "expected a pointer type")
+            .span(unary_expr.expr.span().clone(), "expected a pointer type")
             .help("The `~` operator (free) can only be applied to pointer types.")
             .build();
         data.errors.push(err);
@@ -193,7 +193,7 @@ fn infer_unary_expr(
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let ty = infer_expr(&unary_expr.operand, block, data, None);
+    let ty = infer_expr(&unary_expr.expr, block, data, None);
     let op_name = unary_expr.op.static_name();
 
     let resolved_type = match unary_expr.op {
@@ -851,7 +851,7 @@ fn infer_deref_expr(
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let operand_type = infer_expr(&deref_expr.operand, block, data, None);
+    let operand_type = infer_expr(&deref_expr.expr, block, data, None);
 
     let result_type = match operand_type {
         TypeInfo::Pointer(pointee_type) => pointee_type,
@@ -886,7 +886,7 @@ fn infer_address_of_expr(
     block: &mut Block,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
-    let operand_type = infer_expr(&address_of_expr.operand, block, data, None);
+    let operand_type = infer_expr(&address_of_expr.expr, block, data, None);
 
     let result_type = operand_type.ptr_to();
 

@@ -1,0 +1,13 @@
+fn factorial(n: i64) -> i64:
+    if n <= 1:
+        return 1 .
+    else:
+        return n * factorial(n - 1) .
+    end
+
+fn add(a: i64, b: i64) -> i64:
+    return a + b .
+
+fn main() -> i64:
+    let result = add(factorial(5), factorial(4));
+    return result .

@@ -49,7 +49,7 @@ impl AddId for ExprNode {
             }
             ExprNode::Unary(un) => {
                 un.id = generator.next();
-                un.operand.add_id(generator);
+                un.expr.add_id(generator);
             }
             ExprNode::Ident(id) => id.id = generator.next(),
             ExprNode::FuncCall(func_call_expr) => {
@@ -83,11 +83,11 @@ impl AddId for ExprNode {
             }
             ExprNode::Deref(deref_expr) => {
                 deref_expr.id = generator.next();
-                deref_expr.operand.add_id(generator);
+                deref_expr.expr.add_id(generator);
             }
             ExprNode::AddressOf(address_of_expr) => {
                 address_of_expr.id = generator.next();
-                address_of_expr.operand.add_id(generator);
+                address_of_expr.expr.add_id(generator);
             }
 
             ExprNode::HeapAlloc(heap_alloc_expr) => {

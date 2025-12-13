@@ -162,7 +162,7 @@ pub struct BinaryExpr {
 /// Represents a unary expression (e.g., -a, !b)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UnaryExpr {
-    pub operand: Box<ExprNode>,
+    pub expr: Box<ExprNode>,
     pub op: UnaryOp,
     pub span: Span,
     pub id: NodeId,
@@ -201,14 +201,14 @@ pub struct MemberAccessExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DerefExpr {
-    pub operand: Box<ExprNode>,
+    pub expr: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AddressOfExpr {
-    pub operand: Box<ExprNode>,
+    pub expr: Box<ExprNode>,
     pub span: Span,
     pub id: NodeId,
 }

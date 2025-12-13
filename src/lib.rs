@@ -5,6 +5,8 @@ pub mod utils;
 pub mod pass_c_compilation;
 #[path = "pass-c_lowering/mod.rs"]
 pub mod pass_c_lowering;
+#[path = "pass-check_decl_def/mod.rs"]
+pub mod pass_check_decl_def;
 #[path = "pass-control_flow_analysis/mod.rs"]
 pub mod pass_control_flow_analysis;
 #[path = "pass-diagnostics/mod.rs"]
