@@ -21,6 +21,8 @@ enum Commands {
         input: PathBuf,
         #[arg(short, long, help = "Output file (default: stdout)")]
         output: Option<PathBuf>,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
     },
     #[command(about = "Compile source to YIR")]
     Yir {
@@ -30,11 +32,24 @@ enum Commands {
         output: Option<PathBuf>,
         #[arg(long, help = "Disable colored output")]
         no_color: bool,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
     },
     #[command(about = "Check source for errors")]
     Check {
         #[arg(help = "Input source file")]
         input: PathBuf,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
+    },
+    #[command(about = "Compile source to an executable")]
+    Exe {
+        #[arg(help = "Input source file")]
+        input: PathBuf,
+        #[arg(short, long, help = "Output file; default: <input>.exe")]
+        output: Option<PathBuf>,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
     },
 }
 
@@ -65,42 +80,106 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::C { input, output } => {
+        Commands::C { input, output, compiler_timings } => {
             let (source, filename) = read_source_file(&input)?;
-            let mut pipeline = Pipeline::new(source, filename)
-                .map_err(|e| miette::miette!("Parse error: {}", e))?;
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
             let c_code = pipeline
-                .get_c_code()
+                .calc_c()
                 .map_err(|e| miette::miette!("C code generation error: {}", e))?;
             write_output(output, &c_code.0)?;
+
+            if compiler_timings {
+                pipeline.timings.print_summary();
+            }
         }
         Commands::Yir {
             input,
             output,
             no_color,
+            compiler_timings,
         } => {
             let (source, filename) = read_source_file(&input)?;
-            let pipeline = Pipeline::new(source, filename)
-                .map_err(|e| miette::miette!("Parse error: {}", e))?;
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
+
             let yir_output = if no_color {
                 pipeline
-                    .print_yir()
+                    .calc_yir()
                     .map_err(|e| miette::miette!("YIR generation error: {}", e))?
             } else {
                 pipeline
-                    .print_yir_colored()
+                    .calc_yir_colored()
                     .map_err(|e| miette::miette!("YIR generation error: {}", e))?
             };
             write_output(output, &yir_output.0)?;
+
+            if compiler_timings {
+                pipeline.timings.print_summary();
+            }
         }
-        Commands::Check { input } => {
+        Commands::Check { input, compiler_timings } => {
             let (source, filename) = read_source_file(&input)?;
-            let pipeline = Pipeline::new(source, filename)
-                .map_err(|e| miette::miette!("Parse error: {}", e))?;
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
+
             pipeline
-                .diagnostics()
+                .calc_diagnostics()
                 .map_err(|e| miette::miette!("Diagnostics error: {}", e))?;
-            println!("No errors found");
+
+            if compiler_timings {
+                pipeline.timings.print_summary();
+            }
+        }
+        Commands::Exe {
+            input,
+            output,
+            compiler_timings,
+        } => {
+            let (source, _) = read_source_file(&input)?;
+            // Use only the filename part to avoid issues with directory creation in compile_c_code
+            let filename = input
+                .file_name()
+                .ok_or_else(|| miette::miette!("Invalid input filename"))?
+                .to_string_lossy()
+                .to_string();
+
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
+
+            let executable = pipeline
+                .calc_executable()
+                .map_err(|e| miette::miette!("Executable generation error: {}", e))?;
+
+            if let Some(output_path) = output {
+                fs::copy(&executable.path, output_path)
+                    .map_err(|e| miette::miette!("Failed to copy executable: {}", e))?;
+            } else {
+                // Default: Copy to current directory
+                let name = input.file_stem().unwrap_or(input.as_os_str());
+                let mut dest = PathBuf::from(name);
+                if cfg!(windows) {
+                    dest.set_extension("exe");
+                }
+                fs::copy(&executable.path, dest)
+                    .map_err(|e| miette::miette!("Failed to copy executable to current directory: {}", e))?;
+            }
+
+            if compiler_timings {
+                pipeline.timings.print_summary();
+            }
         }
     }
 

@@ -1,0 +1,114 @@
+// Comprehensive Yuu benchmark file that exercises multiple compiler passes
+
+struct Point:
+    x: i64,
+    y: i64,
+end
+
+struct Rectangle:
+    top_left: Point,
+    bottom_right: Point,
+end
+
+enum Shape:
+    Circle: i64,
+    Rect: Rectangle,
+end
+
+fn fibonacci(n: i64) -> i64:
+    if n <= 1:
+        return n .
+    else:
+        return fibonacci(n - 1) + fibonacci(n - 2) .
+    end
+
+fn factorial(n: i64) -> i64:
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n:
+        result = result * i;
+        i = i + 1;
+    end
+    return result .
+
+fn point_distance_squared(p1: Point, p2: Point) -> i64:
+    let dx = p1.x - p2.x;
+    let dy = p1.y - p2.y;
+    return dx * dx + dy * dy;
+end
+
+fn rectangle_area(rect: Rectangle) -> i64:
+    let width = rect.bottom_right.x - rect.top_left.x;
+    let height = rect.bottom_right.y - rect.top_left.y;
+    return width * height;
+end
+
+fn shape_complexity(shape: Shape) -> i64:
+    match shape:
+        Shape::Circle(radius): return radius * radius .
+        Shape::Rect(rect): return rectangle_area(rect) .
+    end
+end
+
+fn complex_calculation(n: i64) -> i64:
+    // Create some heap-allocated data
+    let heap_point = @Point { x: n, y: n * 2 };
+    let heap_rect = @Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: heap_point.*,
+    };
+
+    // Do some pointer arithmetic
+    let point_ptr = heap_point.*.x.&;
+    point_ptr.* = point_ptr.* + 5;
+
+    let area = rectangle_area(heap_rect.*);
+    let distance = point_distance_squared(heap_point.*, Point { x: 0, y: 0 });
+
+    // Clean up heap memory
+    ~heap_point;
+    ~heap_rect;
+
+    return area + distance .
+
+fn nested_loops_and_recursion(depth: i64) -> i64:
+    let mut total = 0;
+    let mut i = 0;
+
+    while i < depth:
+        let mut j = 0;
+        while j < i:
+            if j % 2 == 0:
+                total = total + fibonacci(j + 3);
+            end
+            else:
+                total = total + factorial(j + 2);
+            end
+            j = j + 1;
+        end
+        i = i + 1;
+    end
+
+    return total .
+
+fn main() -> i64:
+    // Test various language features
+    let simple_calc = fibonacci(8) + factorial(5);
+
+    // Test struct and enum operations
+    let circle = Shape::Circle(10);
+    let rect_shape = Shape::Rect(Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 20, y: 15 },
+    });
+
+    let complexity = shape_complexity(circle) + shape_complexity(rect_shape);
+
+    // Test heap allocation and pointers
+    let heap_result = complex_calculation(7);
+
+    // Test nested control flow
+    let loop_result = nested_loops_and_recursion(5);
+
+    // Combine all results
+    return simple_calc + complexity + heap_result + loop_result .

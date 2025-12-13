@@ -207,7 +207,7 @@ impl<'a> TransientData<'a> {
                 }
             }
             ExprNode::Unary(un_expr) => {
-                let operand = self.lower_expr(&un_expr.operand, ContextKind::AsIs);
+                let operand = self.lower_expr(&un_expr.expr, ContextKind::AsIs);
                 let ty = self.get_type(un_expr.id);
 
                 let result_operand = match un_expr.op {
@@ -477,7 +477,7 @@ impl<'a> TransientData<'a> {
             }
 
             ExprNode::Deref(deref_expr) => {
-                let ptr_var = self.lower_expr(&deref_expr.operand, ContextKind::AsIs);
+                let ptr_var = self.lower_expr(&deref_expr.expr, ContextKind::AsIs);
                 match context {
                     ContextKind::AsIs => {
                         let loaded = self.function.make_load("deref_val".intern(), ptr_var);
@@ -489,7 +489,7 @@ impl<'a> TransientData<'a> {
             }
             ExprNode::AddressOf(address_of_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);
-                self.lower_expr(&address_of_expr.operand, ContextKind::StorageLocation)
+                self.lower_expr(&address_of_expr.expr, ContextKind::StorageLocation)
             }
 
             ExprNode::HeapAlloc(heap_alloc_expr) => {
