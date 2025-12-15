@@ -7,7 +7,11 @@ use crate::{
     pass_diagnostics::error::{ErrorKind, YuuError},
     pass_parse::SourceInfo,
     pass_type_dependency_analysis::TypeDependencyGraph,
-    utils::{StructOrEnumInfo, TypeRegistry, collections::{UstrIndexMap, UstrIndexSet}, type_info_table::TypeInfo},
+    utils::{
+        StructOrEnumInfo, TypeRegistry,
+        collections::{UstrIndexMap, UstrIndexSet},
+        type_info_table::TypeInfo,
+    },
 };
 
 pub struct TypeDependencyAnalysis;

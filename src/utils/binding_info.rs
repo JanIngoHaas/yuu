@@ -15,5 +15,6 @@ pub struct VariableBinding {
 }
 
 pub fn is_prebuilt_node_id(id: NodeId) -> bool {
-    id < 0
+    // Non-expression IDs start from usize::MAX and count down
+    id >= (usize::MAX / 2) // Use half-way point as threshold
 }

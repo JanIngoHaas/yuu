@@ -1,19 +1,19 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::ast::{
-    AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
+    NodeId, AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
     LValueKind, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     UnaryOp,
 };
 use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, DerefExpr, HeapAllocExpr};
 use crate::pass_type_inference::pass_type_inference_impl::TransientDataStructural;
-use crate::utils::BlockTree;
-use crate::utils::type_info_table::{TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64};
 use crate::utils::type_info_table::PrimitiveType;
+use crate::utils::type_info_table::{
+    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64,
+};
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::pass_type_inference_impl::TransientData;
 
 /// Helper function to extract i64 literal value from an expression, if it's a constant
 pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Option<i64> {
@@ -59,8 +59,7 @@ fn infer_pointer_op_expr(
                 | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
         ) {
             // Pointer arithmetic: returns same pointer type
-            data.type_info_table
-                .insert(pointer_op_expr.id, lhs_type);
+            data.type_info_table.insert(pointer_op_expr.id, lhs_type);
             return lhs_type;
         }
     }
@@ -91,10 +90,13 @@ fn infer_cast_expr(
     data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     let _expr_type = infer_expr(&cast_expr.expr, block_id, data, None);
-    let target_type = crate::pass_type_inference::types::infer_type(&cast_expr.target_type, &data.type_registry, &mut data.errors, &data.src_code);
-    data
-        .type_info_table
-        .insert(cast_expr.id, target_type);
+    let target_type = crate::pass_type_inference::types::infer_type(
+        &cast_expr.target_type,
+        &data.type_registry,
+        &mut data.errors,
+        &data.src_code,
+    );
+    data.type_info_table.insert(cast_expr.id, target_type);
     target_type
 }
 
@@ -145,8 +147,7 @@ fn infer_binary_expr(
         expr_id,
     );
 
-    data.type_info_table
-        .insert(expr_id, resolved_type);
+    data.type_info_table.insert(expr_id, resolved_type);
     resolved_type
 }
 
@@ -156,11 +157,11 @@ fn resolve_binary_overload(
     rhs: &'static TypeInfo,
     span: logos::Span,
     data: &mut TransientDataStructural,
-    expr_id: i64,
+    expr_id: NodeId,
 ) -> &'static TypeInfo {
     match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
         Ok(res) => {
-            data.type_registry
+            data
                 .bindings
                 .insert(expr_id, res.binding_info.id);
             res.ty.ret
@@ -175,8 +176,7 @@ fn resolve_binary_overload(
                 span,
             );
             data.errors.push(err);
-            data.type_info_table
-                .insert(expr_id, error_type());
+            data.type_info_table.insert(expr_id, error_type());
             error_type()
         }
     }
@@ -212,8 +212,7 @@ fn infer_unary_expr(
         }
     };
 
-    data.type_info_table
-        .insert(unary_expr.id, resolved_type);
+    data.type_info_table.insert(unary_expr.id, resolved_type);
     resolved_type
 }
 
@@ -226,9 +225,8 @@ fn infer_ident_expr(
     let err = match function_args {
         Some(args) => match data.type_registry.resolve_function(ident_expr.ident, args) {
             Ok(res) => {
-                data.type_info_table
-                    .insert(ident_expr.id, res.general_ty);
-                data.type_registry
+                data.type_info_table.insert(ident_expr.id, res.general_ty);
+                data
                     .bindings
                     .insert(ident_expr.id, res.binding_info.id);
                 return res.general_ty;
@@ -243,13 +241,14 @@ fn infer_ident_expr(
             )),
         },
         None => {
-            match data.block_tree.resolve_variable(block_id, ident_expr.ident, &data.src_code, ident_expr.span.clone())
-            {
+            match data.block_tree.resolve_variable(
+                block_id,
+                ident_expr.ident,
+                &data.src_code,
+                ident_expr.span.clone(),
+            ) {
                 Ok(fr) => {
-                    let ty = data
-                        .type_info_table
-                        .get(fr.binding_info.id)
-                        .expect(
+                    let ty = data.type_info_table.get(fr.binding_info.id).expect(
                         "Compiler bug: binding not found in type table - but it should be there",
                     );
 
@@ -271,7 +270,7 @@ fn infer_ident_expr(
                     }
 
                     data.type_info_table.insert(ident_expr.id, ty);
-                    data.type_registry
+                    data
                         .bindings
                         .insert(ident_expr.id, fr.binding_info.id);
                     return ty;
@@ -281,8 +280,7 @@ fn infer_ident_expr(
         }
     };
     data.errors.push(*err);
-    data.type_info_table
-        .insert(ident_expr.id, error_type());
+    data.type_info_table.insert(ident_expr.id, error_type());
     error_type()
 }
 
@@ -297,7 +295,8 @@ fn infer_func_call_expr(
         .map(|arg| infer_expr(arg, block_id, data, None))
         .collect::<Vec<_>>();
 
-    let actual_func_ident = infer_expr(&func_call_expr.lhs, block_id, data, Some(&actual_arg_types));
+    let actual_func_ident =
+        infer_expr(&func_call_expr.lhs, block_id, data, Some(&actual_arg_types));
 
     let resolved_ret_type = match actual_func_ident {
         TypeInfo::Function(func) => func.ret,
@@ -359,7 +358,7 @@ fn infer_func_call_expr(
                 .build();
             data.errors.push(err);
             error_type()
-        },
+        }
         TypeInfo::Enum(e) => {
             let err = YuuError::builder()
                 .kind(ErrorKind::InvalidExpression)
@@ -471,8 +470,7 @@ fn infer_struct_instantiation(
             .help("Define this struct before using it")
             .build();
         data.errors.push(err);
-        data
-            .type_info_table
+        data.type_info_table
             .insert(struct_instantiation_expr.id, error_type());
         return error_type();
     }
@@ -528,8 +526,7 @@ fn infer_struct_instantiation(
         }
     }
 
-    data
-        .type_info_table
+    data.type_info_table
         .insert(struct_instantiation_expr.id, struct_type);
 
     struct_type
@@ -553,8 +550,7 @@ fn infer_member_access(
 
             match field {
                 Some(field_info) => {
-                    data
-                        .type_info_table
+                    data.type_info_table
                         .insert(member_access_expr.id, field_info.ty);
 
                     field_info.ty
@@ -594,8 +590,7 @@ fn infer_member_access(
                         .build();
                     data.errors.push(err);
 
-                    data
-                        .type_info_table
+                    data.type_info_table
                         .insert(member_access_expr.id, error_type());
                     error_type()
                 }
@@ -628,8 +623,7 @@ fn infer_member_access(
                 .build();
             data.errors.push(err);
 
-            data
-                .type_info_table
+            data.type_info_table
                 .insert(member_access_expr.id, error_type());
             error_type()
         }
@@ -768,9 +762,7 @@ fn infer_enum_instantiation(
             error_type()
         }
     };
-    data
-        .type_info_table
-        .insert(ei.id, inferred_ty);
+    data.type_info_table.insert(ei.id, inferred_ty);
     inferred_ty
 }
 
@@ -793,15 +785,23 @@ pub fn infer_expr(
         ExprNode::MemberAccess(member_access_expr) => {
             infer_member_access(member_access_expr, block_id, data)
         }
-        ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block_id, data, function_args),
+        ExprNode::EnumInstantiation(ei) => {
+            infer_enum_instantiation(ei, block_id, data, function_args)
+        }
         ExprNode::Deref(deref_expr) => infer_deref_expr(deref_expr, block_id, data),
-        ExprNode::AddressOf(address_of_expr) => infer_address_of_expr(address_of_expr, block_id, data),
-        ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block_id, data),
+        ExprNode::AddressOf(address_of_expr) => {
+            infer_address_of_expr(address_of_expr, block_id, data)
+        }
+        ExprNode::HeapAlloc(heap_alloc_expr) => {
+            infer_heap_alloc_expr(heap_alloc_expr, block_id, data)
+        }
         ExprNode::Array(array_expr) => infer_array_expr(array_expr, block_id, data),
         ExprNode::ArrayLiteral(array_literal_expr) => {
             infer_array_literal_expr(array_literal_expr, block_id, data)
         }
-        ExprNode::PointerOp(pointer_op_expr) => infer_pointer_op_expr(pointer_op_expr, block_id, data),
+        ExprNode::PointerOp(pointer_op_expr) => {
+            infer_pointer_op_expr(pointer_op_expr, block_id, data)
+        }
         ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block_id, data),
     }
 }
@@ -826,8 +826,7 @@ fn infer_heap_alloc_expr(
         }
     };
 
-    data
-        .type_info_table
+    data.type_info_table
         .insert(heap_alloc_expr.id, pointer_type);
 
     pointer_type
@@ -861,9 +860,7 @@ fn infer_deref_expr(
         }
     };
 
-    data
-        .type_info_table
-        .insert(deref_expr.id, result_type);
+    data.type_info_table.insert(deref_expr.id, result_type);
 
     result_type
 }
@@ -877,9 +874,7 @@ fn infer_address_of_expr(
 
     let result_type = operand_type.ptr_to();
 
-    data
-        .type_info_table
-        .insert(address_of_expr.id, result_type);
+    data.type_info_table.insert(address_of_expr.id, result_type);
 
     result_type
 }
@@ -894,7 +889,12 @@ fn infer_array_expr(
     // Determine element type
     let element_type = if let Some(explicit_type) = &array_expr.element_type {
         // Explicit type provided: [value:type; count] or [:type; count]
-        infer_type(explicit_type, &data.type_registry, &mut data.errors, &data.src_code)
+        infer_type(
+            explicit_type,
+            &data.type_registry,
+            &mut data.errors,
+            &data.src_code,
+        )
     } else if let Some(init_value) = &array_expr.init_value {
         // Type inferred from init value: [value; count]
         infer_expr(init_value, block_id, data, None)
@@ -926,9 +926,7 @@ fn infer_array_expr(
     // Arrays are treated as pointers to the element type
     let result_type = element_type.ptr_to();
 
-    data
-        .type_info_table
-        .insert(array_expr.id, result_type);
+    data.type_info_table.insert(array_expr.id, result_type);
 
     result_type
 }
@@ -948,7 +946,12 @@ fn infer_array_literal_expr(
     // Determine element type
     let element_type = if let Some(explicit_type) = &array_literal_expr.element_type {
         // Explicit type provided: [1:i64, 2, 3]
-        infer_type(explicit_type, &data.type_registry, &mut data.errors, &data.src_code)
+        infer_type(
+            explicit_type,
+            &data.type_registry,
+            &mut data.errors,
+            &data.src_code,
+        )
     } else {
         // Type inferred from first element: [1, 2, 3]
         infer_expr(&array_literal_expr.elements[0], block_id, data, None)
@@ -979,7 +982,8 @@ fn infer_array_literal_expr(
     // Array literals are treated as pointers to the element type
     let result_type = element_type.ptr_to();
 
-    data.type_info_table.insert(array_literal_expr.id, result_type);
+    data.type_info_table
+        .insert(array_literal_expr.id, result_type);
 
     result_type
 }

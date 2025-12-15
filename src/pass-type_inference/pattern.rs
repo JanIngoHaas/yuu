@@ -1,7 +1,11 @@
 use crate::{
     pass_diagnostics::{ErrorKind, YuuError},
     pass_parse::{EnumPattern, ExprNode, RefutablePatternNode, Spanned},
-    pass_type_inference::{infer_binding, pass_type_inference_impl::{TransientData, TransientDataStructural}}, utils::{Block, type_info_table::TypeInfo},
+    pass_type_inference::{
+        infer_binding,
+        pass_type_inference_impl::{TransientData, TransientDataStructural},
+    },
+    utils::{Block, type_info_table::TypeInfo},
 };
 
 fn infer_enum_pattern(
@@ -51,7 +55,10 @@ fn infer_enum_pattern(
                 let error = YuuError::builder()
                     .kind(ErrorKind::ReferencedUndefinedEnum)
                     .message(format!("Enum '{}' is not defined", enum_pattern.enum_name))
-                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
                     .span(enum_pattern.span.clone(), "undefined enum")
                     .help("Make sure the enum is declared and in scope")
                     .build();
@@ -101,10 +108,7 @@ fn infer_enum_pattern(
                                 data.src_code.source.clone(),
                                 data.src_code.file_name.clone(),
                             )
-                            .span(
-                                enum_pattern.span.clone(),
-                                "data variant must have binding",
-                            )
+                            .span(enum_pattern.span.clone(), "data variant must have binding")
                             .help("Add a binding to destructure the associated data")
                             .build();
                         data.errors.push(err_msg);

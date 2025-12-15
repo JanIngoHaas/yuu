@@ -1,12 +1,18 @@
 use crate::{
     pass_diagnostics::{ErrorKind, YuuError},
     pass_parse::{
-        BindingNode, BlockStmt, DeclStmt, DefStmt, IfStmt, LetStmt, MatchStmt, RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt
-    }, utils::{BindingInfo, BlockTree, type_info_table::{TypeInfo, error_type, primitive_bool, primitive_nil, unknown_type}},
+        BindingNode, BlockStmt, DeclStmt, DefStmt, IfStmt, LetStmt, MatchStmt,
+        RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt,
+    },
+    utils::{
+        BindingInfo, BlockTree,
+        type_info_table::{TypeInfo, error_type, primitive_bool, primitive_nil, unknown_type},
+    },
 };
 
 use super::{
-    infer_binding, infer_expr, pass_type_inference_impl::TransientDataStructural, pattern::infer_pattern,
+    infer_binding, infer_expr, pass_type_inference_impl::TransientDataStructural,
+    pattern::infer_pattern,
 };
 
 fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientDataStructural) {
@@ -20,15 +26,25 @@ fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientDataS
 }
 
 fn infer_decl_stmt(decl_stmt: &DeclStmt, block_id: usize, data: &mut TransientDataStructural) {
-    infer_binding(&BindingNode::Ident(decl_stmt.ident.clone()), block_id, unknown_type(), data);
+    infer_binding(
+        &BindingNode::Ident(decl_stmt.ident.clone()),
+        block_id,
+        unknown_type(),
+        data,
+    );
 }
 
 fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientDataStructural) {
     let expr_type = infer_expr(&def_stmt.expr, block_id, data, None);
-    let var = data.block_tree.resolve_variable(block_id, def_stmt.ident.name, &data.src_code, def_stmt.ident.span.clone());
+    let var = data.block_tree.resolve_variable(
+        block_id,
+        def_stmt.ident.name,
+        &data.src_code,
+        def_stmt.ident.span.clone(),
+    );
 
     match var {
-        Ok(var) =>  {
+        Ok(var) => {
             // Check if the variable was already properly defined (i.e., has a non-unknown type)
             let current_type = data
                 .type_info_table
@@ -50,12 +66,8 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientDataS
                 return;
             }
 
-            data
-                .type_info_table
-                .insert(var.binding_info.id, expr_type); // Update the "unknown" type of the variable
-            data
-                .bindings
-                .insert(def_stmt.ident.id, var.binding_info.id); // Map def statement ident to original binding
+            data.type_info_table.insert(var.binding_info.id, expr_type); // Update the "unknown" type of the variable
+            data.bindings.insert(def_stmt.ident.id, var.binding_info.id); // Map def statement ident to original binding
         }
         Err(err) => {
             data.errors.push(*err);
@@ -63,7 +75,11 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientDataS
     }
 }
 
-fn infer_return_stmt(return_stmt: &ReturnStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_return_stmt(
+    return_stmt: &ReturnStmt,
+    block_id: usize,
+    data: &mut TransientDataStructural,
+) {
     if let Some(expr) = return_stmt.expr.as_ref() {
         let return_ty = infer_expr(expr, block_id, data, None);
         let unification = return_ty.unify(data.current_function_return_type);
@@ -143,12 +159,9 @@ pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientDataStru
         }
         StmtNode::Defer(defer_stmt) => {
             let _ = infer_expr(&defer_stmt.expr, block_id, data, None);
-            data
-                .type_info_table
-                .insert(defer_stmt.id, primitive_nil());
+            data.type_info_table.insert(defer_stmt.id, primitive_nil());
         }
-        StmtNode::Error(_stmt) => {
-        }
+        StmtNode::Error(_stmt) => {}
     }
 }
 
@@ -173,9 +186,7 @@ fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientDataStru
             .help("Conditions must evaluate to a boolean type")
             .build();
         data.errors.push(err_msg);
-        data
-            .type_info_table
-            .insert(if_stmt.id, error_type());
+        data.type_info_table.insert(if_stmt.id, error_type());
     }
 
     // Infer the if body
@@ -243,7 +254,11 @@ fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut Transien
     infer_block_stmt(&while_stmt.condition_block.body, block_id, data);
 }
 
-pub fn infer_block_stmt(block_stmt: &BlockStmt, block_id: usize, data: &mut TransientDataStructural) {
+pub fn infer_block_stmt(
+    block_stmt: &BlockStmt,
+    block_id: usize,
+    data: &mut TransientDataStructural,
+) {
     // Create a new child scope for the block
     let child_block_id = data.block_tree.make_child(
         block_id,
@@ -276,15 +291,14 @@ fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut Transien
         }
 
         // Infer pattern types and handle bindings
-        
-            infer_pattern(
-                &arm.pattern,
-                &scrutinee_ty,
-                &match_stmt.scrutinee,
-                block_id,
-                data,
-            );
-        
+
+        infer_pattern(
+            &arm.pattern,
+            &scrutinee_ty,
+            &match_stmt.scrutinee,
+            block_id,
+            data,
+        );
 
         // Infer the arm body
         infer_block_stmt(&arm.body, block_id, data);

@@ -4,10 +4,10 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::pass_diagnostics::error::{ErrorKind, YuuError, levenshtein_distance};
+use crate::pass_parse::ast::NodeId;
 use crate::pass_parse::ast::SourceInfo;
-use crate::utils::{BindingInfo, VariableBinding};
 use crate::utils::collections::IndexMap;
-use crate::{pass_parse::ast::NodeId};
+use crate::utils::{BindingInfo, VariableBinding};
 use logos::Span;
 use ustr::{Ustr, UstrMap};
 
@@ -76,7 +76,7 @@ impl BlockTree {
             parent: None,
             id: 0,
             block_binding: BindingInfo {
-                id: i64::MIN,
+                id: usize::MIN,
                 src_location: None,
             },
         };
@@ -136,7 +136,13 @@ impl BlockTree {
         block.parent.and_then(|p| self.get_binding(p, name))
     }
 
-    pub fn get_similar_names(&self, block_id: usize, name: &str, amount: u64, max_dst: u64) -> Vec<String> {
+    pub fn get_similar_names(
+        &self,
+        block_id: usize,
+        name: &str,
+        amount: u64,
+        max_dst: u64,
+    ) -> Vec<String> {
         let block = self.get_block(block_id);
         let mut similar_names = Vec::new();
 
@@ -166,7 +172,13 @@ impl BlockTree {
         result
     }
 
-    fn create_binding_not_found_error(&self, block_id: usize, name: &str, src: &SourceInfo, sp: Span) -> YuuError {
+    fn create_binding_not_found_error(
+        &self,
+        block_id: usize,
+        name: &str,
+        src: &SourceInfo,
+        sp: Span,
+    ) -> YuuError {
         let mut builder = YuuError::builder()
             .kind(ErrorKind::FunctionOverloadError)
             .message(format!("Variable '{}' not found", name));

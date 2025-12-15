@@ -1,21 +1,19 @@
-
 use crate::pass_diagnostics::{ErrorKind, YuuError};
-use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::SourceInfo;
-use crate::utils::{TypeRegistry};
-use crate::utils::type_info_table::{TypeInfo, TypeInfoTable, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_u64};
-use crate::{
-    pass_parse::ast::TypeNode,
+use crate::pass_parse::add_ids::GetId;
+use crate::pass_parse::ast::TypeNode;
+use crate::utils::TypeRegistry;
+use crate::utils::type_info_table::{
+    TypeInfo, TypeInfoTable, error_type, primitive_bool, primitive_f32, primitive_f64,
+    primitive_i64, primitive_u64,
 };
-
 
 pub fn infer_type(
     ty: &TypeNode,
     registry: &TypeRegistry,
     errors: &mut Vec<YuuError>,
-    src_code: &SourceInfo
+    src_code: &SourceInfo,
 ) -> &'static TypeInfo {
-
     let semantic_type = match ty {
         TypeNode::BuiltIn(built_in) => match built_in.kind {
             crate::pass_parse::ast::BuiltInTypeKind::I64 => primitive_i64(),
@@ -55,10 +53,7 @@ pub fn infer_type(
                         let mut message = YuuError::builder()
                             .kind(ErrorKind::ReferencedUndefinedStruct)
                             .message(format!("Cannot find struct type '{}'", ident.name))
-                            .source(
-                                src_code.source.clone(),
-                                src_code.file_name.clone(),
-                            )
+                            .source(src_code.source.clone(), src_code.file_name.clone())
                             .span(
                                 ident.span.clone(),
                                 format!("'{}' is not defined", ident.name),
@@ -80,7 +75,7 @@ pub fn infer_type(
         }
         TypeNode::Array(array) => {
             // Arrays are treated as pointers to the element type
-            let element_type = infer_type(&array.element_type, registry,errors, src_code);
+            let element_type = infer_type(&array.element_type, registry, errors, src_code);
             element_type.ptr_to()
         }
     };

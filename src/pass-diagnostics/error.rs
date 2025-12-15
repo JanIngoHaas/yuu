@@ -400,8 +400,8 @@ use syntect::highlighting::{FontStyle, Style, StyleModifier, Theme, ThemeSetting
 use syntect::highlighting::{ScopeSelector, ScopeSelectors};
 
 use crate::pass_parse::ast::{InternUstr, SourceInfo};
-use crate::pass_type_inference::TypeInfo;
-use crate::pass_type_inference::{FunctionInfo, TypeRegistry};
+use crate::utils::type_info_table::TypeInfo;
+use crate::utils::{FunctionInfo, TypeRegistry};
 
 /// Create a custom theme based on the warm_ember color palette
 pub fn create_autumn_rust_theme() -> Theme {
@@ -934,7 +934,7 @@ pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
         row[0] = i;
     }
-    
+
     #[allow(clippy::needless_range_loop)]
     for j in 0..=len2 {
         matrix[0][j] = j;

@@ -694,7 +694,7 @@ impl Spanned for BindingNode {
     }
 }
 
-pub type NodeId = i64;
+pub type NodeId = usize;
 
 pub trait InternUstr {
     fn intern(&self) -> Ustr;

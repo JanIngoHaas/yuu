@@ -85,7 +85,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::C { input, output, compiler_timings } => {
+        Commands::C {
+            input,
+            output,
+            compiler_timings,
+        } => {
             let (source, filename) = read_source_file(&input)?;
             let mut pipeline = Pipeline::new(source, filename);
 
@@ -129,7 +133,10 @@ fn main() -> Result<()> {
                 pipeline.timings.print_summary();
             }
         }
-        Commands::Check { input, compiler_timings } => {
+        Commands::Check {
+            input,
+            compiler_timings,
+        } => {
             let (source, filename) = read_source_file(&input)?;
             let mut pipeline = Pipeline::new(source, filename);
 
@@ -178,8 +185,9 @@ fn main() -> Result<()> {
                 if cfg!(windows) {
                     dest.set_extension("exe");
                 }
-                fs::copy(&executable.path, dest)
-                    .map_err(|e| miette::miette!("Failed to copy executable to current directory: {}", e))?;
+                fs::copy(&executable.path, dest).map_err(|e| {
+                    miette::miette!("Failed to copy executable to current directory: {}", e)
+                })?;
             }
 
             if compiler_timings {

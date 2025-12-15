@@ -1,6 +1,9 @@
 use ustr::Ustr;
 
-use crate::{pass_diagnostics::error::YuuError, utils::collections::{UstrIndexMap, UstrIndexSet}};
+use crate::{
+    pass_diagnostics::error::YuuError,
+    utils::collections::{UstrIndexMap, UstrIndexSet},
+};
 
 pub use self::pass_type_dependencies_impl::TypeDependencyAnalysis;
 
@@ -52,7 +55,7 @@ impl TypeDependencyGraph {
 
         for (_node, deps) in &self.0 {
             for dep in deps {
-                root_nodes.swap_remove(dep);    
+                root_nodes.swap_remove(dep);
             }
         }
 

@@ -1,6 +1,6 @@
-use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
-use std::hash::{BuildHasherDefault, Hash};
 use rustc_hash::FxHasher;
+use std::hash::{BuildHasherDefault, Hash};
+use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use crate::pass_diagnostics::error::YuuError;
 use crate::pass_parse::ast::*;
@@ -265,7 +265,7 @@ static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(TypeInterner::new);
 
 #[derive(Clone, Debug)]
 pub struct TypeInfoTable {
-    pub types: IndexMap<NodeId, &'static TypeInfo>,
+    pub types: Vec<&'static TypeInfo>,
 }
 
 impl Default for TypeInfoTable {
@@ -277,16 +277,29 @@ impl Default for TypeInfoTable {
 impl TypeInfoTable {
     pub fn new() -> Self {
         Self {
-            types: Default::default(),
+            types: Vec::new(),
+        }
+    }
+
+    pub fn with_size(size: usize) -> Self {
+        Self {
+            types: vec![unknown_type(); size],
         }
     }
 
     pub fn insert(&mut self, id: NodeId, ty: &'static TypeInfo) -> bool {
-        self.types.insert(id, ty).is_none()
+        assert!(
+            !crate::utils::binding_info::is_prebuilt_node_id(id),
+            "Compiler Bug: Attempted to insert type for non-expression ID {id}. Only expression IDs should have types!"
+        );
+
+        let was_unknown = matches!(self.types[id], TypeInfo::Unknown);
+        self.types[id] = ty;
+        was_unknown
     }
 
     pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {
-        self.types.get(&id).map(|entry| *entry)
+        self.types.get(id).copied()
     }
 
     pub fn unify_and_insert(
@@ -294,12 +307,9 @@ impl TypeInfoTable {
         id: NodeId,
         ty: &'static TypeInfo,
     ) -> Result<&'static TypeInfo, UnificationError> {
-        let unified = if let Some(existing_entry) = self.types.get(&id) {
-            ty.unify(*existing_entry)?
-        } else {
-            ty
-        };
-        let _ = self.types.insert(id, unified);
+        let existing = self.types[id];
+        let unified = ty.unify(existing)?;
+        self.types[id] = unified;
         Ok(unified)
     }
 

@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use yuu::utils::pipeline::Pipeline;
 
 fn load_test_file(filename: &str) -> (String, String) {
@@ -13,7 +13,8 @@ fn bench_parsing(c: &mut Criterion) {
 
     c.bench_function("parsing", |b| {
         b.iter(|| {
-            let mut pipeline = Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
+            let mut pipeline =
+                Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
             pipeline.calc_ast().expect("Parse failed");
             black_box(pipeline);
         });
@@ -25,8 +26,11 @@ fn bench_compile_to_executable(c: &mut Criterion) {
 
     c.bench_function("compile_to_executable", |b| {
         b.iter(|| {
-            let mut pipeline = Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
-            let _executable = pipeline.calc_executable().expect("Compilation to executable failed");
+            let mut pipeline =
+                Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
+            let _executable = pipeline
+                .calc_executable()
+                .expect("Compilation to executable failed");
             black_box(pipeline);
         });
     });

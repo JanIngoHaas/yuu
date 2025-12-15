@@ -1,4 +1,7 @@
-use crate::{pass_parse::BindingNode, utils::{Block, type_info_table::TypeInfo}};
+use crate::{
+    pass_parse::BindingNode,
+    utils::{Block, type_info_table::TypeInfo},
+};
 
 use super::pass_type_inference_impl::TransientDataStructural;
 
@@ -19,8 +22,7 @@ pub fn infer_binding(
                 Some(ident_binding.span.clone()),
                 false,
             );
-            data.type_info_table
-                .insert(ident_binding.id, expr_type);
+            data.type_info_table.insert(ident_binding.id, expr_type);
         }
     }
 }

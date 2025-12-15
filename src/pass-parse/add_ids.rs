@@ -1,18 +1,36 @@
 use crate::pass_parse::ast::*;
 
 pub struct IdGenerator {
-    next_id: NodeId,
+    next_expr_id: NodeId,
+    next_non_expr_id: NodeId,
 }
 
 impl IdGenerator {
     pub fn new() -> Self {
-        Self { next_id: 0 }
+        Self {
+            next_expr_id: 0,
+            next_non_expr_id: usize::MAX,
+        }
     }
 
-    fn next(&mut self) -> NodeId {
-        let id = self.next_id;
-        self.next_id += 1;
+    fn next_expr(&mut self) -> NodeId {
+        let id = self.next_expr_id;
+        self.next_expr_id += 1;
         id
+    }
+
+    pub fn next_non_expr(&mut self) -> NodeId {
+        let id = self.next_non_expr_id;
+        self.next_non_expr_id -= 1;
+        id
+    }
+
+    pub fn max_expr_id(&self) -> NodeId {
+        if self.next_expr_id == 0 { 0 } else { self.next_expr_id - 1 }
+    }
+
+    pub fn expr_count(&self) -> usize {
+        self.next_expr_id as usize
     }
 }
 
@@ -41,61 +59,61 @@ impl AddId for Node {
 impl AddId for ExprNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
-            ExprNode::Literal(lit) => lit.id = generator.next(),
+            ExprNode::Literal(lit) => lit.id = generator.next_expr(),
             ExprNode::Binary(bin) => {
-                bin.id = generator.next();
+                bin.id = generator.next_expr();
                 bin.left.add_id(generator);
                 bin.right.add_id(generator);
             }
             ExprNode::Unary(un) => {
-                un.id = generator.next();
+                un.id = generator.next_expr();
                 un.expr.add_id(generator);
             }
-            ExprNode::Ident(id) => id.id = generator.next(),
+            ExprNode::Ident(id) => id.id = generator.next_expr(),
             ExprNode::FuncCall(func_call_expr) => {
                 func_call_expr.lhs.add_id(generator);
                 for arg in &mut func_call_expr.args {
                     arg.add_id(generator);
                 }
-                func_call_expr.id = generator.next();
+                func_call_expr.id = generator.next_expr();
             }
             ExprNode::Assignment(assignment_expr) => {
-                assignment_expr.id = generator.next();
+                assignment_expr.id = generator.next_expr();
                 assignment_expr.lhs.add_id(generator);
                 assignment_expr.rhs.add_id(generator);
             }
             ExprNode::StructInstantiation(struct_instantiation_expr) => {
-                struct_instantiation_expr.id = generator.next();
+                struct_instantiation_expr.id = generator.next_expr();
                 for (_name, field) in &mut struct_instantiation_expr.fields {
                     field.add_id(generator);
                 }
             }
             ExprNode::MemberAccess(member_access_expr) => {
-                member_access_expr.id = generator.next();
+                member_access_expr.id = generator.next_expr();
                 member_access_expr.lhs.add_id(generator);
                 // Field doesn't need an ID as it's just a name + span
             }
             ExprNode::EnumInstantiation(enum_instantiation_expr) => {
-                enum_instantiation_expr.id = generator.next();
+                enum_instantiation_expr.id = generator.next_expr();
                 if let Some(data) = &mut enum_instantiation_expr.data {
                     data.add_id(generator);
                 }
             }
             ExprNode::Deref(deref_expr) => {
-                deref_expr.id = generator.next();
+                deref_expr.id = generator.next_expr();
                 deref_expr.expr.add_id(generator);
             }
             ExprNode::AddressOf(address_of_expr) => {
-                address_of_expr.id = generator.next();
+                address_of_expr.id = generator.next_expr();
                 address_of_expr.expr.add_id(generator);
             }
 
             ExprNode::HeapAlloc(heap_alloc_expr) => {
-                heap_alloc_expr.id = generator.next();
+                heap_alloc_expr.id = generator.next_expr();
                 heap_alloc_expr.value.add_id(generator);
             }
             ExprNode::Array(array_expr) => {
-                array_expr.id = generator.next();
+                array_expr.id = generator.next_expr();
                 if let Some(init_value) = &mut array_expr.init_value {
                     init_value.add_id(generator);
                 }
@@ -105,7 +123,7 @@ impl AddId for ExprNode {
                 array_expr.size.add_id(generator);
             }
             ExprNode::ArrayLiteral(array_literal_expr) => {
-                array_literal_expr.id = generator.next();
+                array_literal_expr.id = generator.next_expr();
                 for element in &mut array_literal_expr.elements {
                     element.add_id(generator);
                 }
@@ -114,12 +132,12 @@ impl AddId for ExprNode {
                 }
             }
             ExprNode::PointerOp(pointer_op_expr) => {
-                pointer_op_expr.id = generator.next();
+                pointer_op_expr.id = generator.next_expr();
                 pointer_op_expr.left.add_id(generator);
                 pointer_op_expr.right.add_id(generator);
             }
             ExprNode::Cast(cast_expr) => {
-                cast_expr.id = generator.next();
+                cast_expr.id = generator.next_expr();
                 cast_expr.expr.add_id(generator);
                 cast_expr.target_type.add_id(generator);
             }
@@ -131,26 +149,26 @@ impl AddId for StmtNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
             StmtNode::Let(let_stmt) => {
-                let_stmt.id = generator.next();
+                let_stmt.id = generator.next_non_expr();
                 let_stmt.binding.add_id(generator);
                 let_stmt.expr.add_id(generator);
             }
             StmtNode::Atomic(expr) => expr.add_id(generator),
             StmtNode::Break(exit_stmt) => {
-                exit_stmt.id = generator.next();
+                exit_stmt.id = generator.next_non_expr();
             }
             StmtNode::Return(return_stmt) => {
-                return_stmt.id = generator.next();
-                if let Some(expr) = return_stmt
-                    .expr
-                    .as_deref_mut() { expr.add_id(generator) }
+                return_stmt.id = generator.next_non_expr();
+                if let Some(expr) = return_stmt.expr.as_deref_mut() {
+                    expr.add_id(generator)
+                }
             }
             StmtNode::Defer(defer_stmt) => {
-                defer_stmt.id = generator.next();
+                defer_stmt.id = generator.next_non_expr();
                 defer_stmt.expr.add_id(generator);
             }
             StmtNode::If(if_stmt) => {
-                if_stmt.id = generator.next();
+                if_stmt.id = generator.next_non_expr();
                 if_stmt.if_block.condition.add_id(generator);
                 if_stmt.if_block.body.add_id(generator);
                 // Add IDs to else-if blocks
@@ -163,24 +181,24 @@ impl AddId for StmtNode {
                 }
             }
             StmtNode::While(while_stmt) => {
-                while_stmt.id = generator.next();
+                while_stmt.id = generator.next_non_expr();
                 while_stmt.condition_block.body.add_id(generator);
                 while_stmt.condition_block.condition.add_id(generator);
             }
             StmtNode::Block(block_stmt) => {
-                block_stmt.id = generator.next();
+                block_stmt.id = generator.next_non_expr();
                 for stmt in &mut block_stmt.body {
                     stmt.add_id(generator);
                 }
             }
             StmtNode::Match(match_stmt) => {
-                match_stmt.id = generator.next();
+                match_stmt.id = generator.next_non_expr();
                 match_stmt.scrutinee.add_id(generator);
                 for arm in &mut match_stmt.arms {
-                    arm.id = generator.next();
+                    arm.id = generator.next_non_expr();
                     match &mut *arm.pattern {
                         RefutablePatternNode::Enum(enum_pattern) => {
-                            enum_pattern.id = generator.next();
+                            enum_pattern.id = generator.next_non_expr();
                             if let Some(binding) = &mut enum_pattern.binding {
                                 binding.add_id(generator);
                             }
@@ -193,15 +211,15 @@ impl AddId for StmtNode {
                 }
             }
             StmtNode::Decl(decl_stmt) => {
-                decl_stmt.id = generator.next();
+                decl_stmt.id = generator.next_non_expr();
                 decl_stmt.ident.add_id(generator);
             }
             StmtNode::Def(def_stmt) => {
-                def_stmt.id = generator.next();
+                def_stmt.id = generator.next_non_expr();
                 def_stmt.ident.add_id(generator);
                 def_stmt.expr.add_id(generator);
             }
-            StmtNode::Error(e) => *e = generator.next(),
+            StmtNode::Error(e) => *e = generator.next_non_expr(),
         }
     }
 }
@@ -210,17 +228,17 @@ impl AddId for TypeNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
             TypeNode::Ident(i) => {
-                i.id = generator.next();
+                i.id = generator.next_non_expr();
             }
             TypeNode::BuiltIn(built_in_type) => {
-                built_in_type.id = generator.next();
+                built_in_type.id = generator.next_non_expr();
             }
             TypeNode::Pointer(pointer_type) => {
-                pointer_type.id = generator.next();
+                pointer_type.id = generator.next_non_expr();
                 pointer_type.pointee.add_id(generator);
             }
             TypeNode::Array(array_type) => {
-                array_type.id = generator.next();
+                array_type.id = generator.next_non_expr();
                 array_type.element_type.add_id(generator);
                 array_type.size.add_id(generator);
             }
@@ -232,7 +250,7 @@ impl AddId for BindingNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
             BindingNode::Ident(i) => {
-                i.id = generator.next();
+                i.id = generator.next_expr(); // Variable bindings need expression IDs for type lookup
             }
         }
     }
@@ -240,7 +258,7 @@ impl AddId for BindingNode {
 
 impl AddId for IdentBinding {
     fn add_id(&mut self, generator: &mut IdGenerator) {
-        self.id = generator.next();
+        self.id = generator.next_expr(); // IdentBinding needs expression ID for type lookup
     }
 }
 
@@ -248,7 +266,7 @@ impl AddId for RefutablePatternNode {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         match self {
             RefutablePatternNode::Enum(enum_pattern) => {
-                enum_pattern.id = generator.next();
+                enum_pattern.id = generator.next_non_expr();
                 if let Some(binding) = &mut enum_pattern.binding {
                     binding.add_id(generator);
                 }
@@ -260,13 +278,13 @@ impl AddId for RefutablePatternNode {
 impl AddId for Arg {
     fn add_id(&mut self, generator: &mut IdGenerator) {
         self.ty.add_id(generator);
-        self.id = generator.next();
+        self.id = generator.next_expr(); // Function parameters need expression IDs for type lookup
     }
 }
 
 impl AddId for FuncDeclStructural {
     fn add_id(&mut self, generator: &mut IdGenerator) {
-        self.id = generator.next();
+        self.id = generator.next_non_expr();
         for arg in &mut self.args {
             arg.add_id(generator);
         }
@@ -278,13 +296,13 @@ impl AddId for FuncDeclStructural {
 
 impl AddId for StructDeclStructural {
     fn add_id(&mut self, generator: &mut IdGenerator) {
-        self.id = generator.next();
+        self.id = generator.next_non_expr();
     }
 }
 
 impl AddId for EnumDeclStructural {
     fn add_id(&mut self, generator: &mut IdGenerator) {
-        self.id = generator.next();
+        self.id = generator.next_non_expr();
     }
 }
 
@@ -296,25 +314,25 @@ impl AddId for StructuralNode {
             }
             StructuralNode::FuncDef(def) => {
                 def.decl.add_id(generator);
-                def.id = generator.next();
+                def.id = generator.next_expr(); // Function definitions need expression IDs for type table
                 def.body.add_id(generator);
             }
-            StructuralNode::Error(x) => *x = generator.next(),
+            StructuralNode::Error(x) => *x = generator.next_non_expr(),
             StructuralNode::StructDecl(struct_decl_structural) => {
-                struct_decl_structural.id = generator.next();
+                struct_decl_structural.id = generator.next_non_expr();
             }
             StructuralNode::StructDef(struct_def_structural) => {
                 struct_def_structural.decl.add_id(generator);
-                struct_def_structural.id = generator.next();
+                struct_def_structural.id = generator.next_non_expr();
                 for field in &mut struct_def_structural.fields {
                     field.add_id(generator);
                 }
             }
             StructuralNode::EnumDef(enum_def_structural) => {
                 enum_def_structural.decl.add_id(generator);
-                enum_def_structural.id = generator.next();
+                enum_def_structural.id = generator.next_non_expr();
                 for variant in &mut enum_def_structural.variants {
-                    variant.id = generator.next();
+                    variant.id = generator.next_non_expr();
                 }
             }
         }
@@ -323,19 +341,21 @@ impl AddId for StructuralNode {
 
 impl AddId for BlockStmt {
     fn add_id(&mut self, generator: &mut IdGenerator) {
-        self.id = generator.next();
+        self.id = generator.next_non_expr();
         for stmt in &mut self.body {
             stmt.add_id(generator);
         }
     }
 }
 
-pub fn add_ids(root: &mut AST) {
+pub fn add_ids(root: &mut AST) -> (usize, IdGenerator) {
     // Use a single IdGenerator instance for the entire AST
     let mut generator = IdGenerator::new();
     for node in root.structurals.iter_mut() {
         node.add_id(&mut generator);
     }
+    let expr_count = generator.expr_count();
+    (expr_count, generator)
 }
 
 pub trait GetId {

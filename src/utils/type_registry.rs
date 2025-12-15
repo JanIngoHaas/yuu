@@ -1,10 +1,12 @@
-
 use logos::Span;
-use ustr::{Ustr};
+use ustr::Ustr;
 
-use crate::utils::{BindingInfo, BindingTable};
 use crate::utils::collections::{IndexMap, UstrIndexMap};
-use crate::utils::type_info_table::{FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type};
+use crate::utils::type_info_table::{
+    FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool,
+    primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
+};
+use crate::utils::{BindingInfo, BindingTable};
 use crate::{
     pass_diagnostics::levenshtein_distance,
     pass_parse::ast::{InternUstr, NodeId},
@@ -142,7 +144,6 @@ pub struct TypeRegistry {
     structs: UstrIndexMap<StructInfo>,
     enums: UstrIndexMap<EnumInfo>,
     functions: UstrIndexMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
-    pub bindings: BindingTable,
 }
 
 impl Default for TypeRegistry {
@@ -157,14 +158,11 @@ impl TypeRegistry {
             structs: UstrIndexMap::default(),
             enums: UstrIndexMap::default(),
             functions: UstrIndexMap::default(),
-            bindings: BindingTable::default(),
         };
 
-        let mut id_counter = 0;
-        let mut next = || {
-            id_counter -= 1;
-            id_counter
-        };
+        // Use a proper IdGenerator for built-in operators
+        let mut id_gen = crate::pass_parse::add_ids::IdGenerator::new();
+        let mut next = || id_gen.next_non_expr();
 
         // F32 operations
         reg.register_binary_op(
@@ -559,7 +557,7 @@ impl TypeRegistry {
         };
 
         let funcs = self.functions.entry(info.name).or_default();
-        
+
         let out = funcs
             .insert(arg_type.iter().map(|x| GiveMePtrHashes(*x)).collect(), info)
             .is_none();

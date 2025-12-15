@@ -1,9 +1,11 @@
-
-
 use crate::{
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode},
-    utils::{BindingInfo, BindingTable, BlockTree, EnumVariantInfo, StructFieldInfo, TypeRegistry, collections::UstrIndexMap, type_info_table::{TypeInfo, TypeInfoTable, error_type}},
+    utils::{
+        BindingInfo, BindingTable, BlockTree, EnumVariantInfo, StructFieldInfo, TypeRegistry,
+        collections::UstrIndexMap,
+        type_info_table::{TypeInfo, TypeInfoTable, error_type},
+    },
 };
 
 use super::{declare_function, infer_structural, infer_type};
@@ -12,7 +14,7 @@ pub struct TransientData<'a> {
     pub type_registry: &'a mut TypeRegistry,
     pub type_info_table: &'a mut TypeInfoTable,
     pub ast: &'a AST,
-    pub errors: Vec<YuuError>,
+    pub errors: &'a mut Vec<YuuError>,
     pub src_code: SourceInfo,
     pub current_function_return_type: &'static TypeInfo,
 }
@@ -23,7 +25,7 @@ pub struct TransientDataStructural<'a> {
     pub block_tree: &'a mut BlockTree,
     pub bindings: &'a mut BindingTable,
     pub ast: &'a AST,
-    pub errors: Vec<YuuError>,
+    pub errors: &'a mut Vec<YuuError>,
     pub src_code: SourceInfo,
     pub current_function_return_type: &'static TypeInfo,
 }
@@ -31,11 +33,18 @@ pub struct TransientDataStructural<'a> {
 pub struct TypeInferenceErrors(pub Vec<YuuError>);
 
 impl<'a> TransientData<'a> {
-    pub fn new(type_registry: &'a mut TypeRegistry, ast: &'a AST, src_code: SourceInfo) -> Self {
+    pub fn new(
+        type_registry: &'a mut TypeRegistry,
+        type_info_table: &'a mut TypeInfoTable,
+        ast: &'a AST,
+        errors: &'a mut Vec<YuuError>,
+        src_code: SourceInfo,
+    ) -> Self {
         Self {
             type_registry,
+            type_info_table,
             ast,
-            errors: Vec::default(),
+            errors,
             src_code,
             current_function_return_type: error_type(),
         }
@@ -47,11 +56,22 @@ impl<'a> TransientData<'a> {
 }
 
 impl<'a> TransientDataStructural<'a> {
-    pub fn new(type_registry: &'a TypeRegistry, ast: &'a AST, src_code: SourceInfo) -> Self {
+    pub fn new(
+        type_registry: &'a TypeRegistry,
+        type_info_table: &'a mut TypeInfoTable,
+        block_tree: &'a mut BlockTree,
+        bindings: &'a mut BindingTable,
+        ast: &'a AST,
+        errors: &'a mut Vec<YuuError>,
+        src_code: SourceInfo,
+    ) -> Self {
         Self {
             type_registry,
+            type_info_table,
+            block_tree,
+            bindings,
             ast,
-            errors: Vec::default(),
+            errors,
             src_code,
             current_function_return_type: error_type(),
         }
@@ -151,7 +171,7 @@ fn declare_and_define_functions(
             );
         }
         StructuralNode::FuncDef(def) => {
-            let ret_type = declare_function(
+            let function_type = declare_function(
                 def.decl.name,
                 &def.decl.args,
                 &def.decl.ret_ty,
@@ -159,8 +179,9 @@ fn declare_and_define_functions(
                 def.decl.span.clone(),
                 data,
             );
-            data.type_info_table
-                .insert(def.body.id, ret_type);
+
+            // Store the function type for later access
+            data.type_info_table.insert(def.id, function_type);
         }
         _ => (),
     };
@@ -175,7 +196,12 @@ fn define_user_def_types(
     match structural {
         StructuralNode::StructDef(struct_def_structural) => {
             for field in &struct_def_structural.fields {
-                let ty = infer_type(&field.ty, &data.type_registry, &mut data.errors, &data.src_code);
+                let ty = infer_type(
+                    &field.ty,
+                    &data.type_registry,
+                    &mut data.errors,
+                    &data.src_code,
+                );
                 helper_vec.push(ty);
             }
 
@@ -191,7 +217,9 @@ fn define_user_def_types(
         }
         StructuralNode::EnumDef(enum_def_structural) => {
             for variant in &enum_def_structural.variants {
-                let ty = variant.data_type.as_ref().map(|ty| infer_type(ty, &data.type_registry, &mut data.errors, &data.src_code));
+                let ty = variant.data_type.as_ref().map(|ty| {
+                    infer_type(ty, &data.type_registry, &mut data.errors, &data.src_code)
+                });
                 helper_vec.push(ty.unwrap_or_else(|| error_type())); // Use error_type as placeholder for None
             }
 
@@ -222,50 +250,77 @@ impl TypeInference {
     pub fn run(
         &self,
         ast: &AST,
+        expr_count: usize,
         src_code: SourceInfo,
-    ) -> miette::Result<(TypeRegistry, BlockTree, TypeInferenceErrors)> {
+    ) -> miette::Result<(TypeRegistry, BlockTree, BindingTable, TypeInfoTable, TypeInferenceErrors)> {
         let mut root_block = BlockTree::new();
         let mut type_registry = TypeRegistry::new();
-        let errors = {
-            let mut data = TransientData::new(&mut type_registry, ast, src_code.clone());
-            let mut helper_vec = Vec::<&'static TypeInfo>::new();
+        let mut type_info_table = TypeInfoTable::with_size(expr_count);
+        let mut errors = Vec::new();
+        let mut data = TransientData::new(
+            &mut type_registry,
+            &mut type_info_table,
+            ast,
+            &mut errors,
+            src_code.clone(),
+        );
+        let mut helper_vec = Vec::<&'static TypeInfo>::new();
 
-            // First pass: declare user-defined types (structs and enums)
-            for node in &ast.structurals {
-                declare_user_def_types(node, &mut data);
-            }
+        // First pass: declare user-defined types (structs and enums)
+        for node in &ast.structurals {
+            declare_user_def_types(node, &mut data);
+        }
 
-            // Second pass: define user-defined types right after declaration
-            for node in &ast.structurals {
-                define_user_def_types(node, &mut data, &mut helper_vec);
-            }
+        // Second pass: define user-defined types right after declaration
+        for node in &ast.structurals {
+            define_user_def_types(node, &mut data, &mut helper_vec);
+        }
 
-            // Third pass: declare and define functions (can be done together since functions signatures don't reference each other)
-            let root_id = root_block.root_id();
-            for node in &ast.structurals {
-                declare_and_define_functions(node, &mut data, &mut root_block, root_id);
-            }
-            
-            data.errors
-        };
-        
+        // Third pass: declare and define functions (can be done together since functions signatures don't reference each other)
+        let root_id = root_block.root_id();
+        for node in &ast.structurals {
+            declare_and_define_functions(node, &mut data, &mut root_block, root_id);
+        }
+
+        // Fourth pass: infer the structural elements (SYNC)
+        let mut bindings = BindingTable::default();
+        let mut data = TransientDataStructural::new(
+            &type_registry,
+            &mut type_info_table,
+            &mut root_block,
+            &mut bindings,
+            ast,
+            &mut errors,
+            src_code.clone(),
+        );
+        for node in &ast.structurals {
+            infer_structural(node, root_id, &mut data);
+        }
+
         // Fourth pass: infer the structural elements (PARALLEL)
-        let errors_pass4: Vec<YuuError> = ast.structurals.par_iter().flat_map(|node| {
-            // Create local BlockTree for this function/structural
-            let mut local_tree = BlockTree::new();
-            let root_id = local_tree.root_id();
-            
-            // Create local TransientData with IMMUTABLE type registry reference
-            let mut local_data = TransientDataStructural::new(&type_registry, ast, src_code.clone());
-            
-            infer_structural(node, &mut local_tree, root_id, &mut local_data);
-            
-            local_data.errors
-        }).collect();
+        // let errors_pass4: Vec<YuuError> = ast.structurals.par_iter().flat_map(|node| {
+        //     // Create local BlockTree for this function/structural
+        //     let mut local_tree = BlockTree::new();
+        //     let root_id = local_tree.root_id();
+        //     let mut local_type_info_table = TypeInfoTable::new();
+        //     let mut local_bindings = BindingTable::new();
 
-        let mut all_errors = errors;
-        all_errors.extend(errors_pass4);
+        //     // Create local TransientData with IMMUTABLE type registry reference
+        //     let mut local_data = TransientDataStructural::new(&type_registry, &mut local_type_info_table, &mut local_tree, &mut local_bindings, ast, src_code.clone());
 
-        Ok((type_registry, root_block, TypeInferenceErrors(all_errors)))
+        //     infer_structural(node, root_id, &mut local_data);
+
+        //     local_data.errors
+        // }).collect();
+
+        // let mut all_errors = errors;
+        // all_errors.extend(errors_pass4);
+        Ok((
+            type_registry,
+            root_block,
+            bindings,
+            type_info_table,
+            TypeInferenceErrors(errors),
+        ))
     }
 }

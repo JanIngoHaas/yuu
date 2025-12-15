@@ -1,14 +1,22 @@
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     pass_parse::{
-        BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode, ast::{
-            AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp
-        }, token::{Integer, Token, TokenKind}
+        BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode,
+        ast::{
+            AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode,
+            UnaryOp,
+        },
+        token::{Integer, Token, TokenKind},
     },
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
-    }, utils::{TypeRegistry, calculate_type_layout, collections::IndexMap, type_info_table::TypeInfo},
+    },
+    utils::{
+        TypeRegistry, calculate_type_layout,
+        collections::IndexMap,
+        type_info_table::{TypeInfo, primitive_u64},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,11 +38,13 @@ struct Scope {
 pub struct TransientData<'a> {
     pub function: Function,
     tr: &'a TypeRegistry,
+    type_info_table: &'a crate::utils::type_info_table::TypeInfoTable,
+    bindings: &'a crate::utils::BindingTable,
     var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
     loop_context: Vec<yir::Label>,
     scope_stack: Vec<Scope>,
     current_temporaries: Vec<Variable>, // Temporaries created in the current statement
-    emit_kill_sets: bool, // Flag to control KillSet emission
+    emit_kill_sets: bool,               // Flag to control KillSet emission
 }
 
 enum StmtRes {
@@ -43,10 +53,18 @@ enum StmtRes {
 }
 
 impl<'a> TransientData<'a> {
-    fn new(function: Function, tr: &'a TypeRegistry, emit_kill_sets: bool) -> Self {
+    fn new(
+        function: Function,
+        tr: &'a TypeRegistry,
+        type_info_table: &'a crate::utils::type_info_table::TypeInfoTable,
+        bindings: &'a crate::utils::BindingTable,
+        emit_kill_sets: bool
+    ) -> Self {
         Self {
             function,
             tr,
+            type_info_table,
+            bindings,
             var_map: IndexMap::default(),
             loop_context: Vec::new(),
             scope_stack: Vec::new(),
@@ -56,8 +74,7 @@ impl<'a> TransientData<'a> {
     }
 
     fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
-        self.tr
-            .type_info_table
+        self.type_info_table
             .get(node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
     }
@@ -84,7 +101,9 @@ impl<'a> TransientData<'a> {
     }
 
     fn add_variable_to_current_scope(&mut self, var: Variable) {
-        if self.emit_kill_sets && let Some(current_scope) = self.scope_stack.last_mut() {
+        if self.emit_kill_sets
+            && let Some(current_scope) = self.scope_stack.last_mut()
+        {
             current_scope.vars.push(var);
         }
     }
@@ -103,12 +122,13 @@ impl<'a> TransientData<'a> {
 
     fn kill_current_temporaries(&mut self) {
         if self.emit_kill_sets && !self.current_temporaries.is_empty() {
-            self.function.make_kill_set(std::mem::take(&mut self.current_temporaries));
+            self.function
+                .make_kill_set(std::mem::take(&mut self.current_temporaries));
         }
     }
 
     fn lower_ident_assignment(&mut self, ident_expr: &IdentExpr, context: ContextKind) -> Variable {
-        let binding_id = *self.tr.bindings.get(&ident_expr.id).unwrap_or_else(|| {
+        let binding_id = *self.bindings.get(&ident_expr.id).unwrap_or_else(|| {
             panic!(
                 "Compiler bug: No binding found for ident expr '{}': {} -> Span: {:#?}",
                 ident_expr.ident, ident_expr.id, ident_expr.span
@@ -125,7 +145,9 @@ impl<'a> TransientData<'a> {
         match context {
             ContextKind::StorageLocation => yir_var,
             ContextKind::AsIs => {
-                let temp = self.function.make_load("var_value".intern(), Operand::Variable(yir_var));
+                let temp = self
+                    .function
+                    .make_load("var_value".intern(), Operand::Variable(yir_var));
                 self.add_temporary(temp);
                 temp
             }
@@ -163,14 +185,14 @@ impl<'a> TransientData<'a> {
                     } => Operand::NoOp,
                     _ => todo!("Other literals not implemented yet"),
                 }
-            },
+            }
             ExprNode::Binary(bin_expr) => {
                 // Determine operands. Note: these are "values", not necessarily storage locations.
                 let lhs_val_operand = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
                 let rhs_val_operand = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
-                
+
                 // The overall type of the binary expression, as inferred by the type checker.
-                let result_ty = self.get_type(bin_expr.id); 
+                let result_ty = self.get_type(bin_expr.id);
 
                 let op = match bin_expr.op {
                     BinOp::Add => YirBinOp::Add,
@@ -186,9 +208,13 @@ impl<'a> TransientData<'a> {
                     BinOp::GtEq => YirBinOp::GreaterThanEq,
                 };
 
-                let result_var = self
-                    .function
-                    .make_binary("bin_result".intern(), op, lhs_val_operand, rhs_val_operand, result_ty);
+                let result_var = self.function.make_binary(
+                    "bin_result".intern(),
+                    op,
+                    lhs_val_operand,
+                    rhs_val_operand,
+                    result_ty,
+                );
                 self.add_temporary(result_var);
                 let result_operand = Operand::Variable(result_var);
 
@@ -196,9 +222,15 @@ impl<'a> TransientData<'a> {
                     ContextKind::AsIs => result_operand,
                     ContextKind::StorageLocation => {
                         if result_operand == Operand::NoOp {
-                             unreachable!("Compiler bug: Cannot get storage location for NoOp operand from binary expression");
+                            unreachable!(
+                                "Compiler bug: Cannot get storage location for NoOp operand from binary expression"
+                            );
                         }
-                        let storage_var = self.function.make_alloca_single("bin_result_storage".intern(), result_ty, None);
+                        let storage_var = self.function.make_alloca_single(
+                            "bin_result_storage".intern(),
+                            result_ty,
+                            None,
+                        );
                         self.add_temporary(storage_var);
                         self.function.make_store(storage_var, result_operand);
                         Operand::Variable(storage_var)
@@ -222,11 +254,15 @@ impl<'a> TransientData<'a> {
                     }
                     UnaryOp::Pos => {
                         // Nothing really happens here, so we just return the variable itself or if
-                        // not a variable, we just create a temp one and return that... 
+                        // not a variable, we just create a temp one and return that...
                         if let Operand::Variable(var) = operand {
                             Operand::Variable(var)
                         } else {
-                            let temp = self.function.make_alloca_single("pos_temp".intern(), ty, Some(operand));
+                            let temp = self.function.make_alloca_single(
+                                "pos_temp".intern(),
+                                ty,
+                                Some(operand),
+                            );
                             self.add_temporary(temp);
                             Operand::Variable(temp)
                         }
@@ -241,16 +277,22 @@ impl<'a> TransientData<'a> {
                     ContextKind::AsIs => result_operand,
                     ContextKind::StorageLocation => {
                         if result_operand == Operand::NoOp {
-                            unreachable!("Compiler bug: Cannot get storage location for NoOp operand from unary expression");
+                            unreachable!(
+                                "Compiler bug: Cannot get storage location for NoOp operand from unary expression"
+                            );
                         }
-                        let storage = self.function.make_alloca_single("unary_storage".intern(), ty, Some(result_operand));
+                        let storage = self.function.make_alloca_single(
+                            "unary_storage".intern(),
+                            ty,
+                            Some(result_operand),
+                        );
                         self.add_temporary(storage);
                         Operand::Variable(storage)
                     }
                 }
             }
             ExprNode::Ident(ident_expr) => {
-                Operand::Variable(self.lower_ident_assignment(ident_expr, context))                
+                Operand::Variable(self.lower_ident_assignment(ident_expr, context))
             }
             ExprNode::FuncCall(func_call_expr) => {
                 let func_name = match &*func_call_expr.lhs {
@@ -275,12 +317,16 @@ impl<'a> TransientData<'a> {
                         match context {
                             ContextKind::AsIs => Operand::Variable(result_var),
                             ContextKind::StorageLocation => {
-                                let storage = self.function.make_alloca_single("call_storage".intern(), return_type, Some(Operand::Variable(result_var)));
+                                let storage = self.function.make_alloca_single(
+                                    "call_storage".intern(),
+                                    return_type,
+                                    Some(Operand::Variable(result_var)),
+                                );
                                 self.add_temporary(storage);
                                 Operand::Variable(storage)
                             }
                         }
-                    },
+                    }
                     None => {
                         debug_assert!(
                             context != ContextKind::StorageLocation,
@@ -294,24 +340,30 @@ impl<'a> TransientData<'a> {
             ExprNode::Assignment(assignment_expr) => {
                 let rhs = self.lower_expr(&assignment_expr.rhs, ContextKind::AsIs);
                 let target_var = match assignment_expr.lvalue_kind {
-                    LValueKind::Variable => {
-                        match assignment_expr.lhs.as_ref() {
-                            ExprNode::Ident(ident_expr) => self.lower_ident_assignment(ident_expr, ContextKind::StorageLocation),
-                            _ => unreachable!("Compiler bug: Variable LValueKind must have Ident LHS"),
+                    LValueKind::Variable => match assignment_expr.lhs.as_ref() {
+                        ExprNode::Ident(ident_expr) => {
+                            self.lower_ident_assignment(ident_expr, ContextKind::StorageLocation)
                         }
-                    }
+                        _ => unreachable!("Compiler bug: Variable LValueKind must have Ident LHS"),
+                    },
                     LValueKind::FieldAccess => {
-                        let lhs = self.lower_expr(&assignment_expr.lhs, ContextKind::StorageLocation);
+                        let lhs =
+                            self.lower_expr(&assignment_expr.lhs, ContextKind::StorageLocation);
                         match lhs {
                             Operand::Variable(var) => var,
-                            _ => unreachable!("Compiler bug: FieldAccess LHS must evaluate to a variable (pointer)"),
+                            _ => unreachable!(
+                                "Compiler bug: FieldAccess LHS must evaluate to a variable (pointer)"
+                            ),
                         }
                     }
                     LValueKind::Dereference => {
-                        let lhs = self.lower_expr(&assignment_expr.lhs, ContextKind::StorageLocation);
+                        let lhs =
+                            self.lower_expr(&assignment_expr.lhs, ContextKind::StorageLocation);
                         match lhs {
                             Operand::Variable(var) => var,
-                            _ => unreachable!("Compiler bug: Dereference LHS must evaluate to a variable (pointer)"),
+                            _ => unreachable!(
+                                "Compiler bug: Dereference LHS must evaluate to a variable (pointer)"
+                            ),
                         }
                     }
                 };
@@ -373,11 +425,11 @@ impl<'a> TransientData<'a> {
                     self.function.make_store(field_var, field_op);
                 }
                 match context {
-                    ContextKind::StorageLocation => {
-                        Operand::Variable(struct_var)
-                    }
+                    ContextKind::StorageLocation => Operand::Variable(struct_var),
                     ContextKind::AsIs => {
-                        let loaded_value = self.function.make_load("struct_value".intern(), Operand::Variable(struct_var));
+                        let loaded_value = self
+                            .function
+                            .make_load("struct_value".intern(), Operand::Variable(struct_var));
                         self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
@@ -391,17 +443,22 @@ impl<'a> TransientData<'a> {
                 let (lhs, struct_type) = match lhs_type {
                     TypeInfo::Struct(sinfo) => {
                         // Direct struct access: we need the storage location to get a pointer to the struct
-                        let lhs = self.lower_expr(&member_access_expr.lhs, ContextKind::StorageLocation);
+                        let lhs =
+                            self.lower_expr(&member_access_expr.lhs, ContextKind::StorageLocation);
                         (lhs, sinfo)
-                    },
+                    }
                     TypeInfo::Pointer(inner_type) => {
                         match inner_type {
                             TypeInfo::Struct(sinfo) => {
                                 // Pointer to struct access: we need the pointer value itself
-                                let lhs = self.lower_expr(&member_access_expr.lhs, ContextKind::AsIs);
+                                let lhs =
+                                    self.lower_expr(&member_access_expr.lhs, ContextKind::AsIs);
                                 (lhs, sinfo)
-                            },
-                            _ => unreachable!("Member access on pointer to non-struct type: {:#?}", inner_type),
+                            }
+                            _ => unreachable!(
+                                "Member access on pointer to non-struct type: {:#?}",
+                                inner_type
+                            ),
                         }
                     }
                     _ => unreachable!("Member access on non-struct type: {:#?}", lhs_type),
@@ -422,11 +479,11 @@ impl<'a> TransientData<'a> {
                 self.add_temporary(field_ptr);
 
                 match context {
-                    ContextKind::StorageLocation => {
-                        Operand::Variable(field_ptr)
-                    }
+                    ContextKind::StorageLocation => Operand::Variable(field_ptr),
                     ContextKind::AsIs => {
-                        let loaded_value = self.function.make_load("field_value".intern(), Operand::Variable(field_ptr));
+                        let loaded_value = self
+                            .function
+                            .make_load("field_value".intern(), Operand::Variable(field_ptr));
                         self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
@@ -443,7 +500,10 @@ impl<'a> TransientData<'a> {
                     .get(&ei.variant_name)
                     .expect("Compiler bug: enum variant not found in lowering to YIR");
 
-                let data_operand = ei.data.as_ref().map(|data_expr| self.lower_expr(data_expr, ContextKind::AsIs));
+                let data_operand = ei
+                    .data
+                    .as_ref()
+                    .map(|data_expr| self.lower_expr(data_expr, ContextKind::AsIs));
 
                 let enum_var =
                     self.function
@@ -464,11 +524,11 @@ impl<'a> TransientData<'a> {
                 }
 
                 match context {
-                    ContextKind::StorageLocation => {
-                        Operand::Variable(enum_var)
-                    }
+                    ContextKind::StorageLocation => Operand::Variable(enum_var),
                     ContextKind::AsIs => {
-                        let loaded_value = self.function.make_load("enum_value".intern(), Operand::Variable(enum_var));
+                        let loaded_value = self
+                            .function
+                            .make_load("enum_value".intern(), Operand::Variable(enum_var));
                         self.add_temporary(loaded_value);
                         Operand::Variable(loaded_value)
                     }
@@ -483,7 +543,7 @@ impl<'a> TransientData<'a> {
                         self.add_temporary(loaded);
                         Operand::Variable(loaded)
                     }
-                    ContextKind::StorageLocation => ptr_var
+                    ContextKind::StorageLocation => ptr_var,
                 }
             }
             ExprNode::AddressOf(address_of_expr) => {
@@ -512,14 +572,16 @@ impl<'a> TransientData<'a> {
                             crate::pass_yir_lowering::yir::BinOp::Mul,
                             Operand::U64Const(element_layout.size as u64),
                             count_operand,
-                            primitive_u64()
+                            primitive_u64(),
                         );
                         self.add_temporary(total_size_var);
 
                         // Create ArrayInit based on init_value
                         let init = if let Some(init_value) = &array_expr.init_value {
                             let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
-                            Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(init_operand))
+                            Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(
+                                init_operand,
+                            ))
                         } else {
                             None
                         };
@@ -529,41 +591,47 @@ impl<'a> TransientData<'a> {
                             expr_type,
                             element_layout.size as u64, // element_size
                             Operand::Variable(total_size_var), // total_size
-                            None, // No alignment requirement for now
+                            None,                       // No alignment requirement for now
                             init,
                         );
                         self.add_temporary(ptr_var);
                         Operand::Variable(ptr_var)
                     }
                     ExprNode::ArrayLiteral(array_literal_expr) => {
-                        debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+                        debug_assert!(
+                            !array_literal_expr.elements.is_empty(),
+                            "Empty array literals should be rejected during parsing"
+                        );
 
                         // Lower all elements to operands
-                        let element_operands: Vec<Operand> = array_literal_expr.elements
+                        let element_operands: Vec<Operand> = array_literal_expr
+                            .elements
                             .iter()
                             .map(|elem| self.lower_expr(elem, ContextKind::AsIs))
                             .collect();
 
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays decay to pointers
-                                                                   // IMMEDIATELY
+                        // IMMEDIATELY
                         let element_layout = calculate_type_layout(element_type, self.tr);
-                        let total_size = Operand::U64Const(element_layout.size as u64 * array_literal_expr.elements.len() as u64);
+                        let total_size = Operand::U64Const(
+                            element_layout.size as u64 * array_literal_expr.elements.len() as u64,
+                        );
 
-                        let init = crate::pass_yir_lowering::yir::ArrayInit::Elements(element_operands);
+                        let init =
+                            crate::pass_yir_lowering::yir::ArrayInit::Elements(element_operands);
                         let ptr_var = self.function.make_heap_alloc(
                             "heap_array_literal".intern(),
                             expr_type,
                             element_layout.size as u64, // element_size
-                            total_size, // total_size
-                            None, // No alignment requirement for now
+                            total_size,                 // total_size
+                            None,                       // No alignment requirement for now
                             Some(init),
                         );
                         self.add_temporary(ptr_var);
                         Operand::Variable(ptr_var)
                     }
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
-                        
                         let value_type = self.get_type(struct_instantiation_expr.id);
                         let layout = calculate_type_layout(value_type, self.tr);
                         let size_operand = Operand::U64Const(layout.size as u64);
@@ -573,8 +641,8 @@ impl<'a> TransientData<'a> {
                             "heap_ptr".intern(),
                             expr_type,
                             layout.size as u64, // element_size
-                            size_operand, // total_size
-                            None, // No alignment requirement for now
+                            size_operand,       // total_size
+                            None,               // No alignment requirement for now
                             None, // No init for struct instantiation as we fill fields
                         );
                         self.add_temporary(ptr_var);
@@ -614,13 +682,14 @@ impl<'a> TransientData<'a> {
                             "heap_ptr".intern(),
                             expr_type,
                             layout.size as u64, // element_size
-                            size_operand, // total_size
-                            None, // No alignment requirement for now
-                            None, // No init
+                            size_operand,       // total_size
+                            None,               // No alignment requirement for now
+                            None,               // No init
                         );
                         self.add_temporary(ptr_var);
 
-                        let value_operand = self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
+                        let value_operand =
+                            self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
                         self.function.make_store(ptr_var, value_operand);
                         Operand::Variable(ptr_var)
                     }
@@ -633,7 +702,9 @@ impl<'a> TransientData<'a> {
                     Operand::U64Const(n) => n,
                     Operand::I64Const(n) if n >= 0 => n as u64,
                     _ => {
-                        unreachable!("Array size must be a compile-time constant - type checker should have ensured this");
+                        unreachable!(
+                            "Array size must be a compile-time constant - type checker should have ensured this"
+                        );
                     }
                 };
 
@@ -644,21 +715,29 @@ impl<'a> TransientData<'a> {
                 let ptr_var = if let Some(init_value) = &array_expr.init_value {
                     // Pattern: [value; count] - initialized with repeated value
                     let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
-                    let init = Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(init_operand));
-                    self.function.make_alloca("array".intern(), element_type, count, init)
+                    let init = Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(
+                        init_operand,
+                    ));
+                    self.function
+                        .make_alloca("array".intern(), element_type, count, init)
                 } else {
                     // Pattern: [:type; count] - uninitialized
-                    self.function.make_alloca("array".intern(), element_type, count, None)
+                    self.function
+                        .make_alloca("array".intern(), element_type, count, None)
                 };
 
                 self.add_temporary(ptr_var);
                 Operand::Variable(ptr_var)
             }
             ExprNode::ArrayLiteral(array_literal_expr) => {
-                debug_assert!(!array_literal_expr.elements.is_empty(), "Empty array literals should be rejected during parsing");
+                debug_assert!(
+                    !array_literal_expr.elements.is_empty(),
+                    "Empty array literals should be rejected during parsing"
+                );
 
                 // Lower all elements to operands
-                let element_operands: Vec<Operand> = array_literal_expr.elements
+                let element_operands: Vec<Operand> = array_literal_expr
+                    .elements
                     .iter()
                     .map(|elem| self.lower_expr(elem, ContextKind::AsIs))
                     .collect();
@@ -673,7 +752,7 @@ impl<'a> TransientData<'a> {
                     "array_literal".intern(),
                     element_type,
                     array_literal_expr.elements.len() as u64,
-                    Some(init)
+                    Some(init),
                 );
 
                 self.add_temporary(ptr_var);
@@ -688,7 +767,7 @@ impl<'a> TransientData<'a> {
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    rhs_operand
+                    rhs_operand,
                 );
                 self.add_temporary(result_var);
                 Operand::Variable(result_var)
@@ -704,12 +783,14 @@ impl<'a> TransientData<'a> {
                     let result_var = self.function.make_int_to_ptr(
                         "cast_result".intern(),
                         target_type,
-                        expr_operand
+                        expr_operand,
                     );
                     self.add_temporary(result_var);
                     Operand::Variable(result_var)
                 } else {
-                    panic!("Cast expressions other than int-to-pointer not yet implemented in YIR lowering")
+                    panic!(
+                        "Cast expressions other than int-to-pointer not yet implemented in YIR lowering"
+                    )
                 }
             }
         }
@@ -767,13 +848,16 @@ impl<'a> TransientData<'a> {
                 "Syntax Error reached during lowering - pipeline was wrongly configured or compiler bug"
             ),
             StmtNode::Return(return_stmt) => {
-                let ret_value = return_stmt.expr.as_ref().map(|e| self.lower_expr(e, ContextKind::AsIs));
+                let ret_value = return_stmt
+                    .expr
+                    .as_ref()
+                    .map(|e| self.lower_expr(e, ContextKind::AsIs));
 
                 // Pull all higher-level scopes into the current scope for KILLSETting
                 if !self.scope_stack.is_empty() {
                     // First collect variables from all higher scopes
                     let mut vars_to_merge = Vec::new();
-                    for scope in &self.scope_stack[..self.scope_stack.len()-1] {
+                    for scope in &self.scope_stack[..self.scope_stack.len() - 1] {
                         vars_to_merge.extend_from_slice(&scope.vars);
                     }
 
@@ -817,7 +901,10 @@ impl<'a> TransientData<'a> {
                                     variant_info,
                                 );
                                 self.add_temporary(variant_ptr);
-                                let variant_value = self.function.make_load("variant_value".intern(), Operand::Variable(variant_ptr));
+                                let variant_value = self.function.make_load(
+                                    "variant_value".intern(),
+                                    Operand::Variable(variant_ptr),
+                                );
                                 self.add_temporary(variant_value);
                                 self.lower_binding(
                                     variant_data_binding,
@@ -856,7 +943,6 @@ impl<'a> TransientData<'a> {
                 StmtRes::Proceed
             }
             StmtNode::If(if_stmt) => {
-
                 let if_header = self.function.add_block("if_header".intern());
                 let if_body = self.function.add_block("if_body".intern());
                 let merge_block = self.function.add_block("if_merge".intern());
@@ -864,7 +950,8 @@ impl<'a> TransientData<'a> {
                 self.function.make_jump_if_no_terminator(if_header);
                 self.function.set_current_block(&if_header);
 
-                let lowered_if_condition = self.lower_expr(&if_stmt.if_block.condition, ContextKind::AsIs);
+                let lowered_if_condition =
+                    self.lower_expr(&if_stmt.if_block.condition, ContextKind::AsIs);
                 self.kill_current_temporaries();
 
                 self.function.set_current_block(&if_body);
@@ -886,7 +973,8 @@ impl<'a> TransientData<'a> {
                     );
 
                     self.function.set_current_block(&else_if_header);
-                    let lowered_else_if_cond = self.lower_expr(&else_if_block.condition, ContextKind::AsIs);
+                    let lowered_else_if_cond =
+                        self.lower_expr(&else_if_block.condition, ContextKind::AsIs);
                     self.kill_current_temporaries();
 
                     self.function.set_current_block(&else_if_body);
@@ -957,12 +1045,12 @@ impl<'a> TransientData<'a> {
                 self.var_map.insert(binding_id, yir_var);
                 self.add_variable_to_current_scope(yir_var);
                 StmtRes::Proceed
-            },
+            }
             StmtNode::Def(def_stmt) => {
                 let rhs_value = self.lower_expr(&def_stmt.expr, ContextKind::AsIs);
 
                 // Find the YIR variable that was created during the decl
-                let binding_id = *self.tr.bindings.get(&def_stmt.ident.id).unwrap_or_else(|| {
+                let binding_id = *self.bindings.get(&def_stmt.ident.id).unwrap_or_else(|| {
                     panic!(
                         "Compiler bug: No binding found for def ident '{}': {} -> Span: {:#?}",
                         def_stmt.ident.name, def_stmt.ident.id, def_stmt.ident.span
@@ -978,7 +1066,7 @@ impl<'a> TransientData<'a> {
                 // Store the RHS value into the already-allocated variable
                 self.function.make_store(yir_var, rhs_value);
                 StmtRes::Proceed
-            },
+            }
         };
 
         self.kill_current_temporaries();
@@ -1015,51 +1103,70 @@ impl YirLowering {
         Self
     }
 
-    fn lower_ast(&self, ast: &AST, tr: &TypeRegistry, emit_kill_sets: bool) -> Module {
-        let functions: Vec<Function> = ast.structurals.par_iter().filter_map(|structural| {
-            if let StructuralNode::FuncDef(func) = structural.as_ref() {
-                let return_type = match tr.type_info_table.get(func.id).expect("Function type not found") {
-                    TypeInfo::Function(ft) => ft.ret,
-                    _ => unreachable!("Expected function type"),
-                };
+    fn lower_ast(
+        &self,
+        ast: &AST,
+        tr: &TypeRegistry,
+        type_info_table: &crate::utils::type_info_table::TypeInfoTable,
+        bindings: &crate::utils::BindingTable,
+        emit_kill_sets: bool
+    ) -> Module {
+        let functions: Vec<Function> = ast
+            .structurals
+            .par_iter()
+            .filter_map(|structural| {
+                if let StructuralNode::FuncDef(func) = structural.as_ref() {
+                    let return_type = match type_info_table
+                        .get(func.id)
+                        .expect("Function type not found")
+                    {
+                        TypeInfo::Function(ft) => ft.ret,
+                        _ => unreachable!("Expected function type"),
+                    };
 
-                let mut data =
-                    TransientData::new(Function::new(func.decl.name, return_type), tr, emit_kill_sets);
+                    let mut data = TransientData::new(
+                        Function::new(func.decl.name, return_type),
+                        tr,
+                        type_info_table,
+                        bindings,
+                        emit_kill_sets,
+                    );
 
-                // Push function-level scope for parameters
-                data.push_scope();
+                    // Push function-level scope for parameters
+                    data.push_scope();
 
-                for arg in &func.decl.args {
-                    let (ty, name) = (data.get_type(arg.id), arg.name);
-                    let param = data.function.add_param("stack_param_mem".intern(), ty);
-                    let param_ptr = data.function.make_take_address(name, param);
-                    data.var_map.insert(arg.id, param_ptr);
+                    for arg in &func.decl.args {
+                        let (ty, name) = (data.get_type(arg.id), arg.name);
+                        let param = data.function.add_param("stack_param_mem".intern(), ty);
+                        let param_ptr = data.function.make_take_address(name, param);
+                        data.var_map.insert(arg.id, param_ptr);
 
-                    // Add parameter to function scope
-                    data.add_variable_to_current_scope(param_ptr);
+                        // Add parameter to function scope
+                        data.add_variable_to_current_scope(param_ptr);
+                    }
+
+                    data.lower_block_body(&func.body);
+
+                    // Generate KillSet for function parameters at end of function
+                    data.pop_scope_and_generate_killset();
+
+                    // TODO: Implement a helper make_return_if_no_terminator
+                    if data
+                        .function
+                        .get_current_block()
+                        .map(|x| &x.terminator)
+                        .is_none()
+                    {
+                        data.function.make_return(None);
+                    }
+
+                    data.function.sort_blocks_by_id();
+                    Some(data.function)
+                } else {
+                    None
                 }
-
-                data.lower_block_body(&func.body);
-
-                // Generate KillSet for function parameters at end of function
-                data.pop_scope_and_generate_killset();
-
-                // TODO: Implement a helper make_return_if_no_terminator
-                if data
-                    .function
-                    .get_current_block()
-                    .map(|x| &x.terminator)
-                    .is_none()
-                {
-                    data.function.make_return(None);
-                }
-
-                data.function.sort_blocks_by_id();
-                Some(data.function)
-            } else {
-                None
-            }
-        }).collect();
+            })
+            .collect();
 
         let mut module = Module::new();
 
@@ -1084,8 +1191,15 @@ impl YirLowering {
 }
 
 impl YirLowering {
-    pub fn run(&self, ast: &AST, type_registry: &TypeRegistry, emit_kill_sets: bool) -> miette::Result<Module> {
-        let module = self.lower_ast(ast, type_registry, emit_kill_sets);
+    pub fn run(
+        &self,
+        ast: &AST,
+        type_registry: &TypeRegistry,
+        type_info_table: &crate::utils::type_info_table::TypeInfoTable,
+        bindings: &crate::utils::BindingTable,
+        emit_kill_sets: bool,
+    ) -> miette::Result<Module> {
+        let module = self.lower_ast(ast, type_registry, type_info_table, bindings, emit_kill_sets);
         Ok(module)
     }
 }

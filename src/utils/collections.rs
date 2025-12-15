@@ -1,5 +1,5 @@
-use std::hash::BuildHasherDefault;
 use rustc_hash::FxHasher;
+use std::hash::BuildHasherDefault;
 use ustr::{IdentityHasher, Ustr};
 
 pub type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
