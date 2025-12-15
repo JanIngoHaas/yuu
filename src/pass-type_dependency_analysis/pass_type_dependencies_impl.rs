@@ -3,12 +3,11 @@ use ustr::Ustr;
 
 use super::TypeDependencyAnalysisErrors;
 
-use crate::pass_type_inference::IndexUstrMap;
 use crate::{
     pass_diagnostics::error::{ErrorKind, YuuError},
     pass_parse::SourceInfo,
     pass_type_dependency_analysis::TypeDependencyGraph,
-    pass_type_inference::{IndexUstrSet, StructOrEnumInfo, TypeInfo, TypeRegistry},
+    utils::{StructOrEnumInfo, TypeRegistry, collections::{UstrIndexMap, UstrIndexSet}, type_info_table::TypeInfo},
 };
 
 pub struct TypeDependencyAnalysis;
@@ -139,21 +138,21 @@ impl Default for TypeDependencyAnalysis {
 }
 
 struct TransientData<'a> {
-    dependency_graph: IndexUstrMap<Vec<Ustr>>,
+    dependency_graph: UstrIndexMap<Vec<Ustr>>,
     errors: TypeDependencyAnalysisErrors,
     source_info: &'a SourceInfo,
     type_registry: &'a TypeRegistry,
-    current_path: IndexUstrSet,
+    current_path: UstrIndexSet,
 }
 
 impl<'a> TransientData<'a> {
     fn new(source_info: &'a SourceInfo, type_registry: &'a TypeRegistry) -> Self {
         Self {
-            dependency_graph: IndexUstrMap::default(),
+            dependency_graph: UstrIndexMap::default(),
             errors: TypeDependencyAnalysisErrors::new(),
             source_info,
             type_registry,
-            current_path: IndexUstrSet::default(),
+            current_path: UstrIndexSet::default(),
         }
     }
 }

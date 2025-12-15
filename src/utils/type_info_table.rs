@@ -1,10 +1,10 @@
 use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
-
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash};
+use rustc_hash::FxHasher;
 
 use crate::pass_diagnostics::error::YuuError;
 use crate::pass_parse::ast::*;
-use indexmap::IndexMap;
+use crate::utils::collections::IndexMap;
 use scc::HashMap;
 use ustr::Ustr;
 
@@ -87,7 +87,7 @@ impl PartialEq for TypeCombination {
 impl Eq for TypeCombination {}
 
 pub struct TypeInterner {
-    pub combination_to_type: HashMap<TypeCombination, Box<TypeInfo>>,
+    pub combination_to_type: HashMap<TypeCombination, Box<TypeInfo>, BuildHasherDefault<FxHasher>>,
 }
 
 // Use static references to ensure consistent memory addresses across calls
@@ -182,7 +182,7 @@ impl Default for TypeInterner {
 impl TypeInterner {
     pub fn new() -> Self {
         Self {
-            combination_to_type: HashMap::new(),
+            combination_to_type: HashMap::with_hasher(BuildHasherDefault::default()),
         }
     }
 
@@ -277,16 +277,16 @@ impl Default for TypeInfoTable {
 impl TypeInfoTable {
     pub fn new() -> Self {
         Self {
-            types: IndexMap::new(),
+            types: Default::default(),
         }
     }
 
-    pub fn insert(&mut self, id: NodeId, ty: &'static TypeInfo) {
-        self.types.insert(id, ty);
+    pub fn insert(&mut self, id: NodeId, ty: &'static TypeInfo) -> bool {
+        self.types.insert(id, ty).is_none()
     }
 
     pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {
-        self.types.get(&id).copied()
+        self.types.get(&id).map(|entry| *entry)
     }
 
     pub fn unify_and_insert(
@@ -294,13 +294,12 @@ impl TypeInfoTable {
         id: NodeId,
         ty: &'static TypeInfo,
     ) -> Result<&'static TypeInfo, UnificationError> {
-        let existing = self.types.get(&id);
-        let unified = if let Some(existing) = existing {
-            ty.unify(existing)?
+        let unified = if let Some(existing_entry) = self.types.get(&id) {
+            ty.unify(*existing_entry)?
         } else {
             ty
         };
-        self.types.insert(id, unified);
+        let _ = self.types.insert(id, unified);
         Ok(unified)
     }
 

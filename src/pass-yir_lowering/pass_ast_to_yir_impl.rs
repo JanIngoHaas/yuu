@@ -1,15 +1,15 @@
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+
 use crate::{
     pass_parse::{
         BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode, ast::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode, UnaryOp
         }, token::{Integer, Token, TokenKind}
     },
-    pass_type_inference::{TypeInfo, TypeRegistry, primitive_u64},
     pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
-    }, utils::calculate_type_layout,
+    }, utils::{TypeRegistry, calculate_type_layout, collections::IndexMap, type_info_table::TypeInfo},
 };
-use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ContextKind {
@@ -47,7 +47,7 @@ impl<'a> TransientData<'a> {
         Self {
             function,
             tr,
-            var_map: IndexMap::new(),
+            var_map: IndexMap::default(),
             loop_context: Vec::new(),
             scope_stack: Vec::new(),
             current_temporaries: Vec::new(),
@@ -58,8 +58,7 @@ impl<'a> TransientData<'a> {
     fn get_type(&self, node_id: NodeId) -> &'static TypeInfo {
         self.tr
             .type_info_table
-            .types
-            .get(&node_id)
+            .get(node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
     }
 
@@ -802,7 +801,7 @@ impl<'a> TransientData<'a> {
 
                 match ty {
                     TypeInfo::Enum(enum_ty) => {
-                        let mut jump_targets = IndexMap::new();
+                        let mut jump_targets = IndexMap::default();
                         let enum_info = self.tr.resolve_enum(enum_ty.name).unwrap();
                         for arm in match_stmt.arms.iter() {
                             let RefutablePatternNode::Enum(enum_pattern) = arm.pattern.as_ref();
@@ -1017,55 +1016,62 @@ impl YirLowering {
     }
 
     fn lower_ast(&self, ast: &AST, tr: &TypeRegistry, emit_kill_sets: bool) -> Module {
-        let mut module = Module::new();
+        let functions: Vec<Function> = ast.structurals.par_iter().filter_map(|structural| {
+            if let StructuralNode::FuncDef(func) = structural.as_ref() {
+                let return_type = match tr.type_info_table.get(func.id).expect("Function type not found") {
+                    TypeInfo::Function(ft) => ft.ret,
+                    _ => unreachable!("Expected function type"),
+                };
 
-        for structural in ast.structurals.iter() {
-            match structural.as_ref() {
-                StructuralNode::FuncDef(func) => {
-                    let return_type = match tr.type_info_table.types[&func.id] {
-                        TypeInfo::Function(ft) => ft.ret,
-                        _ => unreachable!("Expected function type"),
-                    };
+                let mut data =
+                    TransientData::new(Function::new(func.decl.name, return_type), tr, emit_kill_sets);
 
-                    let mut data =
-                        TransientData::new(Function::new(func.decl.name, return_type), tr, emit_kill_sets);
+                // Push function-level scope for parameters
+                data.push_scope();
 
-                    // Push function-level scope for parameters
-                    data.push_scope();
+                for arg in &func.decl.args {
+                    let (ty, name) = (data.get_type(arg.id), arg.name);
+                    let param = data.function.add_param("stack_param_mem".intern(), ty);
+                    let param_ptr = data.function.make_take_address(name, param);
+                    data.var_map.insert(arg.id, param_ptr);
 
-                    for arg in &func.decl.args {
-                        let (ty, name) = (data.get_type(arg.id), arg.name);
-                        let param = data.function.add_param("stack_param_mem".intern(), ty);
-                        let param_ptr = data.function.make_take_address(name, param);
-                        data.var_map.insert(arg.id, param_ptr);
-
-                        // Add parameter to function scope
-                        data.add_variable_to_current_scope(param_ptr);
-                    }
-
-                    data.lower_block_body(&func.body);
-
-                    // Generate KillSet for function parameters at end of function
-                    data.pop_scope_and_generate_killset();
-
-                    // TODO: Implement a helper make_return_if_no_terminator
-                    if data
-                        .function
-                        .get_current_block()
-                        .map(|x| &x.terminator)
-                        .is_none()
-                    {
-                        data.function.make_return(None);
-                    }
-
-                    data.function.sort_blocks_by_id();
-                    module.define_function(data.function);
+                    // Add parameter to function scope
+                    data.add_variable_to_current_scope(param_ptr);
                 }
 
+                data.lower_block_body(&func.body);
+
+                // Generate KillSet for function parameters at end of function
+                data.pop_scope_and_generate_killset();
+
+                // TODO: Implement a helper make_return_if_no_terminator
+                if data
+                    .function
+                    .get_current_block()
+                    .map(|x| &x.terminator)
+                    .is_none()
+                {
+                    data.function.make_return(None);
+                }
+
+                data.function.sort_blocks_by_id();
+                Some(data.function)
+            } else {
+                None
+            }
+        }).collect();
+
+        let mut module = Module::new();
+
+        for func in functions {
+            module.define_function(func);
+        }
+
+        for structural in &ast.structurals {
+            match structural.as_ref() {
                 StructuralNode::StructDef(sdefs) => {
                     module.define_struct(sdefs.decl.name);
                 }
-
                 StructuralNode::EnumDef(edefs) => {
                     module.define_enum(edefs.decl.name);
                 }

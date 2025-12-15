@@ -1,16 +1,20 @@
 
 use crate::pass_diagnostics::{ErrorKind, YuuError};
 use crate::pass_parse::add_ids::GetId;
-use crate::pass_type_inference::pass_type_inference_impl::TransientData;
+use crate::pass_parse::SourceInfo;
+use crate::utils::{TypeRegistry};
+use crate::utils::type_info_table::{TypeInfo, TypeInfoTable, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_u64};
 use crate::{
     pass_parse::ast::TypeNode,
-    pass_type_inference::type_info::{
-        TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_u64,
-    },
 };
 
 
-pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo {
+pub fn infer_type(
+    ty: &TypeNode,
+    registry: &TypeRegistry,
+    errors: &mut Vec<YuuError>,
+    src_code: &SourceInfo
+) -> &'static TypeInfo {
 
     let semantic_type = match ty {
         TypeNode::BuiltIn(built_in) => match built_in.kind {
@@ -29,13 +33,12 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
                 "bool" => primitive_bool(),
                 _ => {
                     // Try to resolve as either a struct or enum
-                    let type_info = data.type_registry.resolve_struct_or_enum(ident.name);
+                    let type_info = registry.resolve_struct_or_enum(ident.name);
                     if let Some(info) = type_info {
                         info.ty()
                     } else {
                         // TODO: Implement type inference for functions
-                        let help_msg = data
-                            .type_registry
+                        let help_msg = registry
                             .get_similar_names_struct(ident.name, 3)
                             .into_iter()
                             .map(|x| x.to_string())
@@ -53,8 +56,8 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
                             .kind(ErrorKind::ReferencedUndefinedStruct)
                             .message(format!("Cannot find struct type '{}'", ident.name))
                             .source(
-                                data.src_code.source.clone(),
-                                data.src_code.file_name.clone(),
+                                src_code.source.clone(),
+                                src_code.file_name.clone(),
                             )
                             .span(
                                 ident.span.clone(),
@@ -65,25 +68,24 @@ pub fn infer_type(ty: &TypeNode, data: &mut TransientData) -> &'static TypeInfo 
                             message = message.help(help_msg);
                         }
                         let message = message.build();
-                        data.errors.push(message);
+                        errors.push(message);
                         error_type()
                     }
                 }
             }
         }
         TypeNode::Pointer(pointer) => {
-            let pointee_type = infer_type(&pointer.pointee, data);
+            let pointee_type = infer_type(&pointer.pointee, registry, errors, src_code);
             pointee_type.ptr_to()
         }
         TypeNode::Array(array) => {
             // Arrays are treated as pointers to the element type
-            let element_type = infer_type(&array.element_type, data);
+            let element_type = infer_type(&array.element_type, registry,errors, src_code);
             element_type.ptr_to()
         }
     };
-    // Add the type to the type info table
-    data.type_registry
-        .type_info_table
-        .insert(ty.node_id(), semantic_type);
+    // Not an expression - no need to add to
+    // type_info_table
+    //     .insert(ty.node_id(), semantic_type);
     semantic_type
 }

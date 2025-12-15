@@ -1,5 +1,5 @@
-use crate::pass_type_inference::{TypeInfo, PrimitiveType};
-use crate::pass_type_inference::{StructInfo, EnumInfo, TypeRegistry};
+use crate::utils::{EnumInfo, StructInfo, TypeRegistry, type_info_table::{PrimitiveType, TypeInfo}};
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LayoutInfo {

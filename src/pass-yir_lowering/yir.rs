@@ -1,13 +1,10 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::{EnumVariantInfo, StructFieldInfo};
-use crate::pass_type_inference::{
-    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
-    primitive_u64,
-};
-use indexmap::IndexMap;
+use crate::utils::{EnumVariantInfo, StructFieldInfo, TypeRegistry};
+use crate::utils::type_info_table::{PrimitiveType, TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use crate::utils::collections::IndexMap;
 use std::sync::Arc;
 use ustr::{Ustr, UstrMap};
 
@@ -354,7 +351,7 @@ impl Function {
             name,
             params: Vec::new(),
             return_type,
-            blocks: IndexMap::new(),
+            blocks: IndexMap::default(),
             entry_block: 0,
             follow_c_abi: true,
             current_block: 0,
@@ -814,7 +811,7 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         init_value: Option<Operand>,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
@@ -830,7 +827,7 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         count: u64,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
@@ -845,7 +842,7 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         values: Vec<Operand>,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
@@ -909,7 +906,7 @@ impl Function {
         );
 
         debug_assert!(
-            matches!(index.ty(), TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::I64) | TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::U64)),
+            matches!(index.ty(), TypeInfo::BuiltInPrimitive(PrimitiveType::I64) | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)),
             "Array index must be i64 or u64, got {}",
             index.ty()
         );

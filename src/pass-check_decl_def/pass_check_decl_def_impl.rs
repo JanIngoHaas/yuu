@@ -1,11 +1,9 @@
 use crate::{
     pass_diagnostics::{YuuErrorBuilder, error::YuuError},
     pass_parse::{BlockStmt, ExprNode, StmtNode, StructuralNode, ast::{AST, SourceInfo}},
-    pass_type_inference::{IndexUstrMap, IndexUstrSet, TypeRegistry},
+    pass_type_inference::TypeRegistry, utils::collections::UstrIndexSet,
 };
-use indexmap::IndexMap;
 use miette::Result;
-use ustr::Ustr;
 
 /// Errors from check decl def analysis
 pub struct CheckDeclDefErrors(pub Vec<YuuError>);
@@ -78,12 +76,12 @@ impl CheckDeclDefAnalyzer<'_> {
         }
     }
 
-    fn check_block(&mut self, block: &BlockStmt) -> IndexUstrSet
+    fn check_block(&mut self, block: &BlockStmt) -> UstrIndexSet
     {
         let stmts = &block.body;
 
-        let mut defs = IndexUstrSet::default();
-        let mut decls = IndexUstrSet::default();
+        let mut defs = UstrIndexSet::default();
+        let mut decls = UstrIndexSet::default();
 
         for stmt in stmts {
             let cont = self.check_stmt(&stmt, &mut defs, &mut decls);
@@ -96,7 +94,7 @@ impl CheckDeclDefAnalyzer<'_> {
 
     }
 
-    fn check_expr(&mut self, expr: &ExprNode, decls: &IndexUstrSet, defs: &IndexUstrSet)
+    fn check_expr(&mut self, expr: &ExprNode, decls: &UstrIndexSet, defs: &UstrIndexSet)
     {
         match expr {
             ExprNode::Literal(_) => (),
@@ -171,16 +169,16 @@ impl CheckDeclDefAnalyzer<'_> {
         }
     }
 
-    fn check_stmt(&mut self, stmt: &StmtNode, defs: &mut IndexUstrSet, decls: &mut IndexUstrSet) -> bool
+    fn check_stmt(&mut self, stmt: &StmtNode, defs: &mut UstrIndexSet, decls: &mut UstrIndexSet) -> bool
     {
         match stmt {
             StmtNode::If(if_stmt) => {
                 self.check_expr(&if_stmt.if_block.condition, decls, defs);
-                let defs_if: IndexUstrSet = self.check_block(&if_stmt.if_block.body);
+                let defs_if: UstrIndexSet = self.check_block(&if_stmt.if_block.body);
     
                 for else_if in &if_stmt.else_if_blocks {
                     self.check_expr(&else_if.condition, decls, defs);
-                    let defs_elif: IndexUstrSet = self.check_block(&else_if.body);
+                    let defs_elif: UstrIndexSet = self.check_block(&else_if.body);
                     let not_declared_in_elif = defs_if.difference(&defs_elif);
                     let not_declared_in_if = defs_elif.difference(&defs_if);
 
@@ -194,7 +192,7 @@ impl CheckDeclDefAnalyzer<'_> {
 
                 // Now check the else block if it exists
                 if let Some(else_block) = &if_stmt.else_block {
-                    let defs_else: IndexUstrSet = self.check_block(&else_block);
+                    let defs_else: UstrIndexSet = self.check_block(&else_block);
                     let not_declared_in_else = defs_if.difference(&defs_else);
                     let not_declared_in_if = defs_else.difference(&defs_if);
                     self.report_inconsistent_defs(

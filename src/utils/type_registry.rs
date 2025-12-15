@@ -1,21 +1,13 @@
-use std::hash::BuildHasherDefault;
 
-use indexmap::{IndexMap, IndexSet};
 use logos::Span;
-use ustr::{IdentityHasher, Ustr};
+use ustr::{Ustr};
 
-use crate::pass_type_inference::enum_type;
+use crate::utils::{BindingInfo, BindingTable};
+use crate::utils::collections::{IndexMap, UstrIndexMap};
+use crate::utils::type_info_table::{FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type};
 use crate::{
     pass_diagnostics::levenshtein_distance,
     pass_parse::ast::{InternUstr, NodeId},
-    pass_type_inference::{
-        binding_info::BindingInfo,
-        type_info::{
-            FunctionType, GiveMePtrHashes, TypeInfo, TypeInfoTable, function_type, primitive_bool,
-            primitive_f32, primitive_f64, primitive_i64, primitive_u64, struct_type,
-        },
-    },
-    pass_yir_lowering::block::{BindingTable, Block},
 };
 
 #[derive(Clone)]
@@ -33,13 +25,9 @@ pub struct EnumVariantInfo {
     pub binding_info: BindingInfo,
 }
 
-pub type FieldsMap<V> = IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
-pub type IndexUstrSet = IndexSet<Ustr, BuildHasherDefault<IdentityHasher>>;
-pub type IndexUstrMap<V> = FieldsMap<V>;
-
 #[derive(Clone)]
 pub struct StructInfo {
-    pub fields: FieldsMap<StructFieldInfo>,
+    pub fields: UstrIndexMap<StructFieldInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -47,7 +35,7 @@ pub struct StructInfo {
 
 #[derive(Clone)]
 pub struct EnumInfo {
-    pub variants: FieldsMap<EnumVariantInfo>,
+    pub variants: UstrIndexMap<EnumVariantInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -151,10 +139,9 @@ pub struct FunctionInfo {
 }
 
 pub struct TypeRegistry {
-    structs: FieldsMap<StructInfo>,
-    enums: FieldsMap<EnumInfo>,
-    functions: FieldsMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
-    pub type_info_table: TypeInfoTable,
+    structs: UstrIndexMap<StructInfo>,
+    enums: UstrIndexMap<EnumInfo>,
+    functions: UstrIndexMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
     pub bindings: BindingTable,
 }
 
@@ -167,10 +154,9 @@ impl Default for TypeRegistry {
 impl TypeRegistry {
     pub fn new() -> Self {
         let mut reg = Self {
-            structs: FieldsMap::default(),
-            enums: FieldsMap::default(),
-            functions: FieldsMap::default(),
-            type_info_table: TypeInfoTable::new(),
+            structs: UstrIndexMap::default(),
+            enums: UstrIndexMap::default(),
+            functions: UstrIndexMap::default(),
             bindings: BindingTable::default(),
         };
 
@@ -517,64 +503,44 @@ impl TypeRegistry {
         debug_assert!(out);
     }
 
-    pub fn add_literal(&mut self, id: NodeId, ty: &'static TypeInfo) {
-        self.type_info_table.types.insert(id, ty);
-    }
-
-    pub fn all_structs(&self) -> &FieldsMap<StructInfo> {
+    pub fn all_structs(&self) -> &UstrIndexMap<StructInfo> {
         &self.structs
     }
 
-    pub fn all_enums(&self) -> &FieldsMap<EnumInfo> {
+    pub fn all_enums(&self) -> &UstrIndexMap<EnumInfo> {
         &self.enums
     }
 
     pub fn add_struct(
         &mut self,
-        fields: FieldsMap<StructFieldInfo>,
+        fields: UstrIndexMap<StructFieldInfo>,
         name: Ustr,
         binding_info: BindingInfo,
     ) -> bool {
         let ty = struct_type(name);
-        let id = binding_info.id;
         let info = StructInfo {
             fields,
             name,
             ty,
             binding_info,
         };
-        let succ = self.structs.insert(info.name, info).is_none();
-        self.type_info_table.types.insert(id, ty).is_none() && succ
+        self.structs.insert(info.name, info).is_none()
     }
 
     pub fn add_enum(
         &mut self,
         name: Ustr,
-        variants: FieldsMap<EnumVariantInfo>,
+        variants: UstrIndexMap<EnumVariantInfo>,
         definition_location: BindingInfo,
     ) -> bool {
         let ty = enum_type(name);
-        let id = definition_location.id;
         let info = EnumInfo {
             ty,
             name,
             variants,
             binding_info: definition_location,
         };
-        let succ = self.enums.insert(name, info).is_none();
-        self.type_info_table.types.insert(id, ty).is_none() && succ
-    }
-
-    pub fn add_variable(
-        &mut self,
-        block: &mut Block,
-        name: Ustr,
-        id: NodeId,
-        span: Option<Span>,
-        ty: &'static TypeInfo,
-    ) {
-        block.insert_variable(name, id, span, false);
-        self.type_info_table.types.insert(id, ty);
+        self.enums.insert(name, info).is_none()
     }
 
     pub fn add_function(
@@ -593,20 +559,12 @@ impl TypeRegistry {
         };
 
         let funcs = self.functions.entry(info.name).or_default();
-
-        let succ = self
-            .type_info_table
-            .types
-            .insert(info.binding_info.id, general_type)
-            .is_none();
-
-        // TODO: Make this an actual error that gets printed to the user
-        debug_assert!(succ, "ID already exists in type table");
-
+        
         let out = funcs
             .insert(arg_type.iter().map(|x| GiveMePtrHashes(*x)).collect(), info)
             .is_none();
 
+        // TODO: Make this an actual error that gets printed to the user
         debug_assert!(out, "Function overload already exists");
 
         out
@@ -641,12 +599,12 @@ impl TypeRegistry {
         // First try primitive types
         let name_str = name.as_str();
         match name_str {
-            "i64" => Some(crate::pass_type_inference::type_info::primitive_i64()),
-            "u64" => Some(crate::pass_type_inference::type_info::primitive_u64()),
-            "f32" => Some(crate::pass_type_inference::type_info::primitive_f32()),
-            "f64" => Some(crate::pass_type_inference::type_info::primitive_f64()),
-            "bool" => Some(crate::pass_type_inference::type_info::primitive_bool()),
-            "nil" => Some(crate::pass_type_inference::type_info::primitive_nil()),
+            "i64" => Some(primitive_i64()),
+            "u64" => Some(primitive_u64()),
+            "f32" => Some(primitive_f32()),
+            "f64" => Some(primitive_f64()),
+            "bool" => Some(primitive_bool()),
+            "nil" => Some(primitive_nil()),
             _ => {
                 let resolved_user_type = self.resolve_struct_or_enum(name).map(|info| info.ty());
                 resolved_user_type

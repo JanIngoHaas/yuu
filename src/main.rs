@@ -5,6 +5,11 @@ use std::path::PathBuf;
 use yuu::pass_diagnostics::error;
 use yuu::utils::pipeline::Pipeline;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 #[derive(Parser)]
 #[command(name = "yuu")]
 #[command(about = "A multi-pass compiler for the Yuu programming language")]

@@ -1,16 +1,15 @@
 use crate::{
     pass_diagnostics::{ErrorKind, YuuError},
     pass_parse::{EnumPattern, ExprNode, RefutablePatternNode, Spanned},
-    pass_type_inference::{TypeInfo, infer_binding, pass_type_inference_impl::TransientData},
-    pass_yir_lowering::Block,
+    pass_type_inference::{infer_binding, pass_type_inference_impl::{TransientData, TransientDataStructural}}, utils::{Block, type_info_table::TypeInfo},
 };
 
 fn infer_enum_pattern(
     enum_pattern: &EnumPattern,
     scrutinee_ty: &'static TypeInfo,
     scrutinee_expr: &ExprNode,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) {
     // Verify the scrutinee is an enum type and get variant info
     match scrutinee_ty {
@@ -68,7 +67,7 @@ fn infer_enum_pattern(
                 match (&enum_pattern.binding, &variant_info.variant) {
                     (Some(binding), Some(associated_type)) => {
                         // Data variant with binding - valid
-                        infer_binding(block, binding, associated_type, data);
+                        infer_binding(binding, block_id, associated_type, data);
                     }
                     (Some(_), None) => {
                         // Unit variant with binding - invalid
@@ -155,14 +154,14 @@ fn infer_enum_pattern(
 
 pub fn infer_pattern(
     pattern: &RefutablePatternNode,
-    scrutinee_ty: &&'static crate::pass_type_inference::type_info::TypeInfo,
+    scrutinee_ty: &&'static TypeInfo,
     scrutinee_expr: &ExprNode,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) {
     match pattern {
         RefutablePatternNode::Enum(enum_pattern) => {
-            infer_enum_pattern(enum_pattern, scrutinee_ty, scrutinee_expr, block, data);
+            infer_enum_pattern(enum_pattern, scrutinee_ty, scrutinee_expr, block_id, data);
         }
     }
 }

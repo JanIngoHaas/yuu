@@ -13,10 +13,11 @@ use crate::pass_print_yir::pass_print_yir_impl::{
 use crate::pass_type_dependency_analysis::{
     TypeDependencyAnalysis, TypeDependencyAnalysisErrors, TypeDependencyGraph,
 };
+use crate::pass_type_inference::TypeInferenceErrors;
 use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
-use crate::pass_type_inference::{TypeInferenceErrors, TypeRegistry};
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
-use crate::pass_yir_lowering::{Module, RootBlock};
+use crate::pass_yir_lowering::{Module};
+use crate::utils::{BlockTree, TypeRegistry};
 use miette::{IntoDiagnostic, Result};
 use std::time::{Duration, Instant};
 
@@ -89,7 +90,7 @@ pub struct Pipeline {
     source_info: Option<SourceInfo>,
     syntax_errors: Option<SyntaxErrors>,
     type_registry: Option<TypeRegistry>,
-    root_block: Option<Box<RootBlock>>,
+    root_block: Option<BlockTree>,
     type_errors: Option<TypeInferenceErrors>,
 
     sema_done: bool,

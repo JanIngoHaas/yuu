@@ -8,7 +8,6 @@ use crate::{
 use crate::{
     pass_parse::ast::*,
     pass_parse::token::{Token, TokenKind},
-    pass_yir_lowering::block::FUNC_BLOCK_NAME,
 };
 use logos::Span;
 use ustr::{Ustr, ustr};
@@ -333,7 +332,6 @@ impl Parser {
                 id: 0,
                 span: span.clone(),
                 body: block_stmt.body,
-                label: block_stmt.label,
             }),
         ))
     }
@@ -835,7 +833,6 @@ impl Parser {
                 id: 0,
                 span,
                 body: stmts,
-                label,
             },
         )
     }
@@ -1660,8 +1657,7 @@ impl Parser {
 
     pub fn parse_func_def(&mut self) -> ParseResult<(Span, FuncDefStructural)> {
         let (span, decl) = self.parse_func_decl()?;
-        let (block_span, mut block) = self.parse_block_stmt_inner()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
-        block.label = Some(ustr(FUNC_BLOCK_NAME)); // 🤡
+        let (block_span, block) = self.parse_block_stmt_inner()?;
         let span = span.start..block_span.end;
         Ok(self.make_func_def(span, decl, block))
     }

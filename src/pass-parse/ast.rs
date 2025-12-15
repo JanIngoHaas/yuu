@@ -131,7 +131,6 @@ pub struct BlockStmt {
     pub id: NodeId,
     pub span: Span,
     pub body: Vec<StmtNode>,
-    pub label: Option<Ustr>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
