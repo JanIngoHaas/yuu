@@ -1,7 +1,7 @@
 use logos::Span;
 use ustr::Ustr;
 
-use crate::utils::collections::{IndexMap, UstrIndexMap};
+use crate::utils::collections::{FastHashMap, UstrHashMap};
 use crate::utils::type_info_table::{
     FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool,
     primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
@@ -29,7 +29,7 @@ pub struct EnumVariantInfo {
 
 #[derive(Clone)]
 pub struct StructInfo {
-    pub fields: UstrIndexMap<StructFieldInfo>,
+    pub fields: UstrHashMap<StructFieldInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -37,7 +37,7 @@ pub struct StructInfo {
 
 #[derive(Clone)]
 pub struct EnumInfo {
-    pub variants: UstrIndexMap<EnumVariantInfo>,
+    pub variants: UstrHashMap<EnumVariantInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -141,9 +141,9 @@ pub struct FunctionInfo {
 }
 
 pub struct TypeRegistry {
-    structs: UstrIndexMap<StructInfo>,
-    enums: UstrIndexMap<EnumInfo>,
-    functions: UstrIndexMap<IndexMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
+    structs: UstrHashMap<StructInfo>,
+    enums: UstrHashMap<EnumInfo>,
+    functions: UstrHashMap<FastHashMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
 }
 
 impl Default for TypeRegistry {
@@ -155,9 +155,9 @@ impl Default for TypeRegistry {
 impl TypeRegistry {
     pub fn new() -> Self {
         let mut reg = Self {
-            structs: UstrIndexMap::default(),
-            enums: UstrIndexMap::default(),
-            functions: UstrIndexMap::default(),
+            structs: UstrHashMap::default(),
+            enums: UstrHashMap::default(),
+            functions: UstrHashMap::default(),
         };
 
         // Use a proper IdGenerator for built-in operators
@@ -501,17 +501,17 @@ impl TypeRegistry {
         debug_assert!(out);
     }
 
-    pub fn all_structs(&self) -> &UstrIndexMap<StructInfo> {
+    pub fn all_structs(&self) -> &UstrHashMap<StructInfo> {
         &self.structs
     }
 
-    pub fn all_enums(&self) -> &UstrIndexMap<EnumInfo> {
+    pub fn all_enums(&self) -> &UstrHashMap<EnumInfo> {
         &self.enums
     }
 
     pub fn add_struct(
         &mut self,
-        fields: UstrIndexMap<StructFieldInfo>,
+        fields: UstrHashMap<StructFieldInfo>,
         name: Ustr,
         binding_info: BindingInfo,
     ) -> bool {
@@ -528,7 +528,7 @@ impl TypeRegistry {
     pub fn add_enum(
         &mut self,
         name: Ustr,
-        variants: UstrIndexMap<EnumVariantInfo>,
+        variants: UstrHashMap<EnumVariantInfo>,
         definition_location: BindingInfo,
     ) -> bool {
         let ty = enum_type(name);

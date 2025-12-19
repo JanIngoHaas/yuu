@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use crate::pass_diagnostics::error::{ErrorKind, YuuError, levenshtein_distance};
 use crate::pass_parse::ast::NodeId;
 use crate::pass_parse::ast::SourceInfo;
-use crate::utils::collections::IndexMap;
+use crate::utils::collections::FastHashMap;
 use crate::utils::{BindingInfo, VariableBinding};
 use logos::Span;
 use ustr::{Ustr, UstrMap};
@@ -39,16 +39,16 @@ pub struct BlockTree {
 }
 
 #[derive(Clone, Debug)]
-pub struct BindingTable(IndexMap<NodeId, NodeId>);
+pub struct BindingTable(FastHashMap<NodeId, NodeId>);
 
 impl Default for BindingTable {
     fn default() -> Self {
-        Self(IndexMap::default())
+        Self(FastHashMap::default())
     }
 }
 
 impl Deref for BindingTable {
-    type Target = IndexMap<NodeId, NodeId>;
+    type Target = FastHashMap<NodeId, NodeId>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -4,7 +4,6 @@ use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
 use crate::pass_diagnostics::error::YuuError;
 use crate::pass_parse::ast::*;
-use crate::utils::collections::IndexMap;
 use scc::HashMap;
 use ustr::Ustr;
 

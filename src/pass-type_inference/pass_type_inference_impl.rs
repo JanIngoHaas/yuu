@@ -3,7 +3,7 @@ use crate::{
     pass_parse::{AST, SourceInfo, StructuralNode},
     utils::{
         BindingInfo, BindingTable, BlockTree, EnumVariantInfo, StructFieldInfo, TypeRegistry,
-        collections::UstrIndexMap,
+        collections::UstrHashMap,
         type_info_table::{TypeInfo, TypeInfoTable, error_type},
     },
 };
@@ -99,7 +99,7 @@ impl TypeInference {
 fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData) {
     match structural {
         StructuralNode::StructDef(struct_def) => {
-            let mut struct_defs = UstrIndexMap::default();
+            let mut struct_defs = UstrHashMap::default();
 
             for field in &struct_def.fields {
                 let ty = error_type(); //later: infer_type(&field.ty, &data.type_registry, &mut data.errors, &data.src_code); See below for reason
@@ -124,7 +124,7 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
             );
         }
         StructuralNode::EnumDef(ed) => {
-            let mut enum_variant_defs = UstrIndexMap::default();
+            let mut enum_variant_defs = UstrHashMap::default();
 
             for (idx, variant) in ed.variants.iter().enumerate() {
                 let evi = EnumVariantInfo {
@@ -211,7 +211,8 @@ fn define_user_def_types(
                 .resolve_struct_mut(struct_def_structural.decl.name)
                 .unwrap();
 
-            for (ty, (_sfi_field_name, sfi_info)) in helper_vec.iter().zip(sfi.fields.iter_mut()) {
+            for (field, ty) in struct_def_structural.fields.iter().zip(helper_vec.iter()) {
+                let sfi_info = sfi.fields.get_mut(&field.name).unwrap();
                 sfi_info.ty = *ty;
             }
         }
@@ -229,13 +230,13 @@ fn define_user_def_types(
                 .resolve_enum_mut(enum_def_structural.decl.name)
                 .unwrap();
 
-            for ((variant, ty), (_evi_variant_name, evi_info)) in enum_def_structural
+            for (variant, ty) in enum_def_structural
                 .variants
                 .iter()
                 .zip(helper_vec.iter())
-                .zip(evi.variants.iter_mut())
             {
                 if variant.data_type.is_some() {
+                    let evi_info = evi.variants.get_mut(&variant.name).unwrap();
                     evi_info.variant = Some(*ty);
                 }
             }

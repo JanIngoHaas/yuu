@@ -1,6 +1,6 @@
 use crate::pass_yir_lowering::Label;
 use crate::pass_yir_lowering::yir::{BinOp, ControlFlow, Instruction, Operand, UnaryOp, Variable};
-use crate::utils::collections::IndexMap;
+use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::TypeInfo;
 use std::fmt;
 use std::io::Write;
@@ -12,7 +12,7 @@ use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 struct RGB(u8, u8, u8);
 
 struct ColorPalette {
-    colors: IndexMap<&'static str, RGB>,
+    colors: FastHashMap<&'static str, RGB>,
     color_choice: ColorChoice,
 }
 
@@ -29,7 +29,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn deep_ocean() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 215, 0)); // Deep Gold
         colors.insert("type", RGB(64, 224, 208)); // Turquoise
@@ -45,7 +45,7 @@ impl ColorPalette {
     }
 
     fn warm_ember() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 140, 85)); // Warm Orange
         colors.insert("type", RGB(255, 183, 138)); // Peach
@@ -62,7 +62,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn mystic_forest() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(144, 238, 144)); // Light Green
         colors.insert("type", RGB(152, 251, 152)); // Pale Green
@@ -78,7 +78,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn cosmic_night() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(147, 112, 219)); // Medium Purple
         colors.insert("type", RGB(138, 43, 226)); // Blue Violet
@@ -94,7 +94,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn neon_dreams() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 110, 199)); // Hot Pink
         colors.insert("type", RGB(0, 255, 255)); // Cyan
@@ -112,7 +112,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn summer_breeze() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(255, 110, 74)); // Burnt Orange
         colors.insert("type", RGB(0, 119, 182)); // Ocean Blue
@@ -128,7 +128,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn cherry_blossom() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(219, 68, 88)); // Deep Pink
         colors.insert("type", RGB(15, 76, 129)); // Navy Blue
@@ -144,7 +144,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn forest_morning() -> Self {
-        let mut colors = IndexMap::default();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(0, 102, 0)); // Dark Green
         colors.insert("type", RGB(0, 77, 122)); // Deep Blue

@@ -14,7 +14,7 @@ use crate::{
     },
     utils::{
         TypeRegistry, calculate_type_layout,
-        collections::IndexMap,
+        collections::{FastHashMap, IndexMap},
         type_info_table::{TypeInfo, primitive_u64},
     },
 };
@@ -40,7 +40,7 @@ pub struct TransientData<'a> {
     tr: &'a TypeRegistry,
     type_info_table: &'a crate::utils::type_info_table::TypeInfoTable,
     bindings: &'a crate::utils::BindingTable,
-    var_map: IndexMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
+    var_map: FastHashMap<NodeId, Variable>, // Maps AST Binding NodeId -> YIR Variable
     loop_context: Vec<yir::Label>,
     scope_stack: Vec<Scope>,
     current_temporaries: Vec<Variable>, // Temporaries created in the current statement
@@ -65,7 +65,7 @@ impl<'a> TransientData<'a> {
             tr,
             type_info_table,
             bindings,
-            var_map: IndexMap::default(),
+            var_map: FastHashMap::default(),
             loop_context: Vec::new(),
             scope_stack: Vec::new(),
             current_temporaries: Vec::new(),

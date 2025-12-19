@@ -5,7 +5,7 @@ use crate::{
         RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt,
     },
     utils::{
-        BindingInfo, BlockTree,
+        BindingInfo, BlockTree, collections::UstrIndexSet,
         type_info_table::{TypeInfo, error_type, primitive_bool, primitive_nil, unknown_type},
     },
 };
@@ -279,7 +279,7 @@ fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut Transien
     let scrutinee_ty = infer_expr(&match_stmt.scrutinee, block_id, data, None);
 
     // Collect covered variants for exhaustiveness checking
-    let mut covered_variants = indexmap::IndexSet::new();
+    let mut covered_variants = UstrIndexSet::default();
 
     // Process each match arm
     for arm in &match_stmt.arms {
@@ -309,7 +309,7 @@ fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut Transien
         && let TypeInfo::Enum(enum_type) = scrutinee_ty
         && let Some(enum_info) = data.type_registry.resolve_enum(enum_type.name)
     {
-        let all_variants: indexmap::IndexSet<_> = enum_info.variants.keys().copied().collect();
+        let all_variants: UstrIndexSet = enum_info.variants.keys().copied().collect();
         let missing_variants: Vec<_> = all_variants
             .difference(&covered_variants)
             .map(|v| format!("'{}'", v))

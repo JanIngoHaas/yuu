@@ -2,12 +2,8 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use ustr::{IdentityHasher, Ustr};
 
+pub type FastHashMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type IndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
-pub type IndexSet<T> = indexmap::IndexSet<T, BuildHasherDefault<FxHasher>>;
-
-// For Ustr-keyed collections that benefit from IdentityHasher
+pub type UstrHashMap<V> = std::collections::HashMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
 pub type UstrIndexMap<V> = indexmap::IndexMap<Ustr, V, BuildHasherDefault<IdentityHasher>>;
 pub type UstrIndexSet = indexmap::IndexSet<Ustr, BuildHasherDefault<IdentityHasher>>;
-
-// For lookup-heavy collections that don't need insertion order
-pub type FastHashMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<FxHasher>>;
