@@ -7,6 +7,7 @@ use crate::{
     utils::{TypeRegistry, collections::UstrIndexSet},
 };
 use miette::Result;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /// Errors from check decl def analysis
 pub struct CheckDeclDefErrors(pub Vec<YuuError>);
@@ -26,21 +27,26 @@ impl CheckDeclDef {
         type_registry: &TypeRegistry,
         src_info: &SourceInfo,
     ) -> Result<CheckDeclDefErrors> {
-        let mut analyzer = CheckDeclDefAnalyzer {
-            errors: Vec::new(),
-            src_info,
-        };
+        let errors: Vec<YuuError> = ast.structurals
+            .par_iter()
+            .flat_map(|structural| {
+                let mut analyzer = CheckDeclDefAnalyzer {
+                    errors: Vec::new(),
+                    src_info,
+                };
 
-        for structural in &ast.structurals {
-            match structural.as_ref() {
-                StructuralNode::FuncDef(func_def_structural) => {
-                    let _ = analyzer.check_block(&func_def_structural.body);
+                match structural.as_ref() {
+                    StructuralNode::FuncDef(func_def_structural) => {
+                        let _ = analyzer.check_block(&func_def_structural.body);
+                    }
+                    _ => (),
                 }
-                _ => (),
-            }
-        }
 
-        Ok(CheckDeclDefErrors(analyzer.errors))
+                analyzer.errors
+            })
+            .collect();
+
+        Ok(CheckDeclDefErrors(errors))
     }
 }
 

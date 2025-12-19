@@ -159,7 +159,6 @@ pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientDataStru
         }
         StmtNode::Defer(defer_stmt) => {
             let _ = infer_expr(&defer_stmt.expr, block_id, data, None);
-            data.type_info_table.insert(defer_stmt.id, primitive_nil());
         }
         StmtNode::Error(_stmt) => {}
     }
@@ -186,7 +185,6 @@ fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientDataStru
             .help("Conditions must evaluate to a boolean type")
             .build();
         data.errors.push(err_msg);
-        data.type_info_table.insert(if_stmt.id, error_type());
     }
 
     // Infer the if body
