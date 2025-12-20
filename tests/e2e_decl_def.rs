@@ -129,8 +129,8 @@ fn test_decl_def_with_structs() {
     let executable = run_to_executable(source, "test_decl_def_with_structs.yuu")
         .expect("Failed to compile struct decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run struct decl/def test");
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run struct decl/def test");
 
     assert_eq!(output, 30);
 }
@@ -181,8 +181,8 @@ fn test_decl_def_with_enums() {
     let executable = run_to_executable(source, "test_decl_def_with_enums.yuu")
         .expect("Failed to compile enum decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run enum decl/def test");
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run enum decl/def test");
 
     assert_eq!(output, 42);
 }
@@ -282,8 +282,8 @@ fn test_decl_def_in_loops() {
     let executable = run_to_executable(source, "test_decl_def_in_loops.yuu")
         .expect("Failed to compile loop decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run loop decl/def test");
+    let output =
+        run_executable_with_output(&executable, &[]).expect("Failed to run loop decl/def test");
 
     assert_eq!(output, 10); // 0+1+2+3+4 = 10
 }

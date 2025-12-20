@@ -1,24 +1,28 @@
-use crate::{pass_parse::BindingNode, pass_type_inference::TypeInfo, pass_yir_lowering::Block};
+use crate::{
+    pass_parse::BindingNode,
+    utils::{Block, type_info_table::TypeInfo},
+};
 
-use super::pass_type_inference_impl::TransientData;
+use super::pass_type_inference_impl::TransientDataStructural;
 
 // TODO: For non-identifier bindings, we need to consider the possibility that the expression type might not match
 // the binding type
 pub fn infer_binding(
-    block: &mut Block,
     binding: &BindingNode,
+    block_id: usize,
     expr_type: &'static TypeInfo,
-    data: &mut TransientData,
+    data: &mut TransientDataStructural,
 ) {
     match binding {
         BindingNode::Ident(ident_binding) => {
-            data.type_registry.add_variable(
-                block,
+            let block = data.block_tree.get_block_mut(block_id);
+            block.insert_variable(
                 ident_binding.name,
                 ident_binding.id,
                 Some(ident_binding.span.clone()),
-                expr_type,
+                false,
             );
+            data.type_info_table.insert(ident_binding.id, expr_type);
         }
     }
 }

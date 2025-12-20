@@ -1,21 +1,19 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::ast::{
-    AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
+    NodeId, AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
     LValueKind, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     UnaryOp,
 };
-use crate::pass_parse::{AddressOfExpr, DerefExpr, HeapAllocExpr};
-use crate::pass_type_inference::type_info::{
-    PrimitiveType, TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64,
-    primitive_nil, primitive_u64,
+use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, DerefExpr, HeapAllocExpr};
+use crate::pass_type_inference::pass_type_inference_impl::TransientDataStructural;
+use crate::utils::type_info_table::PrimitiveType;
+use crate::utils::type_info_table::{
+    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64,
 };
-use crate::pass_yir_lowering::block::Block;
-
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
-use super::pass_type_inference_impl::TransientData;
 
 /// Helper function to extract i64 literal value from an expression, if it's a constant
 pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Option<i64> {
@@ -30,7 +28,7 @@ pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Optio
     }
 }
 
-fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
+fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientDataStructural) -> &'static TypeInfo {
     let out = match lit.lit.kind {
         crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
             crate::pass_parse::token::Integer::I64(_) => primitive_i64(),
@@ -41,17 +39,17 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
         crate::pass_parse::token::TokenKind::NilKw => primitive_nil(),
         _ => unreachable!("Compiler bug: Literal not implemented"),
     };
-    data.type_registry.add_literal(lit.id, out);
+    data.type_info_table.insert(lit.id, out);
     out
 }
 
 fn infer_pointer_op_expr(
     pointer_op_expr: &crate::pass_parse::ast::PointerOpExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let lhs_type = infer_expr(&pointer_op_expr.left, block, data, None);
-    let rhs_type = infer_expr(&pointer_op_expr.right, block, data, None);
+    let lhs_type = infer_expr(&pointer_op_expr.left, block_id, data, None);
+    let rhs_type = infer_expr(&pointer_op_expr.right, block_id, data, None);
 
     // Check if LHS is a pointer and RHS is integer
     if let TypeInfo::Pointer(_) = lhs_type {
@@ -61,9 +59,7 @@ fn infer_pointer_op_expr(
                 | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
         ) {
             // Pointer arithmetic: returns same pointer type
-            data.type_registry
-                .type_info_table
-                .insert(pointer_op_expr.id, lhs_type);
+            data.type_info_table.insert(pointer_op_expr.id, lhs_type);
             return lhs_type;
         }
     }
@@ -83,29 +79,31 @@ fn infer_pointer_op_expr(
         .help("The @ operator requires a pointer on the left and an integer offset on the right. Note: @ is not overloadable")
         .build();
     data.errors.push(err);
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(pointer_op_expr.id, error_type());
     error_type()
 }
 
 fn infer_cast_expr(
     cast_expr: &crate::pass_parse::ast::CastExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let _expr_type = infer_expr(&cast_expr.expr, block, data, None);
-    let target_type = crate::pass_type_inference::types::infer_type(&cast_expr.target_type, data);
-    data.type_registry
-        .type_info_table
-        .insert(cast_expr.id, target_type);
+    let _expr_type = infer_expr(&cast_expr.expr, block_id, data, None);
+    let target_type = crate::pass_type_inference::types::infer_type(
+        &cast_expr.target_type,
+        &data.type_registry,
+        &mut data.errors,
+        &data.src_code,
+    );
+    data.type_info_table.insert(cast_expr.id, target_type);
     target_type
 }
 
 fn infer_free_op(
     unary_expr: &UnaryExpr,
     operand_type: &'static TypeInfo,
-    data: &mut TransientData,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     if let TypeInfo::Pointer(_) = operand_type {
         primitive_nil()
@@ -130,16 +128,16 @@ fn infer_free_op(
 
 fn infer_binary_expr(
     binary_expr: &BinaryExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     let expr_id = binary_expr.id;
     let expr_span = binary_expr.span.clone();
     let op_name = binary_expr.op.static_name();
 
     // Standard logic for all binary ops
-    let lhs_type_actual = infer_expr(&binary_expr.left, block, data, None);
-    let rhs_type_actual = infer_expr(&binary_expr.right, block, data, None);
+    let lhs_type_actual = infer_expr(&binary_expr.left, block_id, data, None);
+    let rhs_type_actual = infer_expr(&binary_expr.right, block_id, data, None);
     let resolved_type = resolve_binary_overload(
         op_name,
         lhs_type_actual,
@@ -149,9 +147,7 @@ fn infer_binary_expr(
         expr_id,
     );
 
-    data.type_registry
-        .type_info_table
-        .insert(expr_id, resolved_type);
+    data.type_info_table.insert(expr_id, resolved_type);
     resolved_type
 }
 
@@ -160,12 +156,12 @@ fn resolve_binary_overload(
     lhs: &'static TypeInfo,
     rhs: &'static TypeInfo,
     span: logos::Span,
-    data: &mut TransientData,
-    expr_id: i64,
+    data: &mut TransientDataStructural,
+    expr_id: NodeId,
 ) -> &'static TypeInfo {
     match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
         Ok(res) => {
-            data.type_registry
+            data
                 .bindings
                 .insert(expr_id, res.binding_info.id);
             res.ty.ret
@@ -180,9 +176,7 @@ fn resolve_binary_overload(
                 span,
             );
             data.errors.push(err);
-            data.type_registry
-                .type_info_table
-                .insert(expr_id, error_type());
+            data.type_info_table.insert(expr_id, error_type());
             error_type()
         }
     }
@@ -190,10 +184,10 @@ fn resolve_binary_overload(
 
 fn infer_unary_expr(
     unary_expr: &UnaryExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let ty = infer_expr(&unary_expr.expr, block, data, None);
+    let ty = infer_expr(&unary_expr.expr, block_id, data, None);
     let op_name = unary_expr.op.static_name();
 
     let resolved_type = match unary_expr.op {
@@ -218,25 +212,21 @@ fn infer_unary_expr(
         }
     };
 
-    data.type_registry
-        .type_info_table
-        .insert(unary_expr.id, resolved_type);
+    data.type_info_table.insert(unary_expr.id, resolved_type);
     resolved_type
 }
 
 fn infer_ident_expr(
     ident_expr: &IdentExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     let err = match function_args {
         Some(args) => match data.type_registry.resolve_function(ident_expr.ident, args) {
             Ok(res) => {
-                data.type_registry
-                    .type_info_table
-                    .insert(ident_expr.id, res.general_ty);
-                data.type_registry
+                data.type_info_table.insert(ident_expr.id, res.general_ty);
+                data
                     .bindings
                     .insert(ident_expr.id, res.binding_info.id);
                 return res.general_ty;
@@ -251,14 +241,14 @@ fn infer_ident_expr(
             )),
         },
         None => {
-            match block.resolve_variable(ident_expr.ident, &data.src_code, ident_expr.span.clone())
-            {
+            match data.block_tree.resolve_variable(
+                block_id,
+                ident_expr.ident,
+                &data.src_code,
+                ident_expr.span.clone(),
+            ) {
                 Ok(fr) => {
-                    let ty = data
-                        .type_registry
-                        .type_info_table
-                        .get(fr.binding_info.id)
-                        .expect(
+                    let ty = data.type_info_table.get(fr.binding_info.id).expect(
                         "Compiler bug: binding not found in type table - but it should be there",
                     );
 
@@ -275,12 +265,12 @@ fn infer_ident_expr(
                             .help("Define the variable with 'def' before using it to establish its type")
                             .build();
                         data.errors.push(err);
-                        data.type_registry.type_info_table.insert(ident_expr.id, error_type());
+                        data.type_info_table.insert(ident_expr.id, error_type());
                         return error_type();
                     }
 
-                    data.type_registry.type_info_table.insert(ident_expr.id, ty);
-                    data.type_registry
+                    data.type_info_table.insert(ident_expr.id, ty);
+                    data
                         .bindings
                         .insert(ident_expr.id, fr.binding_info.id);
                     return ty;
@@ -290,24 +280,23 @@ fn infer_ident_expr(
         }
     };
     data.errors.push(*err);
-    data.type_registry
-        .type_info_table
-        .insert(ident_expr.id, error_type());
+    data.type_info_table.insert(ident_expr.id, error_type());
     error_type()
 }
 
 fn infer_func_call_expr(
     func_call_expr: &FuncCallExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     let actual_arg_types = func_call_expr
         .args
         .iter()
-        .map(|arg| infer_expr(arg, block, data, None))
+        .map(|arg| infer_expr(arg, block_id, data, None))
         .collect::<Vec<_>>();
 
-    let actual_func_ident = infer_expr(&func_call_expr.lhs, block, data, Some(&actual_arg_types));
+    let actual_func_ident =
+        infer_expr(&func_call_expr.lhs, block_id, data, Some(&actual_arg_types));
 
     let resolved_ret_type = match actual_func_ident {
         TypeInfo::Function(func) => func.ret,
@@ -369,7 +358,7 @@ fn infer_func_call_expr(
                 .build();
             data.errors.push(err);
             error_type()
-        },
+        }
         TypeInfo::Enum(e) => {
             let err = YuuError::builder()
                 .kind(ErrorKind::InvalidExpression)
@@ -389,8 +378,7 @@ fn infer_func_call_expr(
         }
     };
 
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(func_call_expr.id, resolved_ret_type);
 
     resolved_ret_type
@@ -398,8 +386,8 @@ fn infer_func_call_expr(
 
 fn infer_assignment(
     assignment_expr: &AssignmentExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     // checking LValueKind is done in parsing already..
 
@@ -413,8 +401,8 @@ fn infer_assignment(
         "LValueKind should match the LHS expression structure"
     );
 
-    let ty_lhs = infer_expr(&assignment_expr.lhs, block, data, None);
-    let ty_rhs = infer_expr(&assignment_expr.rhs, block, data, None);
+    let ty_lhs = infer_expr(&assignment_expr.lhs, block_id, data, None);
+    let ty_rhs = infer_expr(&assignment_expr.rhs, block_id, data, None);
 
     // First unify to check compatibility
     let _unified = match ty_lhs.unify(ty_rhs) {
@@ -446,8 +434,7 @@ fn infer_assignment(
     };
 
     // Assignment expressions always have type "nil"
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(assignment_expr.id, primitive_nil());
 
     primitive_nil()
@@ -455,11 +442,11 @@ fn infer_assignment(
 
 fn infer_struct_instantiation(
     struct_instantiation_expr: &StructInstantiationExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     for (_, expr_node) in &struct_instantiation_expr.fields {
-        infer_expr(expr_node, block, data, None);
+        infer_expr(expr_node, block_id, data, None);
     }
 
     let struct_name = struct_instantiation_expr.struct_name;
@@ -483,8 +470,7 @@ fn infer_struct_instantiation(
             .help("Define this struct before using it")
             .build();
         data.errors.push(err);
-        data.type_registry
-            .type_info_table
+        data.type_info_table
             .insert(struct_instantiation_expr.id, error_type());
         return error_type();
     }
@@ -494,7 +480,6 @@ fn infer_struct_instantiation(
 
     for (field, expr_node) in &struct_instantiation_expr.fields {
         let expr_type = data
-            .type_registry
             .type_info_table
             .get(expr_node.node_id())
             .expect("Compiler bug: expression type should be in registry");
@@ -541,8 +526,7 @@ fn infer_struct_instantiation(
         }
     }
 
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(struct_instantiation_expr.id, struct_type);
 
     struct_type
@@ -550,10 +534,10 @@ fn infer_struct_instantiation(
 
 fn infer_member_access(
     member_access_expr: &MemberAccessExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let lhs_ty = infer_expr(&member_access_expr.lhs, block, data, None);
+    let lhs_ty = infer_expr(&member_access_expr.lhs, block_id, data, None);
 
     match lhs_ty {
         TypeInfo::Struct(s) | TypeInfo::Pointer(TypeInfo::Struct(s)) => {
@@ -566,8 +550,7 @@ fn infer_member_access(
 
             match field {
                 Some(field_info) => {
-                    data.type_registry
-                        .type_info_table
+                    data.type_info_table
                         .insert(member_access_expr.id, field_info.ty);
 
                     field_info.ty
@@ -607,8 +590,7 @@ fn infer_member_access(
                         .build();
                     data.errors.push(err);
 
-                    data.type_registry
-                        .type_info_table
+                    data.type_info_table
                         .insert(member_access_expr.id, error_type());
                     error_type()
                 }
@@ -641,8 +623,7 @@ fn infer_member_access(
                 .build();
             data.errors.push(err);
 
-            data.type_registry
-                .type_info_table
+            data.type_info_table
                 .insert(member_access_expr.id, error_type());
             error_type()
         }
@@ -651,8 +632,8 @@ fn infer_member_access(
 
 fn infer_enum_instantiation(
     ei: &EnumInstantiationExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     let enum_type = data.type_registry.resolve_enum(ei.enum_name);
@@ -667,7 +648,7 @@ fn infer_enum_instantiation(
                         // Yes, we have both
                         (Some(dexpr), Some(reg_ty)) => {
                             // Calculate type (semantic) from associated data (syntactical)
-                            let ty = infer_expr(dexpr, block, data, function_args);
+                            let ty = infer_expr(dexpr, block_id, data, function_args);
                             // See if the types match
                             if let Err(err) = ty.unify(reg_ty) {
                                 let err_msg = YuuError::builder()
@@ -781,51 +762,57 @@ fn infer_enum_instantiation(
             error_type()
         }
     };
-    data.type_registry
-        .type_info_table
-        .insert(ei.id, inferred_ty);
+    data.type_info_table.insert(ei.id, inferred_ty);
     inferred_ty
 }
 
 pub fn infer_expr(
     expr: &ExprNode,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     match expr {
         ExprNode::Literal(lit) => infer_literal_expr(lit, data),
-        ExprNode::Binary(binary) => infer_binary_expr(binary, block, data),
-        ExprNode::Unary(unary) => infer_unary_expr(unary, block, data),
-        ExprNode::Ident(ident) => infer_ident_expr(ident, block, data, function_args),
-        ExprNode::FuncCall(func_call) => infer_func_call_expr(func_call, block, data),
-        ExprNode::Assignment(assignment) => infer_assignment(assignment, block, data),
+        ExprNode::Binary(binary) => infer_binary_expr(binary, block_id, data),
+        ExprNode::Unary(unary) => infer_unary_expr(unary, block_id, data),
+        ExprNode::Ident(ident) => infer_ident_expr(ident, block_id, data, function_args),
+        ExprNode::FuncCall(func_call) => infer_func_call_expr(func_call, block_id, data),
+        ExprNode::Assignment(assignment) => infer_assignment(assignment, block_id, data),
         ExprNode::StructInstantiation(struct_instantiation_expr) => {
-            infer_struct_instantiation(struct_instantiation_expr, block, data)
+            infer_struct_instantiation(struct_instantiation_expr, block_id, data)
         }
         ExprNode::MemberAccess(member_access_expr) => {
-            infer_member_access(member_access_expr, block, data)
+            infer_member_access(member_access_expr, block_id, data)
         }
-        ExprNode::EnumInstantiation(ei) => infer_enum_instantiation(ei, block, data, function_args),
-        ExprNode::Deref(deref_expr) => infer_deref_expr(deref_expr, block, data),
-        ExprNode::AddressOf(address_of_expr) => infer_address_of_expr(address_of_expr, block, data),
-        ExprNode::HeapAlloc(heap_alloc_expr) => infer_heap_alloc_expr(heap_alloc_expr, block, data),
-        ExprNode::Array(array_expr) => infer_array_expr(array_expr, block, data),
+        ExprNode::EnumInstantiation(ei) => {
+            infer_enum_instantiation(ei, block_id, data, function_args)
+        }
+        ExprNode::Deref(deref_expr) => infer_deref_expr(deref_expr, block_id, data),
+        ExprNode::AddressOf(address_of_expr) => {
+            infer_address_of_expr(address_of_expr, block_id, data)
+        }
+        ExprNode::HeapAlloc(heap_alloc_expr) => {
+            infer_heap_alloc_expr(heap_alloc_expr, block_id, data)
+        }
+        ExprNode::Array(array_expr) => infer_array_expr(array_expr, block_id, data),
         ExprNode::ArrayLiteral(array_literal_expr) => {
-            infer_array_literal_expr(array_literal_expr, block, data)
+            infer_array_literal_expr(array_literal_expr, block_id, data)
         }
-        ExprNode::PointerOp(pointer_op_expr) => infer_pointer_op_expr(pointer_op_expr, block, data),
-        ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block, data),
+        ExprNode::PointerOp(pointer_op_expr) => {
+            infer_pointer_op_expr(pointer_op_expr, block_id, data)
+        }
+        ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block_id, data),
     }
 }
 
 fn infer_heap_alloc_expr(
     heap_alloc_expr: &HeapAllocExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     // Always infer the type of the expression to be allocated
-    let value_type = infer_expr(&heap_alloc_expr.value, block, data, None);
+    let value_type = infer_expr(&heap_alloc_expr.value, block_id, data, None);
 
     // Special case: for array expressions, use the element type directly
     // REASON: The expression would otherwise immediately decay to a pointer...
@@ -839,8 +826,7 @@ fn infer_heap_alloc_expr(
         }
     };
 
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(heap_alloc_expr.id, pointer_type);
 
     pointer_type
@@ -848,10 +834,10 @@ fn infer_heap_alloc_expr(
 
 fn infer_deref_expr(
     deref_expr: &DerefExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let operand_type = infer_expr(&deref_expr.expr, block, data, None);
+    let operand_type = infer_expr(&deref_expr.expr, block_id, data, None);
 
     let result_type = match operand_type {
         TypeInfo::Pointer(pointee_type) => pointee_type,
@@ -874,44 +860,44 @@ fn infer_deref_expr(
         }
     };
 
-    data.type_registry
-        .type_info_table
-        .insert(deref_expr.id, result_type);
+    data.type_info_table.insert(deref_expr.id, result_type);
 
     result_type
 }
 
 fn infer_address_of_expr(
     address_of_expr: &AddressOfExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    let operand_type = infer_expr(&address_of_expr.expr, block, data, None);
+    let operand_type = infer_expr(&address_of_expr.expr, block_id, data, None);
 
     let result_type = operand_type.ptr_to();
 
-    data.type_registry
-        .type_info_table
-        .insert(address_of_expr.id, result_type);
+    data.type_info_table.insert(address_of_expr.id, result_type);
 
     result_type
 }
 
 fn infer_array_expr(
     array_expr: &crate::pass_parse::ast::ArrayExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
-    use crate::pass_type_inference::type_info::{PrimitiveType, TypeInfo};
     use crate::pass_type_inference::types::infer_type;
 
     // Determine element type
     let element_type = if let Some(explicit_type) = &array_expr.element_type {
         // Explicit type provided: [value:type; count] or [:type; count]
-        infer_type(explicit_type, data)
+        infer_type(
+            explicit_type,
+            &data.type_registry,
+            &mut data.errors,
+            &data.src_code,
+        )
     } else if let Some(init_value) = &array_expr.init_value {
         // Type inferred from init value: [value; count]
-        infer_expr(init_value, block, data, None)
+        infer_expr(init_value, block_id, data, None)
     } else {
         // This should not happen - we need either explicit type or init value
         panic!(
@@ -920,7 +906,7 @@ fn infer_array_expr(
     };
 
     // Verify size is an integer type
-    let size_type = infer_expr(&array_expr.size, block, data, None);
+    let size_type = infer_expr(&array_expr.size, block_id, data, None);
     if !matches!(size_type, TypeInfo::BuiltInPrimitive(PrimitiveType::I64)) {
         // Emit proper error for user mistake
         data.errors.push(
@@ -934,23 +920,21 @@ fn infer_array_expr(
                 .span(array_expr.size.span(), "expected i64 for array size")
                 .build(),
         );
-        return crate::pass_type_inference::type_info::error_type();
+        return error_type();
     }
 
     // Arrays are treated as pointers to the element type
     let result_type = element_type.ptr_to();
 
-    data.type_registry
-        .type_info_table
-        .insert(array_expr.id, result_type);
+    data.type_info_table.insert(array_expr.id, result_type);
 
     result_type
 }
 
 fn infer_array_literal_expr(
-    array_literal_expr: &crate::pass_parse::ast::ArrayLiteralExpr,
-    block: &mut Block,
-    data: &mut TransientData,
+    array_literal_expr: &ArrayLiteralExpr,
+    block_id: usize,
+    data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     use crate::pass_type_inference::types::infer_type;
 
@@ -962,15 +946,20 @@ fn infer_array_literal_expr(
     // Determine element type
     let element_type = if let Some(explicit_type) = &array_literal_expr.element_type {
         // Explicit type provided: [1:i64, 2, 3]
-        infer_type(explicit_type, data)
+        infer_type(
+            explicit_type,
+            &data.type_registry,
+            &mut data.errors,
+            &data.src_code,
+        )
     } else {
         // Type inferred from first element: [1, 2, 3]
-        infer_expr(&array_literal_expr.elements[0], block, data, None)
+        infer_expr(&array_literal_expr.elements[0], block_id, data, None)
     };
 
     // Type check remaining elements against the determined element type
     for (i, element) in array_literal_expr.elements.iter().enumerate().skip(1) {
-        let element_type_inferred = infer_expr(element, block, data, None);
+        let element_type_inferred = infer_expr(element, block_id, data, None);
 
         if element_type_inferred != element_type {
             data.errors.push(
@@ -993,8 +982,7 @@ fn infer_array_literal_expr(
     // Array literals are treated as pointers to the element type
     let result_type = element_type.ptr_to();
 
-    data.type_registry
-        .type_info_table
+    data.type_info_table
         .insert(array_literal_expr.id, result_type);
 
     result_type

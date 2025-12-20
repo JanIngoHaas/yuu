@@ -1,11 +1,11 @@
 use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
-use crate::pass_type_inference::{EnumVariantInfo, StructFieldInfo};
-use crate::pass_type_inference::{
-    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
-    primitive_u64,
+use crate::utils::collections::IndexMap;
+use crate::utils::type_info_table::{
+    PrimitiveType, TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
+    primitive_nil, primitive_u64,
 };
-use indexmap::IndexMap;
+use crate::utils::{EnumVariantInfo, StructFieldInfo, TypeRegistry};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -136,9 +136,9 @@ pub enum UnaryOp {
 
 #[derive(Clone, Debug)]
 pub enum ArrayInit {
-    Zero,                           // Zero-initialize all elements
-    Splat(Operand),                // Fill all elements with same value
-    Elements(Vec<Operand>),        // Explicit element values
+    Zero,                   // Zero-initialize all elements
+    Splat(Operand),         // Fill all elements with same value
+    Elements(Vec<Operand>), // Explicit element values
 }
 
 #[derive(Clone, Debug)]
@@ -229,11 +229,11 @@ pub enum Instruction {
 
     // Heap allocation - returns a pointer to allocated memory
     HeapAlloc {
-        target: Variable,            // Pointer variable to store the heap address
-        element_size: u64,           // Size of each element in bytes (static)
-        total_size: Operand,         // Total allocation size in bytes (can be dynamic)
-        align: Option<u64>,          // Optional alignment requirement
-        init: Option<ArrayInit>,     // Array initialization (None for uninitialized)
+        target: Variable,        // Pointer variable to store the heap address
+        element_size: u64,       // Size of each element in bytes (static)
+        total_size: Operand,     // Total allocation size in bytes (can be dynamic)
+        align: Option<u64>,      // Optional alignment requirement
+        init: Option<ArrayInit>, // Array initialization (None for uninitialized)
     },
 
     // Heap deallocation - frees previously allocated memory
@@ -354,7 +354,7 @@ impl Function {
             name,
             params: Vec::new(),
             return_type,
-            blocks: IndexMap::new(),
+            blocks: IndexMap::default(),
             entry_block: 0,
             follow_c_abi: true,
             current_block: 0,
@@ -494,7 +494,12 @@ impl Function {
     ) -> Variable {
         let dest_ty = element_ty.ptr_to();
         let target = self.fresh_variable(name_hint, dest_ty);
-        let instr = Instruction::Alloca { target, count, align: None, init };
+        let instr = Instruction::Alloca {
+            target,
+            count,
+            align: None,
+            init,
+        };
         self.get_current_block_mut().instructions.push(instr);
         target
     }
@@ -538,7 +543,12 @@ impl Function {
         values: Vec<Operand>,
     ) -> Variable {
         let count = values.len() as u64;
-        self.make_alloca(name_hint, element_ty, count, Some(ArrayInit::Elements(values)))
+        self.make_alloca(
+            name_hint,
+            element_ty,
+            count,
+            Some(ArrayInit::Elements(values)),
+        )
     }
 
     // Convenience method that checks for valid types
@@ -548,10 +558,7 @@ impl Function {
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Option<Variable> {
-        if matches!(
-            ty,
-            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
-        ) {
+        if matches!(ty, TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error) {
             return None;
         }
 
@@ -803,7 +810,13 @@ impl Function {
         );
 
         let target = self.fresh_variable(name_hint, ty);
-        let instr = Instruction::HeapAlloc { target, element_size, total_size, align, init };
+        let instr = Instruction::HeapAlloc {
+            target,
+            element_size,
+            total_size,
+            align,
+            init,
+        };
         self.get_current_block_mut().instructions.push(instr);
         target
     }
@@ -814,7 +827,7 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         init_value: Option<Operand>,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
@@ -830,13 +843,20 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         count: u64,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
         let element_size = layout.size as u64;
         let total_size = Operand::U64Const(count * element_size);
-        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, Some(ArrayInit::Zero))
+        self.make_heap_alloc(
+            name_hint,
+            ptr_ty,
+            element_size,
+            total_size,
+            None,
+            Some(ArrayInit::Zero),
+        )
     }
 
     // Convenience method for heap array with explicit values
@@ -845,13 +865,20 @@ impl Function {
         name_hint: Ustr,
         ptr_ty: &'static TypeInfo,
         values: Vec<Operand>,
-        tr: &crate::pass_type_inference::TypeRegistry,
+        tr: &TypeRegistry,
     ) -> Variable {
         let element_ty = ptr_ty.deref_ptr();
         let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
         let element_size = layout.size as u64;
         let total_size = Operand::U64Const(values.len() as u64 * element_size);
-        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, Some(ArrayInit::Elements(values)))
+        self.make_heap_alloc(
+            name_hint,
+            ptr_ty,
+            element_size,
+            total_size,
+            None,
+            Some(ArrayInit::Elements(values)),
+        )
     }
 
     // Builder method for heap deallocation
@@ -909,7 +936,11 @@ impl Function {
         );
 
         debug_assert!(
-            matches!(index.ty(), TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::I64) | TypeInfo::BuiltInPrimitive(crate::pass_type_inference::PrimitiveType::U64)),
+            matches!(
+                index.ty(),
+                TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
+                    | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
+            ),
             "Array index must be i64 or u64, got {}",
             index.ty()
         );
@@ -917,7 +948,11 @@ impl Function {
         let element_ty = base_ty.deref_ptr();
         let target = self.fresh_variable(name_hint, element_ty.ptr_to());
 
-        let instr = Instruction::GetElementPtr { target, base, index };
+        let instr = Instruction::GetElementPtr {
+            target,
+            base,
+            index,
+        };
         self.get_current_block_mut().instructions.push(instr);
         target
     }

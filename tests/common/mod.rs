@@ -6,8 +6,7 @@ use yuu::utils::pipeline::*;
 
 /// Helper function to run the full YIR pipeline and return YIR output
 pub fn run_to_yir(source: &str, filename: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let yir_output =
-        Pipeline::new(source.to_string(), filename.to_string()).calc_yir_colored()?;
+    let yir_output = Pipeline::new(source.to_string(), filename.to_string()).calc_yir_colored()?;
     Ok(yir_output.0)
 }
 

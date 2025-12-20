@@ -1,11 +1,12 @@
 use crate::pass_type_dependency_analysis::TypeDependencyGraph;
 // YIR to C lowering pass - transforms the YIR intermediate representation to C code
-use crate::pass_type_inference::{
-    EnumInfo, PrimitiveType, StructInfo, StructOrEnumInfo, TypeInfo, TypeRegistry,
-};
 use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
     Operand, UnaryOp, Variable,
+};
+use crate::utils::{
+    EnumInfo, StructInfo, StructOrEnumInfo, TypeRegistry,
+    type_info_table::{PrimitiveType, TypeInfo},
 };
 use miette::IntoDiagnostic;
 use std::fmt::Write;
@@ -171,7 +172,7 @@ impl CLowering {
         }
 
         write!(data.output, ";")?;
-        
+
         Self::gen_type(data, ty)?;
         write!(data.output, " ")?;
         Self::write_var_name(var, &mut data.output)?;
@@ -194,7 +195,12 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca { target, count, align, init } => {
+            Instruction::Alloca {
+                target,
+                count,
+                align,
+                init,
+            } => {
                 if let Some(align) = align {
                     write!(data.output, "alignas({align}) ")?;
                 }
@@ -212,7 +218,7 @@ impl CLowering {
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, "=&")?; 
+                write!(data.output, "=&")?;
                 Self::write_var_name(source, &mut data.output)?;
                 write!(data.output, ";")?;
             }
@@ -236,7 +242,7 @@ impl CLowering {
                 write!(data.output, "->{});", field)?;
             }
             Instruction::Load { target, source } => {
-                self.gen_simple_var_decl(data, target)?; 
+                self.gen_simple_var_decl(data, target)?;
                 write!(data.output, "=*")?;
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
@@ -341,7 +347,13 @@ impl CLowering {
                 self.gen_operand(data, source)?;
                 write!(data.output, ";")?;
             }
-            Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
+            Instruction::HeapAlloc {
+                target,
+                element_size,
+                total_size,
+                align,
+                init,
+            } => {
                 // Generate heap allocation
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
@@ -416,7 +428,11 @@ impl CLowering {
                 self.gen_operand(data, ptr)?;
                 write!(data.output, ");")?;
             }
-            Instruction::GetElementPtr { target, base, index } => {
+            Instruction::GetElementPtr {
+                target,
+                base,
+                index,
+            } => {
                 self.gen_variable_decl(data, target)?;
                 write!(data.output, ";")?;
                 Self::write_var_name(target, &mut data.output)?;
@@ -601,13 +617,16 @@ impl CLowering {
         )?;
 
         // Generate helper functions for array initialization
-        write!(data.output, r#"static inline void __yuu_template_fill(void* dest, const void* template_val, size_t element_size, size_t count) {{
+        write!(
+            data.output,
+            r#"static inline void __yuu_template_fill(void* dest, const void* template_val, size_t element_size, size_t count) {{
   char* d = (char*)dest;
   for (size_t i = 0; i < count; i++) {{
     memcpy(d + i * element_size, template_val, element_size);
   }}
 }}
-"#)?;
+"#
+        )?;
 
         // Note: __yuu_elements_fill will be generated per-type as needed since each call has different element types
 

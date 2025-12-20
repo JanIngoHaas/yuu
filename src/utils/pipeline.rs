@@ -13,10 +13,11 @@ use crate::pass_print_yir::pass_print_yir_impl::{
 use crate::pass_type_dependency_analysis::{
     TypeDependencyAnalysis, TypeDependencyAnalysisErrors, TypeDependencyGraph,
 };
+use crate::pass_type_inference::TypeInferenceErrors;
 use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
-use crate::pass_type_inference::{TypeInferenceErrors, TypeRegistry};
+use crate::pass_yir_lowering::Module;
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
-use crate::pass_yir_lowering::{Module, RootBlock};
+use crate::utils::{BlockTree, TypeRegistry};
 use miette::{IntoDiagnostic, Result};
 use std::time::{Duration, Instant};
 
@@ -57,24 +58,35 @@ impl PassTimings {
         println!("Total duration: {:.3}ms", total_secs * 1000.0);
         if self.total_loc > 0 {
             println!("Total LOC: {}", self.total_loc);
-            println!("Overall Speed: {:.2} LOC/s", self.total_loc as f64 / total_secs);
+            println!(
+                "Overall Speed: {:.2} LOC/s",
+                self.total_loc as f64 / total_secs
+            );
         }
         println!();
-        
-        println!("{:<25} | {:<12} | {:<8} | {:<12}", "Pass", "Time", "%", "Speed");
+
+        println!(
+            "{:<25} | {:<12} | {:<8} | {:<12}",
+            "Pass", "Time", "%", "Speed"
+        );
         println!("{:-<25}-|-{:-<12}-|-{:-<8}-|-{:-<12}", "", "", "", "");
-        
+
         for timing in &self.timings {
             let duration_secs = timing.duration.as_secs_f64();
-            let percent = if total_secs > 0.0 { (duration_secs / total_secs) * 100.0 } else { 0.0 };
-            
+            let percent = if total_secs > 0.0 {
+                (duration_secs / total_secs) * 100.0
+            } else {
+                0.0
+            };
+
             let speed_str = if self.total_loc > 0 && duration_secs > 0.0 {
                 format!("{:.2} LOC/s", self.total_loc as f64 / duration_secs)
             } else {
                 "-".to_string()
             };
-            
-            println!("{:<25} | {:8.3}ms | {:5.1}% | {:<12}",
+
+            println!(
+                "{:<25} | {:8.3}ms | {:5.1}% | {:<12}",
                 timing.pass_name,
                 duration_secs * 1000.0,
                 percent,
@@ -87,9 +99,12 @@ impl PassTimings {
 pub struct Pipeline {
     pub ast: Option<AST>,
     source_info: Option<SourceInfo>,
+    pub id_generator: Option<crate::pass_parse::add_ids::IdGenerator>,
     syntax_errors: Option<SyntaxErrors>,
     type_registry: Option<TypeRegistry>,
-    root_block: Option<Box<RootBlock>>,
+    binding_table: Option<crate::utils::BindingTable>,
+    type_info_table: Option<crate::utils::type_info_table::TypeInfoTable>,
+    root_block: Option<BlockTree>,
     type_errors: Option<TypeInferenceErrors>,
 
     sema_done: bool,
@@ -111,8 +126,11 @@ impl Default for Pipeline {
         Self {
             ast: None,
             source_info: None,
+            id_generator: None,
             syntax_errors: None,
             type_registry: None,
+            binding_table: None,
+            type_info_table: None,
             decl_def_errors: None,
             root_block: None,
             type_errors: None,
@@ -139,8 +157,11 @@ impl Pipeline {
         Pipeline {
             ast: None,
             source_info: Some(source_info),
+            id_generator: None,
             syntax_errors: None,
             type_registry: None,
+            binding_table: None,
+            type_info_table: None,
             decl_def_errors: None,
             root_block: None,
             type_errors: None,
@@ -181,10 +202,11 @@ impl Pipeline {
 
         let parse_pass = Parse::new();
         let start = Instant::now();
-        let (ast, syntax_errors) = parse_pass.run(source_info)?;
+        let (ast, id_generator, syntax_errors) = parse_pass.run(source_info)?;
         let parse_duration = start.elapsed();
 
         self.ast = Some(ast);
+        self.id_generator = Some(id_generator);
         self.syntax_errors = Some(syntax_errors);
 
         self.record_pass_timing("parse", parse_duration);
@@ -204,12 +226,15 @@ impl Pipeline {
         let source_info = self.source_info.as_ref().unwrap();
 
         let start = Instant::now();
-        let (type_registry, root_block, type_errors) =
-            TypeInference::new().run(ast, source_info.clone())?;
+        let expr_count = self.id_generator.as_ref().unwrap().expr_count();
+        let (type_registry, root_block, binding_table, type_info_table, type_errors) =
+            TypeInference::new().run(ast, expr_count, source_info.clone())?;
         let duration = start.elapsed();
 
         self.record_pass_timing("type_inference", duration);
         self.type_registry = Some(type_registry);
+        self.binding_table = Some(binding_table);
+        self.type_info_table = Some(type_info_table);
         self.root_block = Some(root_block);
         self.type_errors = Some(type_errors);
         Ok(())
@@ -235,10 +260,9 @@ impl Pipeline {
         );
 
         self.control_flow_errors =
-            Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
+            Some(ControlFlowAnalysis.run(ast, type_registry, self.type_info_table.as_ref().unwrap(), source_info)?);
 
-        self.decl_def_errors =
-            Some(CheckDeclDef.run(ast, type_registry, source_info)?);
+        self.decl_def_errors = Some(CheckDeclDef.run(ast, type_registry, source_info)?);
         let duration = start.elapsed();
 
         self.record_pass_timing("semantic_analysis", duration);
@@ -263,7 +287,13 @@ impl Pipeline {
         let type_registry = self.type_registry.as_ref().unwrap();
 
         let start = Instant::now();
-        let module = YirLowering::new().run(ast, type_registry, false)?;
+        let module = YirLowering::new().run(
+            ast,
+            type_registry,
+            self.type_info_table.as_ref().unwrap(),
+            self.binding_table.as_ref().unwrap(),
+            false
+        )?;
         let duration = start.elapsed();
 
         self.record_pass_timing("yir_lowering", duration);
@@ -307,7 +337,6 @@ impl Pipeline {
         let type_dependency_errors = self.type_dependency_errors.as_ref().unwrap();
         let decl_def_errors = self.decl_def_errors.as_ref().unwrap();
 
-
         let sema_errors = cf_errors
             .0
             .iter()
@@ -316,11 +345,7 @@ impl Pipeline {
             .cloned()
             .collect::<Vec<_>>();
 
-        Diagnostics.run(
-            &syntax_errors.0,
-            &type_inference_errors.0,
-            &sema_errors,
-        )?;
+        Diagnostics.run(&syntax_errors.0, &type_inference_errors.0, &sema_errors)?;
         Ok(())
     }
 
@@ -378,7 +403,7 @@ impl Pipeline {
 
     pub fn get_module_mut(&mut self) -> Result<&mut Module> {
         self.yir_lowering()?;
-        
+
         self.module
             .as_mut()
             .ok_or_else(|| miette::miette!("Module not available"))

@@ -188,7 +188,8 @@ fn main() -> i64:
     return val .
     "#;
 
-    let executable = run_to_executable(source, "test_heap_free_struct.yuu").expect("Failed to compile");
+    let executable =
+        run_to_executable(source, "test_heap_free_struct.yuu").expect("Failed to compile");
     let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
     assert_eq!(result, 30);
 }

@@ -1,7 +1,7 @@
-use crate::pass_type_inference::TypeInfo;
 use crate::pass_yir_lowering::Label;
 use crate::pass_yir_lowering::yir::{BinOp, ControlFlow, Instruction, Operand, UnaryOp, Variable};
-use indexmap::IndexMap;
+use crate::utils::collections::FastHashMap;
+use crate::utils::type_info_table::TypeInfo;
 use std::fmt;
 use std::io::Write;
 use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
@@ -12,7 +12,7 @@ use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 struct RGB(u8, u8, u8);
 
 struct ColorPalette {
-    colors: IndexMap<&'static str, RGB>,
+    colors: FastHashMap<&'static str, RGB>,
     color_choice: ColorChoice,
 }
 
@@ -29,7 +29,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn deep_ocean() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 215, 0)); // Deep Gold
         colors.insert("type", RGB(64, 224, 208)); // Turquoise
@@ -45,7 +45,7 @@ impl ColorPalette {
     }
 
     fn warm_ember() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 140, 85)); // Warm Orange
         colors.insert("type", RGB(255, 183, 138)); // Peach
@@ -62,7 +62,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn mystic_forest() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(144, 238, 144)); // Light Green
         colors.insert("type", RGB(152, 251, 152)); // Pale Green
@@ -78,7 +78,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn cosmic_night() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(147, 112, 219)); // Medium Purple
         colors.insert("type", RGB(138, 43, 226)); // Blue Violet
@@ -94,7 +94,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn neon_dreams() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(255, 255, 255)); // White
         colors.insert("keyword", RGB(255, 110, 199)); // Hot Pink
         colors.insert("type", RGB(0, 255, 255)); // Cyan
@@ -112,7 +112,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn summer_breeze() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(255, 110, 74)); // Burnt Orange
         colors.insert("type", RGB(0, 119, 182)); // Ocean Blue
@@ -128,7 +128,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn cherry_blossom() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(219, 68, 88)); // Deep Pink
         colors.insert("type", RGB(15, 76, 129)); // Navy Blue
@@ -144,7 +144,7 @@ impl ColorPalette {
 
     #[allow(dead_code)]
     fn forest_morning() -> Self {
-        let mut colors = IndexMap::new();
+        let mut colors = FastHashMap::default();
         colors.insert("function", RGB(0, 0, 0)); // Black
         colors.insert("keyword", RGB(0, 102, 0)); // Dark Green
         colors.insert("type", RGB(0, 77, 122)); // Deep Blue
@@ -336,7 +336,12 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::Alloca { target, count, align, init } => {
+        Instruction::Alloca {
+            target,
+            count,
+            align,
+            init,
+        } => {
             let align_str = align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
@@ -483,7 +488,11 @@ pub fn format_instruction(
                 format_operand(source, do_color)
             )
         }
-        Instruction::GetVariantDataPtr { target, base, variant } => {
+        Instruction::GetVariantDataPtr {
+            target,
+            base,
+            variant,
+        } => {
             writeln!(
                 f,
                 "{} := {} {} {}",
@@ -502,7 +511,13 @@ pub fn format_instruction(
                 format_operand(source, do_color)
             )
         }
-        Instruction::HeapAlloc { target, element_size, total_size, align, init } => {
+        Instruction::HeapAlloc {
+            target,
+            element_size,
+            total_size,
+            align,
+            init,
+        } => {
             if let Some(alignment) = align {
                 write!(
                     f,
@@ -526,7 +541,11 @@ pub fn format_instruction(
             }
 
             if let Some(array_init) = init {
-                write!(f, " {}", colorize(&format!("{:?}", array_init), "keyword", do_color))?;
+                write!(
+                    f,
+                    " {}",
+                    colorize(&format!("{:?}", array_init), "keyword", do_color)
+                )?;
             }
             writeln!(f)
         }
@@ -538,7 +557,11 @@ pub fn format_instruction(
                 format_operand(ptr, do_color)
             )
         }
-        Instruction::GetElementPtr { target, base, index } => {
+        Instruction::GetElementPtr {
+            target,
+            base,
+            index,
+        } => {
             writeln!(
                 f,
                 "{} := {} {}[{}]",
@@ -640,19 +663,30 @@ pub fn format_control_flow(
             jump_targets,
             default,
         } => {
-            write!(f, "{} {} {{", format_keyword("JUMP_TABLE", do_color), format_operand(scrutinee, do_color))?;
+            write!(
+                f,
+                "{} {} {{",
+                format_keyword("JUMP_TABLE", do_color),
+                format_operand(scrutinee, do_color)
+            )?;
             writeln!(f)?;
 
             for (variant_name, label) in jump_targets {
-                writeln!(f, "    {} -> {}", 
-                    colorize(&variant_name.to_string(), "constant", do_color), 
-                    format_label(label, do_color))?;
+                writeln!(
+                    f,
+                    "    {} -> {}",
+                    colorize(&variant_name.to_string(), "constant", do_color),
+                    format_label(label, do_color)
+                )?;
             }
 
             if let Some(default_label) = default {
-                writeln!(f, "    {} -> {}", 
-                    colorize("DEFAULT", "keyword", do_color), 
-                    format_label(default_label, do_color))?;
+                writeln!(
+                    f,
+                    "    {} -> {}",
+                    colorize("DEFAULT", "keyword", do_color),
+                    format_label(default_label, do_color)
+                )?;
             }
 
             writeln!(f, "}}")

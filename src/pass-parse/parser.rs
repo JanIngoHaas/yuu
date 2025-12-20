@@ -8,7 +8,6 @@ use crate::{
 use crate::{
     pass_parse::ast::*,
     pass_parse::token::{Token, TokenKind},
-    pass_yir_lowering::block::FUNC_BLOCK_NAME,
 };
 use logos::Span;
 use ustr::{Ustr, ustr};
@@ -333,7 +332,6 @@ impl Parser {
                 id: 0,
                 span: span.clone(),
                 body: block_stmt.body,
-                label: block_stmt.label,
             }),
         ))
     }
@@ -673,12 +671,15 @@ impl Parser {
 
         let t = self.lexer.next_token();
         match t.kind {
-            TokenKind::Ident(ident) => Ok((t.span.clone(), BindingNode::Ident(IdentBinding {
-                span: t.span.clone(),
-                name: ident,
-                id: 0,
-                is_mut,
-            }))),
+            TokenKind::Ident(ident) => Ok((
+                t.span.clone(),
+                BindingNode::Ident(IdentBinding {
+                    span: t.span.clone(),
+                    name: ident,
+                    id: 0,
+                    is_mut,
+                }),
+            )),
             _ => {
                 self.errors.push(
                     YuuError::unexpected_token(
@@ -835,7 +836,6 @@ impl Parser {
                 id: 0,
                 span,
                 body: stmts,
-                label,
             },
         )
     }
@@ -1660,8 +1660,7 @@ impl Parser {
 
     pub fn parse_func_def(&mut self) -> ParseResult<(Span, FuncDefStructural)> {
         let (span, decl) = self.parse_func_decl()?;
-        let (block_span, mut block) = self.parse_block_stmt_inner()?; // TODO: write a parse_root_func_block - we don't want the root function blocks to have labels
-        block.label = Some(ustr(FUNC_BLOCK_NAME)); // 🤡
+        let (block_span, block) = self.parse_block_stmt_inner()?;
         let span = span.start..block_span.end;
         Ok(self.make_func_def(span, decl, block))
     }
@@ -1694,8 +1693,8 @@ impl Parser {
                 span: ident.span.clone(),
                 name,
                 id: 0,
-                is_mut: true
-            }, 
+                is_mut: true,
+            },
             _ => {
                 let mut error = YuuError::unexpected_token(
                     ident.span.clone(),
@@ -1704,14 +1703,14 @@ impl Parser {
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 );
-                error = error
-                    .with_help("Grammar: 'dec <name>;'".to_string());
+                error = error.with_help("Grammar: 'dec <name>;'".to_string());
                 self.errors.push(error);
                 return Err(self.lexer.synchronize());
             }
         };
 
-        let final_span = self.expect_semicolon_or_block_terminator(dec_kw.span.clone(), ident.span.clone())?;
+        let final_span =
+            self.expect_semicolon_or_block_terminator(dec_kw.span.clone(), ident.span.clone())?;
         let decl_stmt = DeclStmt {
             id: 0,
             ident: name,
@@ -1731,8 +1730,8 @@ impl Parser {
                 id: 0,
                 name,
                 span: ident.span.clone(),
-                is_mut: true
-            }, 
+                is_mut: true,
+            },
             _ => {
                 let mut error = YuuError::unexpected_token(
                     ident.span.clone(),
@@ -1741,8 +1740,7 @@ impl Parser {
                     self.lexer.code_info.source.clone(),
                     self.lexer.code_info.file_name.clone(),
                 );
-                error = error
-                    .with_help("Grammar: 'def <name> = <expr>;'".to_string());
+                error = error.with_help("Grammar: 'def <name> = <expr>;'".to_string());
                 self.errors.push(error);
                 return Err(self.lexer.synchronize());
             }
@@ -1751,7 +1749,8 @@ impl Parser {
         let _eq_token = self.lexer.expect(&[TokenKind::Equal], &mut self.errors)?;
         let (expr_span, expr) = self.parse_expr()?;
 
-        let final_span = self.expect_semicolon_or_block_terminator(def_kw.span.clone(), expr_span.clone())?;
+        let final_span =
+            self.expect_semicolon_or_block_terminator(def_kw.span.clone(), expr_span.clone())?;
         let def_stmt = DefStmt {
             id: 0,
             ident: name,
@@ -1760,7 +1759,6 @@ impl Parser {
         };
 
         Ok((final_span, StmtNode::Def(def_stmt)))
-
     }
 
     fn parse_return_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
@@ -1880,9 +1878,9 @@ impl Parser {
             structurals: structural_nodes,
         }
     }
-    pub fn parse_and_add_ids(&mut self) -> AST {
+    pub fn parse_and_add_ids(&mut self) -> (AST, usize, crate::pass_parse::add_ids::IdGenerator) {
         let mut ast = self.parse();
-        add_ids(&mut ast);
-        ast
+        let (expr_count, id_generator) = add_ids(&mut ast);
+        (ast, expr_count, id_generator)
     }
 }

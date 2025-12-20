@@ -1,15 +1,16 @@
 use ustr::Ustr;
 
-use crate::pass_diagnostics::error::YuuError;
-use crate::pass_type_inference::{IndexUstrMap, IndexUstrSet};
-
+use crate::{
+    pass_diagnostics::error::YuuError,
+    utils::collections::{UstrIndexMap, UstrIndexSet},
+};
 
 pub use self::pass_type_dependencies_impl::TypeDependencyAnalysis;
 
 mod pass_type_dependencies_impl;
 
 /// Type dependency graph using petgraph
-pub struct TypeDependencyGraph(pub IndexUstrMap<Vec<Ustr>>);
+pub struct TypeDependencyGraph(pub UstrIndexMap<Vec<Ustr>>);
 
 /// Errors that can occur during type dependency analysis
 #[derive(Debug, Clone)]
@@ -50,11 +51,11 @@ impl TypeDependencyGraph {
     pub fn create_topological_order(&self) -> Vec<Ustr> {
         // Find the "root" nodes (i.e. nodes that depend on other nodes but have no other node that depends on them)
 
-        let mut root_nodes = IndexUstrSet::from_iter(self.0.keys().copied());
+        let mut root_nodes = UstrIndexSet::from_iter(self.0.keys().copied());
 
         for (_node, deps) in &self.0 {
             for dep in deps {
-                root_nodes.swap_remove(dep);    
+                root_nodes.swap_remove(dep);
             }
         }
 

@@ -131,7 +131,6 @@ pub struct BlockStmt {
     pub id: NodeId,
     pub span: Span,
     pub body: Vec<StmtNode>,
-    pub label: Option<Ustr>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -695,7 +694,7 @@ impl Spanned for BindingNode {
     }
 }
 
-pub type NodeId = i64;
+pub type NodeId = usize;
 
 pub trait InternUstr {
     fn intern(&self) -> Ustr;

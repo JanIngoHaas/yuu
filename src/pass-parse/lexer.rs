@@ -29,7 +29,8 @@ pub struct Lexer {
 impl Lexer {
     pub fn new(code_info: &SourceInfo) -> Self {
         let mut lexer = TokenKind::lexer(code_info.source.as_ref());
-        let mut tokens = Vec::new();
+        //let estimated_tokens = (code_info.source.len() / 4).max(1000); // No meaningful performance increase.
+        let mut tokens = Vec::default();
 
         // Pre-lex the entire file at once
         while let Some(token_result) = lexer.next() {
