@@ -9,7 +9,7 @@ use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, DerefExpr, HeapAllocExp
 use crate::pass_type_inference::pass_type_inference_impl::TransientDataStructural;
 use crate::utils::type_info_table::PrimitiveType;
 use crate::utils::type_info_table::{
-    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64,
+    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
 };
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
@@ -803,6 +803,11 @@ pub fn infer_expr(
             infer_pointer_op_expr(pointer_op_expr, block_id, data)
         }
         ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block_id, data),
+        ExprNode::LuaMeta(_) => {
+            // LuaMeta nodes should be processed in Lua execution phase before type inference
+            // For now, return unknown type as placeholder
+            unknown_type()
+        }
     }
 }
 

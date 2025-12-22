@@ -234,6 +234,14 @@ pub enum TokenKind {
     #[token("~")]
     Tilde,
 
+    #[regex(r"#([^#]|##)*?#", |lex| {
+        let full = lex.slice();
+        let inner = &full[1..full.len()-1];
+        let processed = inner.replace("##", "#");
+        Some(ustr(&processed))
+    })]
+    LuaMeta(Ustr),
+
     EOF,
 }
 
@@ -303,6 +311,7 @@ impl Display for TokenKind {
             TokenKind::MultiDeref(count) => write!(f, "'.{}'", "*".repeat(*count)),
             TokenKind::DotAmpersand => "'.&'".fmt(f),
             TokenKind::Tilde => "'~'".fmt(f),
+            TokenKind::LuaMeta(code) => write!(f, "'#{}#' (Lua meta)", code),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),

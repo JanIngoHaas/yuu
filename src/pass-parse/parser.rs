@@ -124,6 +124,22 @@ impl Parser {
                 Ok(self.make_literal_expr(t))
             }
 
+            TokenKind::LuaMeta(_) => {
+                let token = self.lexer.next_token();
+                match token.kind {
+                    TokenKind::LuaMeta(lua_code) => {
+                        let span = token.span.clone();
+                        let lua_meta = LuaMetaNode {
+                            id: 0,
+                            span: span.clone(),
+                            lua_code,
+                        };
+                        Ok((span, ExprNode::LuaMeta(lua_meta)))
+                    }
+                    _ => unreachable!("Token kind should match the peeked token"),
+                }
+            }
+
             TokenKind::Ident(_) => {
                 // Check if this identifier is followed by a double colon (enum instantiation)
                 let peek_next = self.lexer.peek_at(1);

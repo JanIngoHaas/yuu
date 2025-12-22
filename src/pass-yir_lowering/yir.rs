@@ -230,8 +230,8 @@ pub enum Instruction {
     // Heap allocation - returns a pointer to allocated memory
     HeapAlloc {
         target: Variable,        // Pointer variable to store the heap address
-        element_size: u64,       // Size of each element in bytes (static)
-        total_size: Operand,     // Total allocation size in bytes (can be dynamic)
+        element_size: u64,       // Size of one element in bytes (static)
+        total_size: Operand,     // Total allocation size in bytes (in case of arrays, could be > element_size, can be dynamic)
         align: Option<u64>,      // Optional alignment requirement
         init: Option<ArrayInit>, // Array initialization (None for uninitialized)
     },

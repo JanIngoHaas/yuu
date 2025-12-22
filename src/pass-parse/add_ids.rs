@@ -141,6 +141,9 @@ impl AddId for ExprNode {
                 cast_expr.expr.add_id(generator);
                 cast_expr.target_type.add_id(generator);
             }
+            ExprNode::LuaMeta(lua_meta) => {
+                lua_meta.id = generator.next_expr();
+            }
         }
     }
 }
@@ -396,6 +399,7 @@ impl GetId for ExprNode {
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.id,
             ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.id,
             ExprNode::Cast(cast_expr) => cast_expr.id,
+            ExprNode::LuaMeta(lua_meta) => lua_meta.id,
         }
     }
 }

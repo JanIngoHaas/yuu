@@ -793,6 +793,9 @@ impl<'a> TransientData<'a> {
                     )
                 }
             }
+            ExprNode::LuaMeta(_) => {
+                panic!("Compiler bug: LuaMeta nodes should be replaced before YIR lowering")
+            }
         }
     }
 

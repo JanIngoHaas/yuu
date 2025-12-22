@@ -301,6 +301,13 @@ pub struct CastExpr {
     pub id: NodeId,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LuaMetaNode {
+    pub id: NodeId,
+    pub span: Span,
+    pub lua_code: Ustr,
+}
+
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
 
@@ -336,6 +343,7 @@ pub enum ExprNode {
     ArrayLiteral(ArrayLiteralExpr),
 
     Cast(CastExpr),
+    LuaMeta(LuaMetaNode),
     //Error,
 }
 
@@ -636,6 +644,7 @@ impl Spanned for ExprNode {
             ExprNode::Array(array_expr) => array_expr.span.clone(),
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.span.clone(),
             ExprNode::Cast(cast_expr) => cast_expr.span.clone(),
+            ExprNode::LuaMeta(lua_meta_node) => lua_meta_node.span.clone(),
         }
     }
 }

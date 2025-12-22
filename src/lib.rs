@@ -21,3 +21,6 @@ pub mod pass_type_dependency_analysis;
 pub mod pass_type_inference;
 #[path = "pass-yir_lowering/mod.rs"]
 pub mod pass_yir_lowering;
+
+#[path = "pass-compiler_plugin_s1/mod.rs"]
+pub mod pass_compiler_plugin_s1;

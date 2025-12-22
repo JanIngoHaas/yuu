@@ -205,6 +205,9 @@ impl CheckDeclDefAnalyzer<'_> {
             ExprNode::Cast(cast_expr) => {
                 self.check_expr(&cast_expr.expr, decls, defs);
             }
+            ExprNode::LuaMeta(_) => {
+                // TODO: implement Lua metaprogramming checking
+            }
         }
     }
 
