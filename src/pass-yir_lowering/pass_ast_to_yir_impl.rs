@@ -557,7 +557,7 @@ impl<'a> TransientData<'a> {
                 let expr_type = self.get_type(heap_alloc_expr.id);
 
                 // Check if we can initialize directly on heap
-                match &*heap_alloc_expr.value {
+                match &*heap_alloc_expr.expr {
                     ExprNode::Array(array_expr) => {
                         // Get the size operand (can be dynamic for heap allocation)
                         let count_operand = self.lower_expr(&array_expr.size, ContextKind::AsIs);
@@ -577,7 +577,7 @@ impl<'a> TransientData<'a> {
                         self.add_temporary(total_size_var);
 
                         // Create ArrayInit based on init_value
-                        let init = if let Some(init_value) = &array_expr.init_value {
+                        let init = if let Some(init_value) = &array_expr.init_expr {
                             let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
                             Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(
                                 init_operand,
@@ -673,7 +673,7 @@ impl<'a> TransientData<'a> {
                         Operand::Variable(ptr_var)
                     }
                     _ => {
-                        let value_type = self.get_type(heap_alloc_expr.value.node_id());
+                        let value_type = self.get_type(heap_alloc_expr.expr.node_id());
                         let layout = calculate_type_layout(value_type, self.tr);
                         let size_operand = Operand::U64Const(layout.size as u64);
 
@@ -689,7 +689,7 @@ impl<'a> TransientData<'a> {
                         self.add_temporary(ptr_var);
 
                         let value_operand =
-                            self.lower_expr(&heap_alloc_expr.value, ContextKind::AsIs);
+                            self.lower_expr(&heap_alloc_expr.expr, ContextKind::AsIs);
                         self.function.make_store(ptr_var, value_operand);
                         Operand::Variable(ptr_var)
                     }
@@ -712,7 +712,7 @@ impl<'a> TransientData<'a> {
                 let array_type = self.get_type(array_expr.id);
                 let element_type = array_type.deref_ptr(); // Arrays are stored as pointers
 
-                let ptr_var = if let Some(init_value) = &array_expr.init_value {
+                let ptr_var = if let Some(init_value) = &array_expr.init_expr {
                     // Pattern: [value; count] - initialized with repeated value
                     let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
                     let init = Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(

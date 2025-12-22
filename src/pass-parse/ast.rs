@@ -214,14 +214,14 @@ pub struct AddressOfExpr {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HeapAllocExpr {
-    pub value: Box<ExprNode>, // Expression to allocate on heap
+    pub expr: Box<ExprNode>, // Expression to allocate on heap
     pub span: Span,
     pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ArrayExpr {
-    pub init_value: Option<Box<ExprNode>>, // None for uninitialized (_)
+    pub init_expr: Option<Box<ExprNode>>, // None for uninitialized (_)
     pub element_type: Option<Box<TypeNode>>, // None for inferred type
     pub size: Box<ExprNode>,               // Array size expression
     pub span: Span,
@@ -305,7 +305,7 @@ pub struct CastExpr {
 pub struct LuaMetaNode {
     pub id: NodeId,
     pub span: Span,
-    pub lua_code: Ustr,
+    pub lua_code: String,
 }
 
 /// Represents an expression in the AST
@@ -343,6 +343,7 @@ pub enum ExprNode {
     ArrayLiteral(ArrayLiteralExpr),
 
     Cast(CastExpr),
+
     LuaMeta(LuaMetaNode),
     //Error,
 }
@@ -389,12 +390,14 @@ pub struct IdentBinding {
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BindingNode {
     Ident(IdentBinding),
+    LuaMeta(LuaMetaNode),
 }
 
 impl BindingNode {
     pub fn is_mut(&self) -> bool {
         match self {
             BindingNode::Ident(ident) => ident.is_mut,
+            _ => false,
         }
     }
 }
@@ -403,6 +406,7 @@ impl Display for BindingNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BindingNode::Ident(ident) => write!(f, "{}(id: {})", ident.name, ident.id),
+            BindingNode::LuaMeta(lua_meta) => write!(f, "{}(id: {})", lua_meta.lua_code, lua_meta.id),
         }
     }
 }
@@ -461,6 +465,7 @@ pub enum TypeNode {
     Ident(IdentType),
     Pointer(PointerType),
     Array(ArrayType),
+    LuaMeta(LuaMetaNode),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -542,6 +547,7 @@ pub enum StructuralNode {
     StructDecl(StructDeclStructural),
     StructDef(StructDefStructural),
     EnumDef(EnumDefStructural),
+    LuaMeta(LuaMetaNode),
     Error(NodeId),
 }
 
@@ -580,6 +586,7 @@ pub enum StmtNode {
     Error(NodeId),
     Decl(DeclStmt),
     Def(DefStmt),
+    LuaMeta(LuaMetaNode)
 }
 
 /// Represents a node in the AST
@@ -665,6 +672,7 @@ impl Spanned for StmtNode {
             StmtNode::Decl(decl_stmt) => decl_stmt.span.clone(),
             StmtNode::Def(def_stmt) => def_stmt.span.clone(),
             StmtNode::Error(_) => 0..0,
+            StmtNode::LuaMeta(meta) => meta.span.clone(),
         }
     }
 }
@@ -676,6 +684,7 @@ impl Spanned for TypeNode {
             TypeNode::BuiltIn(built_in_type) => built_in_type.span.clone(),
             TypeNode::Pointer(pointer_type) => pointer_type.span.clone(),
             TypeNode::Array(array_type) => array_type.span.clone(),
+            TypeNode::LuaMeta(meta) => meta.span.clone(),
         }
     }
 }
@@ -691,6 +700,7 @@ impl Spanned for StructuralNode {
             }
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.span.clone(),
             StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.span.clone(),
+            StructuralNode::LuaMeta(meta) => meta.span.clone(),
         }
     }
 }
@@ -699,6 +709,7 @@ impl Spanned for BindingNode {
     fn span(&self) -> Span {
         match self {
             BindingNode::Ident(ident) => ident.span.clone(),
+            BindingNode::LuaMeta(meta) => meta.span.clone(),
         }
     }
 }

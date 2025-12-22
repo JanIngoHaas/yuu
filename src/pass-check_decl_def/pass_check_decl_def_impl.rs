@@ -188,11 +188,11 @@ impl CheckDeclDefAnalyzer<'_> {
                 self.check_expr(&pointer_op_expr.right, decls, defs);
             }
             ExprNode::HeapAlloc(heap_alloc_expr) => {
-                self.check_expr(&heap_alloc_expr.value, decls, defs);
+                self.check_expr(&heap_alloc_expr.expr, decls, defs);
             }
             ExprNode::Array(array_expr) => {
                 array_expr
-                    .init_value
+                    .init_expr
                     .as_ref()
                     .map(|expr| self.check_expr(expr, decls, defs));
                 self.check_expr(&array_expr.size, decls, defs);

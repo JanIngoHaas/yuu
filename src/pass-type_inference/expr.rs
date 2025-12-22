@@ -817,11 +817,11 @@ fn infer_heap_alloc_expr(
     data: &mut TransientDataStructural,
 ) -> &'static TypeInfo {
     // Always infer the type of the expression to be allocated
-    let value_type = infer_expr(&heap_alloc_expr.value, block_id, data, None);
+    let value_type = infer_expr(&heap_alloc_expr.expr, block_id, data, None);
 
     // Special case: for array expressions, use the element type directly
     // REASON: The expression would otherwise immediately decay to a pointer...
-    let pointer_type = match &*heap_alloc_expr.value {
+    let pointer_type = match &*heap_alloc_expr.expr {
         ExprNode::Array(_) | ExprNode::ArrayLiteral(_) => {
             value_type // Here, we already have a pointer, so we just don't do anything...
         }
@@ -900,7 +900,7 @@ fn infer_array_expr(
             &mut data.errors,
             &data.src_code,
         )
-    } else if let Some(init_value) = &array_expr.init_value {
+    } else if let Some(init_value) = &array_expr.init_expr {
         // Type inferred from init value: [value; count]
         infer_expr(init_value, block_id, data, None)
     } else {

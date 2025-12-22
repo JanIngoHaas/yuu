@@ -110,11 +110,11 @@ impl AddId for ExprNode {
 
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 heap_alloc_expr.id = generator.next_expr();
-                heap_alloc_expr.value.add_id(generator);
+                heap_alloc_expr.expr.add_id(generator);
             }
             ExprNode::Array(array_expr) => {
                 array_expr.id = generator.next_expr();
-                if let Some(init_value) = &mut array_expr.init_value {
+                if let Some(init_value) = &mut array_expr.init_expr {
                     init_value.add_id(generator);
                 }
                 if let Some(element_type) = &mut array_expr.element_type {
