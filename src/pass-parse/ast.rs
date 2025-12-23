@@ -623,6 +623,7 @@ impl Spanned for Node {
             Node::Structural(structural_node) => structural_node.span(),
             Node::Binding(pattern_node) => match pattern_node {
                 BindingNode::Ident(ident) => ident.span.clone(),
+                BindingNode::LuaMeta(lua_meta) => lua_meta.span.clone(),
             },
         }
     }

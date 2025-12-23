@@ -118,5 +118,8 @@ pub fn infer_structural(
         StructuralNode::StructDecl(_struct_decl) => {}
         StructuralNode::StructDef(_struct_def) => {}
         StructuralNode::EnumDef(_enum_def) => {}
+        StructuralNode::LuaMeta(_) => {
+            // TODO: Implement Lua meta structural type inference
+        }
     }
 }

@@ -1070,6 +1070,9 @@ impl<'a> TransientData<'a> {
                 self.function.make_store(yir_var, rhs_value);
                 StmtRes::Proceed
             }
+            StmtNode::LuaMeta(_) => {
+                panic!("Compiler bug: LuaMeta nodes should be replaced before YIR lowering")
+            }
         };
 
         self.kill_current_temporaries();
@@ -1088,6 +1091,9 @@ impl<'a> TransientData<'a> {
                 self.var_map.insert(binding_id, yir_var);
 
                 self.add_variable_to_current_scope(yir_var);
+            }
+            BindingNode::LuaMeta(_) => {
+                panic!("Compiler bug: LuaMeta nodes should be replaced before YIR lowering")
             }
         }
     }
@@ -1184,6 +1190,9 @@ impl YirLowering {
                 }
                 StructuralNode::EnumDef(edefs) => {
                     module.define_enum(edefs.decl.name);
+                }
+                StructuralNode::LuaMeta(_) => {
+                    panic!("Compiler bug: LuaMeta nodes should be replaced before YIR lowering")
                 }
                 _ => (),
             }

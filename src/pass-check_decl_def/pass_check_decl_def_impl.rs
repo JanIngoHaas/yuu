@@ -328,6 +328,7 @@ impl CheckDeclDefAnalyzer<'_> {
                 defs.insert(def_stmt.ident.name);
                 true
             }
+            StmtNode::LuaMeta(_) => true,
         }
     }
 }

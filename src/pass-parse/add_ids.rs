@@ -223,6 +223,9 @@ impl AddId for StmtNode {
                 def_stmt.expr.add_id(generator);
             }
             StmtNode::Error(e) => *e = generator.next_non_expr(),
+            StmtNode::LuaMeta(lua_meta) => {
+                lua_meta.id = generator.next_non_expr();
+            }
         }
     }
 }
@@ -245,6 +248,9 @@ impl AddId for TypeNode {
                 array_type.element_type.add_id(generator);
                 array_type.size.add_id(generator);
             }
+            TypeNode::LuaMeta(lua_meta) => {
+                lua_meta.id = generator.next_non_expr();
+            }
         }
     }
 }
@@ -254,6 +260,9 @@ impl AddId for BindingNode {
         match self {
             BindingNode::Ident(i) => {
                 i.id = generator.next_expr(); // Variable bindings need expression IDs for type lookup
+            }
+            BindingNode::LuaMeta(lua_meta) => {
+                lua_meta.id = generator.next_expr();
             }
         }
     }
@@ -338,6 +347,9 @@ impl AddId for StructuralNode {
                     variant.id = generator.next_non_expr();
                 }
             }
+            StructuralNode::LuaMeta(lua_meta) => {
+                lua_meta.id = generator.next_non_expr();
+            }
         }
     }
 }
@@ -419,6 +431,7 @@ impl GetId for StmtNode {
             StmtNode::Decl(decl_stmt) => decl_stmt.id,
             StmtNode::Def(def_stmt) => def_stmt.id,
             StmtNode::Error(x) => *x,
+            StmtNode::LuaMeta(lua_meta) => lua_meta.id,
         }
     }
 }
@@ -430,6 +443,7 @@ impl GetId for TypeNode {
             TypeNode::BuiltIn(built_in_type) => built_in_type.id,
             TypeNode::Pointer(pointer_type) => pointer_type.id,
             TypeNode::Array(array_type) => array_type.id,
+            TypeNode::LuaMeta(lua_meta) => lua_meta.id,
         }
     }
 }
@@ -438,6 +452,7 @@ impl GetId for BindingNode {
     fn node_id(&self) -> NodeId {
         match self {
             BindingNode::Ident(i) => i.id,
+            BindingNode::LuaMeta(lua_meta) => lua_meta.id,
         }
     }
 }
@@ -451,6 +466,7 @@ impl GetId for StructuralNode {
             StructuralNode::StructDecl(struct_decl_structural) => struct_decl_structural.id,
             StructuralNode::StructDef(struct_def_structural) => struct_def_structural.id,
             StructuralNode::EnumDef(enum_def_structural) => enum_def_structural.id,
+            StructuralNode::LuaMeta(lua_meta) => lua_meta.id,
         }
     }
 }

@@ -1,4 +1,4 @@
-use rustc_hash::FxHasher;
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHasher};
 use std::hash::{BuildHasherDefault, Hash};
 use std::{fmt::Display, hash::Hasher, ops::Deref, sync::LazyLock};
 
@@ -264,7 +264,7 @@ static TYPE_CACHE: LazyLock<TypeInterner> = LazyLock::new(TypeInterner::new);
 
 #[derive(Clone, Debug)]
 pub struct TypeInfoTable {
-    pub types: Vec<&'static TypeInfo>,
+    pub types: FxHashMap<NodeId, &'static TypeInfo>,
 }
 
 impl Default for TypeInfoTable {
@@ -276,13 +276,13 @@ impl Default for TypeInfoTable {
 impl TypeInfoTable {
     pub fn new() -> Self {
         Self {
-            types: Vec::new(),
+            types: FxHashMap::default(),
         }
     }
 
     pub fn with_size(size: usize) -> Self {
         Self {
-            types: vec![unknown_type(); size],
+            types: FxHashMap::with_capacity_and_hasher(size, FxBuildHasher::default()),
         }
     }
 
@@ -292,13 +292,13 @@ impl TypeInfoTable {
             "Compiler Bug: Attempted to insert type for non-expression ID {id}. Only expression IDs should have types!"
         );
 
-        let was_unknown = matches!(self.types[id], TypeInfo::Unknown);
-        self.types[id] = ty;
+        let was_unknown = matches!(self.types[&id], TypeInfo::Unknown);
+        self.types.insert(id, ty);
         was_unknown
     }
 
     pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {
-        self.types.get(id).copied()
+        self.types.get(&id).copied()
     }
 
     pub fn unify_and_insert(
@@ -306,9 +306,9 @@ impl TypeInfoTable {
         id: NodeId,
         ty: &'static TypeInfo,
     ) -> Result<&'static TypeInfo, UnificationError> {
-        let existing = self.types[id];
+        let existing = self.types[&id];
         let unified = ty.unify(existing)?;
-        self.types[id] = unified;
+        self.types.insert(id, unified);
         Ok(unified)
     }
 

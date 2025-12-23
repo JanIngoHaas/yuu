@@ -7,6 +7,7 @@ use crate::pass_control_flow_analysis::pass_control_flow_analysis_impl::{
 use crate::pass_diagnostics::pass_diagnostics_impl::Diagnostics;
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
 use crate::pass_parse::{AST, SourceInfo};
+use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_print_yir::pass_print_yir_impl::{
     YirTextualRepresentation, YirToColoredString, YirToString,
 };
@@ -428,5 +429,13 @@ impl Pipeline {
 
         self.record_pass_timing("c_compilation", duration);
         Ok(out)
+    }
+
+    pub fn get_source_info(&self) -> Option<&SourceInfo> {
+        self.source_info.as_ref()
+    }
+
+    pub fn get_id_generator_mut(&mut self) -> Option<&mut IdGenerator> {
+        self.id_generator.as_mut()
     }
 }

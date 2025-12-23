@@ -24,6 +24,9 @@ pub fn infer_binding(
             );
             data.type_info_table.insert(ident_binding.id, expr_type);
         }
+        BindingNode::LuaMeta(_) => {
+            // TODO: Implement Lua meta binding
+        }
     }
 }
 

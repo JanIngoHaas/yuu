@@ -78,6 +78,10 @@ pub fn infer_type(
             let element_type = infer_type(&array.element_type, registry, errors, src_code);
             element_type.ptr_to()
         }
+        TypeNode::LuaMeta(_) => {
+            // TODO: Implement Lua meta type inference
+            error_type()
+        }
     };
     // Not an expression - no need to add to
     // type_info_table

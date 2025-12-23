@@ -113,6 +113,9 @@ impl<'a> ControlFlowAnalyzer<'a> {
                     );
                 }
             }
+            StructuralNode::LuaMeta(_) => {
+                // Lua meta nodes don't need control flow analysis
+            }
             _ => {
                 // Other structural nodes don't need control flow analysis
             }
@@ -186,7 +189,8 @@ impl<'a> ControlFlowAnalyzer<'a> {
             | StmtNode::Defer(_)
             | StmtNode::Decl(_)
             | StmtNode::Def(_)
-            | StmtNode::Error(_) => FlowState::CouldContinue,
+            | StmtNode::Error(_)
+            | StmtNode::LuaMeta(_) => FlowState::CouldContinue,
         }
     }
 

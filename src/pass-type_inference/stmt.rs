@@ -161,6 +161,9 @@ pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientDataStru
             let _ = infer_expr(&defer_stmt.expr, block_id, data, None);
         }
         StmtNode::Error(_stmt) => {}
+        StmtNode::LuaMeta(_) => {
+            // TODO: Implement Lua meta statement type inference
+        }
     }
 }
 
