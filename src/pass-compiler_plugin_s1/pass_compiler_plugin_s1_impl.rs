@@ -56,7 +56,7 @@ impl PluginPass {
         };
 
         // 2. Convert result to T
-        let mut new_node: T = match self.lua.from_value(result_value) {
+        let new_node: T = match self.lua.from_value(result_value) {
             Ok(node) => node,
             Err(err) => {
                 data.errors.push(
@@ -72,13 +72,14 @@ impl PluginPass {
             }
         };
 
-        // 3. Assign new ID
-        new_node.add_id(data.id_generator);
-
         Some(new_node)
     }
 
-    fn replace_node<T>(&self, node: &mut T, new_node: T) {
+    fn replace_node<T>(&self, node: &mut T, mut new_node: T, data: &mut TransientData)
+    where
+        T: AddId
+    {
+        new_node.add_id(data.id_generator);
         *node = new_node;
     }
 
@@ -117,7 +118,7 @@ impl PluginPass {
             StructuralNode::Error(_) => {}
             StructuralNode::LuaMeta(lm) => {
                 if let Some(new_node) = self.execute_lua_transform(&lm.lua_code, &lm.span, data) {
-                    self.replace_node(structural, new_node);
+                    self.replace_node(structural, new_node, data);
                 }
             },
         }
@@ -171,7 +172,7 @@ impl PluginPass {
             }
             StmtNode::LuaMeta(lm) => {
                 if let Some(new_node) = self.execute_lua_transform(&lm.lua_code, &lm.span, data) {
-                    self.replace_node(stmt, new_node);
+                    self.replace_node(stmt, new_node, data);
                 }
             },
             StmtNode::Error(_) => {}
@@ -196,7 +197,7 @@ impl PluginPass {
             ExprNode::Ident(_) => {}
             ExprNode::LuaMeta(lm) => {
                 if let Some(new_node) = self.execute_lua_transform(&lm.lua_code, &lm.span, data) {
-                    self.replace_node(expr, new_node);
+                    self.replace_node(expr, new_node, data);
                 }
             },
             ExprNode::Binary(e) => {
@@ -279,7 +280,7 @@ impl PluginPass {
             }
             TypeNode::LuaMeta(lm) => {
                 if let Some(new_node) = self.execute_lua_transform(&lm.lua_code, &lm.span, data) {
-                    self.replace_node(ty, new_node);
+                    self.replace_node(ty, new_node, data);
                 }
             },
         }
@@ -292,7 +293,7 @@ impl PluginPass {
             },
             BindingNode::LuaMeta(lm) => {
                 if let Some(new_node) = self.execute_lua_transform(&lm.lua_code, &lm.span, data) {
-                    self.replace_node(binding, new_node);
+                    self.replace_node(binding, new_node, data);
                 }
             },
         }
