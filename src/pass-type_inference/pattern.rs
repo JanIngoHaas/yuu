@@ -3,7 +3,7 @@ use crate::{
     pass_parse::{EnumPattern, ExprNode, RefutablePatternNode, Spanned},
     pass_type_inference::{
         infer_binding,
-        pass_type_inference_impl::{TransientData, TransientDataStructural},
+        pass_type_inference_impl::TransientData,
     },
     utils::{Block, type_info_table::TypeInfo},
 };
@@ -13,7 +13,7 @@ fn infer_enum_pattern(
     scrutinee_ty: &'static TypeInfo,
     scrutinee_expr: &ExprNode,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     // Verify the scrutinee is an enum type and get variant info
     match scrutinee_ty {
@@ -161,7 +161,7 @@ pub fn infer_pattern(
     scrutinee_ty: &&'static TypeInfo,
     scrutinee_expr: &ExprNode,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     match pattern {
         RefutablePatternNode::Enum(enum_pattern) => {

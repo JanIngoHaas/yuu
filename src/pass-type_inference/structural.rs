@@ -11,55 +11,13 @@ use ustr::Ustr;
 
 use super::{
     infer_type,
-    pass_type_inference_impl::{TransientData, TransientDataStructural},
+    pass_type_inference_impl::{TransientData},
 };
-
-pub fn declare_function(
-    name: Ustr,
-    args: &[Arg],
-    ret_ty: &Option<Box<TypeNode>>,
-    id: NodeId,
-    span: Span,
-    data: &mut TransientData,
-) -> &'static TypeInfo {
-    let func_arg_types = args
-        .iter()
-        .map(|arg| {
-            let semantic_arg_type = infer_type(
-                &arg.ty,
-                &data.type_registry,
-                &mut data.errors,
-                &data.src_code,
-            );
-            semantic_arg_type
-        })
-        .collect::<Vec<_>>();
-
-    let ret_type = if let Some(ty) = ret_ty {
-        infer_type(ty, &data.type_registry, &mut data.errors, &data.src_code)
-    } else {
-        primitive_nil()
-    };
-
-    data.type_registry.add_function(
-        &func_arg_types,
-        ret_type,
-        name,
-        BindingInfo {
-            id,
-            src_location: Some(span),
-        },
-    );
-
-    // Create and return the full function type
-    let (_, full_function_type) = function_type(&func_arg_types, ret_type);
-    full_function_type
-}
 
 pub fn infer_structural(
     structural: &StructuralNode,
     current_block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     match structural {
         StructuralNode::FuncDecl(_decl) => {}

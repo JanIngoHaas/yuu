@@ -11,6 +11,7 @@ use crate::utils::{BindingInfo, VariableBinding};
 use logos::Span;
 use ustr::{Ustr, UstrMap};
 
+#[derive(Debug, Clone)]
 pub struct Block {
     pub bindings: UstrMap<VariableBinding>,
     pub parent: Option<usize>,
@@ -33,6 +34,7 @@ impl Block {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct BlockTree {
     arena: Vec<Block>,
     root: usize,

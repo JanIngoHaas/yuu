@@ -1467,6 +1467,7 @@ impl Parser {
                 name,
                 args,
                 ret_ty,
+                metadata: None,
             },
         )
     }
@@ -1488,6 +1489,7 @@ impl Parser {
             span: span.clone(),
             decl,
             fields,
+            metadata: None,
         };
 
         Ok((span, out))
@@ -1506,6 +1508,7 @@ impl Parser {
                         id: 0,
                         name,
                         span: enum_tkn.span.start..ident.span.end,
+                        metadata: None,
                     },
                 )
             }
@@ -1633,6 +1636,7 @@ impl Parser {
             span: span.clone(),
             decl,
             variants,
+            metadata: None,
         };
         Ok((span, out))
     }
@@ -1652,7 +1656,7 @@ impl Parser {
 
         let span = struct_tkn.span.start..ident.span.end;
 
-        Ok((span.clone(), StructDeclStructural { id: 0, span, name }))
+        Ok((span.clone(), StructDeclStructural { id: 0, span, name, metadata: None }))
     }
 
     pub fn make_func_def(
@@ -1668,6 +1672,7 @@ impl Parser {
                 decl,
                 body,
                 span,
+                metadata: None,
             },
         )
     }

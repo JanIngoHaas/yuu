@@ -16,9 +16,10 @@ use crate::pass_type_dependency_analysis::{
 };
 use crate::pass_type_inference::TypeInferenceErrors;
 use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
+use crate::pass_type_registration::TypeRegistration;
 use crate::pass_yir_lowering::Module;
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
-use crate::utils::{BlockTree, TypeRegistry};
+use crate::utils::TypeRegistry;
 use miette::{IntoDiagnostic, Result};
 use std::time::{Duration, Instant};
 
@@ -98,23 +99,28 @@ impl PassTimings {
 }
 
 pub struct Pipeline {
-    pub ast: Option<AST>,
+    parse_done: bool,
+    type_registration_done: bool,
+    type_inference_done: bool,
+    semantic_analysis_done: bool,
+    yir_lowering_done: bool,
+    c_lowering_done: bool,
+    diagnostics_done: bool,
+
     source_info: Option<SourceInfo>,
     pub id_generator: Option<crate::pass_parse::add_ids::IdGenerator>,
+    
+    pub ast: Option<AST>,
     syntax_errors: Option<SyntaxErrors>,
+    
     type_registry: Option<TypeRegistry>,
-    binding_table: Option<crate::utils::BindingTable>,
-    type_info_table: Option<crate::utils::type_info_table::TypeInfoTable>,
-    root_block: Option<BlockTree>,
     type_errors: Option<TypeInferenceErrors>,
-
-    sema_done: bool,
+    
     control_flow_errors: Option<ControlFlowAnalysisErrors>,
     decl_def_errors: Option<CheckDeclDefErrors>,
-
     type_dependency_errors: Option<TypeDependencyAnalysisErrors>,
     type_dependency_order: Option<TypeDependencyGraph>,
-
+    
     module: Option<Module>,
     c_code: Option<CSourceCode>,
 
@@ -125,18 +131,21 @@ pub struct Pipeline {
 impl Default for Pipeline {
     fn default() -> Self {
         Self {
-            ast: None,
+            parse_done: false,
+            type_registration_done: false,
+            type_inference_done: false,
+            semantic_analysis_done: false,
+            yir_lowering_done: false,
+            c_lowering_done: false,
+            diagnostics_done: false,
             source_info: None,
             id_generator: None,
+            ast: None,
             syntax_errors: None,
             type_registry: None,
-            binding_table: None,
-            type_info_table: None,
-            decl_def_errors: None,
-            root_block: None,
             type_errors: None,
-            sema_done: false,
             control_flow_errors: None,
+            decl_def_errors: None,
             type_dependency_errors: None,
             type_dependency_order: None,
             module: None,
@@ -156,18 +165,21 @@ impl Pipeline {
         };
 
         Pipeline {
-            ast: None,
+            parse_done: false,
+            type_registration_done: false,
+            type_inference_done: false,
+            semantic_analysis_done: false,
+            yir_lowering_done: false,
+            c_lowering_done: false,
+            diagnostics_done: false,
             source_info: Some(source_info),
             id_generator: None,
+            ast: None,
             syntax_errors: None,
             type_registry: None,
-            binding_table: None,
-            type_info_table: None,
-            decl_def_errors: None,
-            root_block: None,
             type_errors: None,
-            sema_done: false,
             control_flow_errors: None,
+            decl_def_errors: None,
             type_dependency_errors: None,
             type_dependency_order: None,
             module: None,
@@ -192,7 +204,7 @@ impl Pipeline {
     }
 
     fn parse(&mut self) -> Result<()> {
-        if self.ast.is_some() {
+        if self.parse_done {
             return Ok(());
         }
 
@@ -209,44 +221,62 @@ impl Pipeline {
         self.ast = Some(ast);
         self.id_generator = Some(id_generator);
         self.syntax_errors = Some(syntax_errors);
+        self.parse_done = true;
 
         self.record_pass_timing("parse", parse_duration);
         Ok(())
     }
 
-    fn type_inference(&mut self) -> Result<()> {
-        if self.type_registry.is_some() && self.root_block.is_some() && self.type_errors.is_some() {
+    fn type_registration(&mut self) -> Result<()> {
+        if self.type_registration_done {
             return Ok(());
         }
 
-        if self.ast.is_none() {
+        if !self.parse_done {
             self.parse()?;
         }
 
-        let ast = self.ast.as_ref().unwrap();
+        let ast = self.ast.as_mut().unwrap();
         let source_info = self.source_info.as_ref().unwrap();
 
         let start = Instant::now();
-        let expr_count = self.id_generator.as_ref().unwrap().expr_count();
-        let (type_registry, root_block, binding_table, type_info_table, type_errors) =
-            TypeInference::new().run(ast, expr_count, source_info.clone())?;
+        let (type_registry, _type_registration_errors) = TypeRegistration.run(ast, source_info);
         let duration = start.elapsed();
-
-        self.record_pass_timing("type_inference", duration);
+        
         self.type_registry = Some(type_registry);
-        self.binding_table = Some(binding_table);
-        self.type_info_table = Some(type_info_table);
-        self.root_block = Some(root_block);
+        self.type_registration_done = true;
+        self.record_pass_timing("type_registration", duration);
+        Ok(())
+    }
+
+    fn type_inference(&mut self) -> Result<()> {
+        if self.type_inference_done {
+            return Ok(());
+        }
+
+        if !self.type_registration_done {
+            self.type_registration()?;
+        }
+
+        let ast = self.ast.as_mut().unwrap();
+        let source_info = self.source_info.as_ref().unwrap();
+
+        let start = Instant::now();
+        let type_errors = TypeInference.run(ast, self.type_registry.as_ref().unwrap(), source_info.clone())?;
+        let duration = start.elapsed();
+        
+        self.record_pass_timing("type_inference", duration);
         self.type_errors = Some(type_errors);
+        self.type_inference_done = true;
         Ok(())
     }
 
     fn semantic_analysis(&mut self) -> Result<()> {
-        if self.sema_done {
+        if self.semantic_analysis_done {
             return Ok(());
         }
 
-        if self.type_registry.is_none() {
+        if !self.type_inference_done {
             self.type_inference()?;
         }
 
@@ -261,7 +291,7 @@ impl Pipeline {
         );
 
         self.control_flow_errors =
-            Some(ControlFlowAnalysis.run(ast, type_registry, self.type_info_table.as_ref().unwrap(), source_info)?);
+            Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
 
         self.decl_def_errors = Some(CheckDeclDef.run(ast, type_registry, source_info)?);
         let duration = start.elapsed();
@@ -269,18 +299,17 @@ impl Pipeline {
         self.record_pass_timing("semantic_analysis", duration);
         self.type_dependency_errors = Some(type_dependency_errors);
         self.type_dependency_order = Some(type_dependency_order);
-
-        self.sema_done = true;
+        self.semantic_analysis_done = true;
 
         Ok(())
     }
 
     fn yir_lowering(&mut self) -> Result<()> {
-        if self.module.is_some() {
+        if self.yir_lowering_done {
             return Ok(());
         }
 
-        if self.control_flow_errors.is_none() {
+        if !self.diagnostics_done {
             self.diagnostics()?;
         }
 
@@ -291,24 +320,23 @@ impl Pipeline {
         let module = YirLowering::new().run(
             ast,
             type_registry,
-            self.type_info_table.as_ref().unwrap(),
-            self.binding_table.as_ref().unwrap(),
             false
         )?;
         let duration = start.elapsed();
 
         self.record_pass_timing("yir_lowering", duration);
         self.module = Some(module);
+        self.yir_lowering_done = true;
 
         Ok(())
     }
 
     fn c_lowering(&mut self) -> Result<()> {
-        if self.c_code.is_some() {
+        if self.c_lowering_done {
             return Ok(());
         }
 
-        if self.module.is_none() {
+        if !self.yir_lowering_done {
             self.yir_lowering()?;
         }
 
@@ -322,12 +350,17 @@ impl Pipeline {
 
         self.record_pass_timing("c_lowering", duration);
         self.c_code = Some(c_code);
+        self.c_lowering_done = true;
 
         Ok(())
     }
 
     fn diagnostics(&mut self) -> Result<()> {
-        if self.control_flow_errors.is_none() {
+        if self.diagnostics_done {
+            return Ok(());
+        }
+
+        if !self.semantic_analysis_done {
             self.semantic_analysis()?;
         }
 
@@ -347,6 +380,7 @@ impl Pipeline {
             .collect::<Vec<_>>();
 
         Diagnostics.run(&syntax_errors.0, &type_inference_errors.0, &sema_errors)?;
+        self.diagnostics_done = true;
         Ok(())
     }
 
@@ -356,7 +390,7 @@ impl Pipeline {
     }
 
     pub fn calc_yir(&mut self) -> Result<YirTextualRepresentation> {
-        if self.module.is_none() {
+        if !self.yir_lowering_done {
             self.yir_lowering()?;
         }
 
@@ -365,7 +399,7 @@ impl Pipeline {
     }
 
     pub fn calc_yir_colored(&mut self) -> Result<YirTextualRepresentation> {
-        if self.module.is_none() {
+        if !self.yir_lowering_done {
             self.yir_lowering()?;
         }
 
@@ -374,7 +408,7 @@ impl Pipeline {
     }
 
     pub fn calc_ast(&mut self) -> Result<&AST> {
-        if self.ast.is_none() {
+        if !self.parse_done {
             self.parse()?;
         }
         Ok(self.ast.as_ref().unwrap())
@@ -385,7 +419,7 @@ impl Pipeline {
     }
 
     pub fn calc_c(&mut self) -> Result<&CSourceCode> {
-        if self.c_code.is_none() {
+        if !self.c_lowering_done {
             self.c_lowering()?;
         }
 
@@ -393,7 +427,7 @@ impl Pipeline {
     }
 
     pub fn get_module(&mut self) -> Result<&Module> {
-        if self.module.is_none() {
+        if !self.yir_lowering_done {
             self.yir_lowering()?;
         }
 
@@ -411,7 +445,7 @@ impl Pipeline {
     }
 
     pub fn calc_executable(&mut self) -> Result<CExecutable> {
-        if self.c_code.is_none() {
+        if !self.c_lowering_done {
             self.c_lowering()?;
         }
 

@@ -11,11 +11,11 @@ use crate::{
 };
 
 use super::{
-    infer_binding, infer_expr, pass_type_inference_impl::TransientDataStructural,
+    infer_binding, infer_expr, pass_type_inference_impl::TransientData,
     pattern::infer_pattern,
 };
 
-fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientData) {
     let ty_expr = infer_expr(&let_stmt.expr, block_id, data, None);
 
     // If the expression already has an error type, don't emit another
@@ -25,7 +25,7 @@ fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientDataS
     infer_binding(&let_stmt.binding, block_id, ty_expr, data);
 }
 
-fn infer_decl_stmt(decl_stmt: &DeclStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_decl_stmt(decl_stmt: &DeclStmt, block_id: usize, data: &mut TransientData) {
     infer_binding(
         &BindingNode::Ident(decl_stmt.ident.clone()),
         block_id,
@@ -34,7 +34,7 @@ fn infer_decl_stmt(decl_stmt: &DeclStmt, block_id: usize, data: &mut TransientDa
     );
 }
 
-fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientData) {
     let expr_type = infer_expr(&def_stmt.expr, block_id, data, None);
     let var = data.block_tree.resolve_variable(
         block_id,
@@ -78,7 +78,7 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientDataS
 fn infer_return_stmt(
     return_stmt: &ReturnStmt,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     if let Some(expr) = return_stmt.expr.as_ref() {
         let return_ty = infer_expr(expr, block_id, data, None);
@@ -122,7 +122,7 @@ fn infer_return_stmt(
     }
 }
 
-pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientDataStructural) {
+pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientData) {
     match stmt {
         StmtNode::Let(let_stmt) => {
             infer_let_stmt(let_stmt, block_id, data);
@@ -167,7 +167,7 @@ pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientDataStru
     }
 }
 
-fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientData) {
     // Check condition
     let cond_ty = infer_expr(&if_stmt.if_block.condition, block_id, data, None);
     if let Err(err) = cond_ty.unify(primitive_bool()) {
@@ -224,7 +224,7 @@ fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientDataStru
     }
 }
 
-fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut TransientData) {
     let cond_ty = infer_expr(&while_stmt.condition_block.condition, block_id, data, None);
 
     if let Err(err) = cond_ty.unify(primitive_bool()) {
@@ -258,7 +258,7 @@ fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut Transien
 pub fn infer_block_stmt(
     block_stmt: &BlockStmt,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     // Create a new child scope for the block
     let child_block_id = data.block_tree.make_child(
@@ -275,7 +275,7 @@ pub fn infer_block_stmt(
     }
 }
 
-fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut TransientDataStructural) {
+fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut TransientData) {
     // Infer the scrutinee expression
     let scrutinee_ty = infer_expr(&match_stmt.scrutinee, block_id, data, None);
 

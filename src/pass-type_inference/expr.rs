@@ -6,7 +6,7 @@ use crate::pass_parse::ast::{
     UnaryOp,
 };
 use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, DerefExpr, HeapAllocExpr};
-use crate::pass_type_inference::pass_type_inference_impl::TransientDataStructural;
+use crate::pass_type_inference::pass_type_inference_impl::TransientData;
 use crate::utils::type_info_table::PrimitiveType;
 use crate::utils::type_info_table::{
     TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
@@ -28,7 +28,7 @@ pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Optio
     }
 }
 
-fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientDataStructural) -> &'static TypeInfo {
+fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
         crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
             crate::pass_parse::token::Integer::I64(_) => primitive_i64(),
@@ -46,7 +46,7 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientDataStructural) -> 
 fn infer_pointer_op_expr(
     pointer_op_expr: &crate::pass_parse::ast::PointerOpExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let lhs_type = infer_expr(&pointer_op_expr.left, block_id, data, None);
     let rhs_type = infer_expr(&pointer_op_expr.right, block_id, data, None);
@@ -87,7 +87,7 @@ fn infer_pointer_op_expr(
 fn infer_cast_expr(
     cast_expr: &crate::pass_parse::ast::CastExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let _expr_type = infer_expr(&cast_expr.expr, block_id, data, None);
     let target_type = crate::pass_type_inference::types::infer_type(
@@ -103,7 +103,7 @@ fn infer_cast_expr(
 fn infer_free_op(
     unary_expr: &UnaryExpr,
     operand_type: &'static TypeInfo,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     if let TypeInfo::Pointer(_) = operand_type {
         primitive_nil()
@@ -129,7 +129,7 @@ fn infer_free_op(
 fn infer_binary_expr(
     binary_expr: &BinaryExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let expr_id = binary_expr.id;
     let expr_span = binary_expr.span.clone();
@@ -156,7 +156,7 @@ fn resolve_binary_overload(
     lhs: &'static TypeInfo,
     rhs: &'static TypeInfo,
     span: logos::Span,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
     expr_id: NodeId,
 ) -> &'static TypeInfo {
     match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
@@ -185,7 +185,7 @@ fn resolve_binary_overload(
 fn infer_unary_expr(
     unary_expr: &UnaryExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let ty = infer_expr(&unary_expr.expr, block_id, data, None);
     let op_name = unary_expr.op.static_name();
@@ -219,7 +219,7 @@ fn infer_unary_expr(
 fn infer_ident_expr(
     ident_expr: &IdentExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     let err = match function_args {
@@ -287,7 +287,7 @@ fn infer_ident_expr(
 fn infer_func_call_expr(
     func_call_expr: &FuncCallExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let actual_arg_types = func_call_expr
         .args
@@ -387,7 +387,7 @@ fn infer_func_call_expr(
 fn infer_assignment(
     assignment_expr: &AssignmentExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     // checking LValueKind is done in parsing already..
 
@@ -443,7 +443,7 @@ fn infer_assignment(
 fn infer_struct_instantiation(
     struct_instantiation_expr: &StructInstantiationExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     for (_, expr_node) in &struct_instantiation_expr.fields {
         infer_expr(expr_node, block_id, data, None);
@@ -535,7 +535,7 @@ fn infer_struct_instantiation(
 fn infer_member_access(
     member_access_expr: &MemberAccessExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let lhs_ty = infer_expr(&member_access_expr.lhs, block_id, data, None);
 
@@ -633,7 +633,7 @@ fn infer_member_access(
 fn infer_enum_instantiation(
     ei: &EnumInstantiationExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     let enum_type = data.type_registry.resolve_enum(ei.enum_name);
@@ -769,7 +769,7 @@ fn infer_enum_instantiation(
 pub fn infer_expr(
     expr: &ExprNode,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
     match expr {
@@ -814,7 +814,7 @@ pub fn infer_expr(
 fn infer_heap_alloc_expr(
     heap_alloc_expr: &HeapAllocExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     // Always infer the type of the expression to be allocated
     let value_type = infer_expr(&heap_alloc_expr.expr, block_id, data, None);
@@ -840,7 +840,7 @@ fn infer_heap_alloc_expr(
 fn infer_deref_expr(
     deref_expr: &DerefExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let operand_type = infer_expr(&deref_expr.expr, block_id, data, None);
 
@@ -873,7 +873,7 @@ fn infer_deref_expr(
 fn infer_address_of_expr(
     address_of_expr: &AddressOfExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     let operand_type = infer_expr(&address_of_expr.expr, block_id, data, None);
 
@@ -887,7 +887,7 @@ fn infer_address_of_expr(
 fn infer_array_expr(
     array_expr: &crate::pass_parse::ast::ArrayExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     use crate::pass_type_inference::types::infer_type;
 
@@ -939,7 +939,7 @@ fn infer_array_expr(
 fn infer_array_literal_expr(
     array_literal_expr: &ArrayLiteralExpr,
     block_id: usize,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) -> &'static TypeInfo {
     use crate::pass_type_inference::types::infer_type;
 

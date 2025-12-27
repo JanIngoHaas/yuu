@@ -1116,8 +1116,6 @@ impl YirLowering {
         &self,
         ast: &AST,
         tr: &TypeRegistry,
-        type_info_table: &crate::utils::type_info_table::TypeInfoTable,
-        bindings: &crate::utils::BindingTable,
         emit_kill_sets: bool
     ) -> Module {
         let functions: Vec<Function> = ast
@@ -1125,19 +1123,20 @@ impl YirLowering {
             .par_iter()
             .filter_map(|structural| {
                 if let StructuralNode::FuncDef(func) = structural.as_ref() {
-                    let return_type = match type_info_table
-                        .get(func.id)
-                        .expect("Function type not found")
-                    {
+                    let return_type = match tr.get_structural_type(func.id) {
                         TypeInfo::Function(ft) => ft.ret,
                         _ => unreachable!("Expected function type"),
                     };
 
+                    // Extract metadata from AST node
+                    let metadata = func.metadata.as_ref()
+                        .expect("Function metadata should be populated by type inference");
+
                     let mut data = TransientData::new(
                         Function::new(func.decl.name, return_type),
                         tr,
-                        type_info_table,
-                        bindings,
+                        &metadata.type_info_table,
+                        &metadata.binding_table,
                         emit_kill_sets,
                     );
 
@@ -1207,11 +1206,9 @@ impl YirLowering {
         &self,
         ast: &AST,
         type_registry: &TypeRegistry,
-        type_info_table: &crate::utils::type_info_table::TypeInfoTable,
-        bindings: &crate::utils::BindingTable,
         emit_kill_sets: bool,
     ) -> miette::Result<Module> {
-        let module = self.lower_ast(ast, type_registry, type_info_table, bindings, emit_kill_sets);
+        let module = self.lower_ast(ast, type_registry, emit_kill_sets);
         Ok(module)
     }
 }

@@ -292,9 +292,8 @@ impl TypeInfoTable {
             "Compiler Bug: Attempted to insert type for non-expression ID {id}. Only expression IDs should have types!"
         );
 
-        let was_unknown = matches!(self.types[&id], TypeInfo::Unknown);
-        self.types.insert(id, ty);
-        was_unknown
+        let was_there = self.types.insert(id, ty).is_some();
+        was_there
     }
 
     pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {

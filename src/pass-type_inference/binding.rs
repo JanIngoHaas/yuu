@@ -3,7 +3,7 @@ use crate::{
     utils::{Block, type_info_table::TypeInfo},
 };
 
-use super::pass_type_inference_impl::TransientDataStructural;
+use super::pass_type_inference_impl::TransientData;
 
 // TODO: For non-identifier bindings, we need to consider the possibility that the expression type might not match
 // the binding type
@@ -11,7 +11,7 @@ pub fn infer_binding(
     binding: &BindingNode,
     block_id: usize,
     expr_type: &'static TypeInfo,
-    data: &mut TransientDataStructural,
+    data: &mut TransientData,
 ) {
     match binding {
         BindingNode::Ident(ident_binding) => {

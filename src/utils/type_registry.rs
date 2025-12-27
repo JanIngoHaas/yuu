@@ -144,6 +144,7 @@ pub struct TypeRegistry {
     structs: UstrHashMap<StructInfo>,
     enums: UstrHashMap<EnumInfo>,
     functions: UstrHashMap<FastHashMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
+    structural_types_by_node: FastHashMap<NodeId, &'static TypeInfo>, // Cache structural types by their definition NodeId
 }
 
 impl Default for TypeRegistry {
@@ -158,6 +159,7 @@ impl TypeRegistry {
             structs: UstrHashMap::default(),
             enums: UstrHashMap::default(),
             functions: UstrHashMap::default(),
+            structural_types_by_node: FastHashMap::default(),
         };
 
         // Use a proper IdGenerator for built-in operators
@@ -520,8 +522,12 @@ impl TypeRegistry {
             fields,
             name,
             ty,
-            binding_info,
+            binding_info: binding_info.clone(),
         };
+        
+        // Cache the struct type by its definition NodeId
+        self.structural_types_by_node.insert(binding_info.id, ty);
+        
         self.structs.insert(info.name, info).is_none()
     }
 
@@ -536,8 +542,12 @@ impl TypeRegistry {
             ty,
             name,
             variants,
-            binding_info: definition_location,
+            binding_info: definition_location.clone(),
         };
+        
+        // Cache the enum type by its definition NodeId
+        self.structural_types_by_node.insert(definition_location.id, ty);
+        
         self.enums.insert(name, info).is_none()
     }
 
@@ -553,8 +563,11 @@ impl TypeRegistry {
             name,
             ty: func_type,
             general_ty: general_type,
-            binding_info,
+            binding_info: binding_info.clone(),
         };
+
+        // Cache the function type by its definition NodeId
+        self.structural_types_by_node.insert(binding_info.id, general_type);
 
         let funcs = self.functions.entry(info.name).or_default();
 
@@ -624,6 +637,16 @@ impl TypeRegistry {
             .filter(|x| levenshtein_distance(name.as_str(), x.as_str()) <= max_dst)
             .cloned()
             .collect()
+    }
+
+    /// Cache a structural type by its NodeId (for functions, structs, enums)
+    pub fn cache_structural_type(&mut self, node_id: NodeId, type_info: &'static TypeInfo) {
+        self.structural_types_by_node.insert(node_id, type_info);
+    }
+
+    /// Get a cached structural type by its NodeId, returns unknown_type() if not found
+    pub fn get_structural_type(&self, node_id: NodeId) -> &'static TypeInfo {
+        self.structural_types_by_node.get(&node_id).copied().unwrap_or_else(|| crate::utils::type_info_table::unknown_type())
     }
 
     pub fn resolve_function(

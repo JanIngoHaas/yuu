@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
 use crate::pass_parse::token::Token;
+use crate::utils::{BindingTable, BlockTree, type_info_table::TypeInfoTable};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -13,6 +14,14 @@ use std::{
 pub struct SourceInfo {
     pub source: Arc<str>,
     pub file_name: Arc<str>,
+}
+
+/// Metadata computed during type inference for structural elements
+#[derive(Debug, Clone)]
+pub struct StructuralMetadata {
+    pub type_info_table: TypeInfoTable,
+    pub binding_table: BindingTable,
+    pub block_tree: BlockTree,
 }
 
 /// Binary operators for arithmetic expressions
@@ -306,6 +315,8 @@ pub struct LuaMetaNode {
     pub id: NodeId,
     pub span: Span,
     pub lua_code: String,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 /// Represents an expression in the AST
@@ -484,6 +495,8 @@ pub struct FuncDeclStructural {
     pub name: Ustr,
     pub args: Vec<Arg>,
     pub ret_ty: Option<Box<TypeNode>>,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -500,6 +513,8 @@ pub struct FuncDefStructural {
     pub decl: FuncDeclStructural,
     pub body: BlockStmt,
     pub span: Span,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -507,6 +522,8 @@ pub struct StructDeclStructural {
     pub id: NodeId,
     pub span: Span,
     pub name: Ustr,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -515,6 +532,8 @@ pub struct StructDefStructural {
     pub span: Span,
     pub decl: StructDeclStructural,
     pub fields: Vec<Arg>,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -530,6 +549,8 @@ pub struct EnumDeclStructural {
     pub id: NodeId,
     pub span: Span,
     pub name: Ustr,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -538,6 +559,8 @@ pub struct EnumDefStructural {
     pub span: Span,
     pub decl: EnumDeclStructural,
     pub variants: Vec<EnumVariant>,
+    #[serde(skip)]
+    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

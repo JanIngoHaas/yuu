@@ -27,13 +27,11 @@ impl ControlFlowAnalysis {
         &self,
         ast: &AST,
         type_registry: &TypeRegistry,
-        type_info_table: &crate::utils::type_info_table::TypeInfoTable,
         src_info: &SourceInfo,
     ) -> Result<ControlFlowAnalysisErrors> {
         let mut analyzer = ControlFlowAnalyzer {
             errors: Vec::new(),
             type_registry,
-            type_info_table,
             src_info,
         };
 
@@ -55,7 +53,6 @@ impl Default for ControlFlowAnalysis {
 struct ControlFlowAnalyzer<'a> {
     errors: Vec<YuuError>,
     type_registry: &'a TypeRegistry,
-    type_info_table: &'a crate::utils::type_info_table::TypeInfoTable,
     src_info: &'a SourceInfo,
 }
 
@@ -83,16 +80,15 @@ impl<'a> ControlFlowAnalyzer<'a> {
     fn analyze_structural(&mut self, structural: &StructuralNode) {
         match structural {
             StructuralNode::FuncDef(func_def) => {
-                // Get the function's declared return type from TypeInfoTable
-                let function_type = self
-                    .type_info_table
-                    .get(func_def.id)
-                    .expect("Function return type should be in TypeInfoTable");
+                // Get the function's declared return type from TypeRegistry
+                let function_type = self.type_registry.get_structural_type(func_def.id);
 
                 // Extract the return type from the function type
                 let declared_return_type = match function_type {
                     TypeInfo::Function(ft) => ft.ret,
-                    _ => unreachable!("Function definition should have function type"),
+                    _ => {
+                        unreachable!("Function definition should have function type")
+                    },
                 };
 
                 // First, check if the function actually has a return type of something other than "nil"
