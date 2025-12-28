@@ -130,7 +130,7 @@ impl TypeDependencyAnalysis {
             data.current_path.insert(*name);
             Self::build_dependency_graph(&mut data, StructOrEnumInfo::Enum(info));
         }
-
+        
         (TypeDependencyGraph(data.dependency_graph), data.errors)
     }
 }

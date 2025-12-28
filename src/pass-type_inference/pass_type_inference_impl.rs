@@ -2,19 +2,18 @@ use crate::{
     pass_diagnostics::YuuError,
     pass_parse::{AST, SourceInfo, StructuralNode, StructuralMetadata},
     utils::{
-        BindingInfo, BindingTable, BlockTree, EnumVariantInfo, StructFieldInfo, TypeRegistry,
-        collections::UstrHashMap,
+        Block, BindingInfo, BindingTable, BlockTree, TypeRegistry,
         type_info_table::{TypeInfo, TypeInfoTable, error_type},
     },
 };
 use rayon::prelude::*;
 
-use super::{infer_structural, infer_type};
+use super::infer_structural;
 
-pub struct TransientData<'a> {
+pub struct TransientData<'a, 'b> {
     pub type_registry: &'a TypeRegistry,
     pub type_info_table: &'a mut TypeInfoTable,
-    pub block_tree: &'a mut BlockTree,
+    pub block_tree: &'a mut BlockTree<'b>,
     pub bindings: &'a mut BindingTable,
     pub errors: &'a mut Vec<YuuError>,
     pub src_code: &'a SourceInfo,
@@ -23,11 +22,11 @@ pub struct TransientData<'a> {
 
 pub struct TypeInferenceErrors(pub Vec<YuuError>);
 
-impl<'a> TransientData<'a> {
+impl<'a, 'b> TransientData<'a, 'b> {
     pub fn new(
         type_registry: &'a TypeRegistry,
         type_info_table: &'a mut TypeInfoTable,
-        block_tree: &'a mut BlockTree,
+        block_tree: &'a mut BlockTree<'b>,
         bindings: &'a mut BindingTable,
         errors: &'a mut Vec<YuuError>,
         src_code: &'a SourceInfo,
@@ -63,13 +62,24 @@ impl TypeInference {
         type_registry: &TypeRegistry,
         src_code: SourceInfo,
     ) -> miette::Result<TypeInferenceErrors> {
+        // Create root block outside of parallel processing
+        let root_block = Block {
+            bindings: ustr::UstrMap::default(),
+            parent: None,
+            id: 0,
+            block_binding: BindingInfo {
+                id: usize::MIN,
+                src_location: None,
+            },
+        };
+
         // Process structural elements in parallel with isolated metadata
         let all_errors: Vec<YuuError> = ast.structurals
             .par_iter_mut()
             .flat_map(|structural_node| {
                 let expr_count = structural_node.metadata.expr_count;
                 let mut local_type_info_table = TypeInfoTable::with_capacity(expr_count);
-                let mut local_block_tree = BlockTree::new();
+                let mut local_block_tree = BlockTree::new(&root_block);
                 let mut local_bindings = BindingTable::with_capacity(expr_count);
                 let mut local_errors = Vec::new();
                 
@@ -91,7 +101,6 @@ impl TypeInference {
                     structural_node.metadata = StructuralMetadata {
                         type_info_table: local_type_info_table,
                         binding_table: local_bindings,
-                        block_tree: local_block_tree,
                         expr_count,
                     };
                 }

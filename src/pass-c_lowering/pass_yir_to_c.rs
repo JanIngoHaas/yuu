@@ -628,8 +628,6 @@ impl CLowering {
 "#
         )?;
 
-        // Note: __yuu_elements_fill will be generated per-type as needed since each call has different element types
-
         for name in data.type_dependency_order.create_topological_order() {
             let soe = data
                 .tr

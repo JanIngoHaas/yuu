@@ -1,3 +1,4 @@
+use indexmap::IndexSet;
 use ustr::Ustr;
 
 use crate::{
@@ -37,7 +38,7 @@ impl Default for TypeDependencyAnalysisErrors {
 }
 
 impl TypeDependencyGraph {
-    fn create_topological_order_inner(&self, ordered: &mut Vec<Ustr>, node: Ustr) {
+    fn create_topological_order_inner(&self, ordered: &mut IndexSet<Ustr>, node: Ustr) {
         let deps = self.0.get(&node);
         if let Some(deps) = deps {
             for &dep in deps {
@@ -45,10 +46,10 @@ impl TypeDependencyGraph {
             }
         }
 
-        ordered.push(node);
+        ordered.insert(node);
     }
 
-    pub fn create_topological_order(&self) -> Vec<Ustr> {
+    pub fn create_topological_order(&self) -> IndexSet<Ustr> {
         // Find the "root" nodes (i.e. nodes that depend on other nodes but have no other node that depends on them)
 
         let mut root_nodes = UstrIndexSet::from_iter(self.0.keys().copied());
@@ -61,11 +62,10 @@ impl TypeDependencyGraph {
 
         // The remaining items in "root_nodes" had no incoming edges!
 
-        let mut ordered = Vec::new();
+        let mut ordered = IndexSet::new();
         while let Some(node) = root_nodes.pop() {
             self.create_topological_order_inner(&mut ordered, node);
         }
-
         ordered
     }
 }

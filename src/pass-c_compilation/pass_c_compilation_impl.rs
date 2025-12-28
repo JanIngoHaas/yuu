@@ -77,8 +77,8 @@ impl CCompilation {
 
         if !output.status.success() {
             return Err(miette::miette!(
-                "Clang compilation failed",
-                //String::from_utf8_lossy(&output.stderr)
+                "Clang compilation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
             ));
         }
 
@@ -96,8 +96,8 @@ impl CCompilation {
 
         if !output.status.success() {
             return Err(miette::miette!(
-                "GCC compilation failed",
-                //String::from_utf8_lossy(&output.stderr)
+                "GCC compilation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
             ));
         }
 

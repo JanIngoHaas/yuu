@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
 use crate::pass_parse::token::Token;
-use crate::utils::{BindingTable, BlockTree, type_info_table::TypeInfoTable};
+use crate::utils::{BindingTable, type_info_table::TypeInfoTable};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -21,7 +21,6 @@ pub struct SourceInfo {
 pub struct StructuralMetadata {
     pub type_info_table: TypeInfoTable,
     pub binding_table: BindingTable,
-    pub block_tree: BlockTree,
     pub expr_count: usize,
 }
 
@@ -40,7 +39,6 @@ impl StructuralElement {
             metadata: StructuralMetadata {
                 type_info_table: TypeInfoTable::new(),
                 binding_table: BindingTable::default(),
-                block_tree: BlockTree::default(),
                 expr_count: 0, // Will be set during add_ids
             },
         }

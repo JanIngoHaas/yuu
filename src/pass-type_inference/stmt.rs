@@ -5,8 +5,8 @@ use crate::{
         RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt,
     },
     utils::{
-        BindingInfo, BlockTree, collections::UstrIndexSet,
-        type_info_table::{TypeInfo, error_type, primitive_bool, primitive_nil, unknown_type},
+        BindingInfo, collections::UstrIndexSet,
+        type_info_table::{TypeInfo, primitive_bool, primitive_nil, unknown_type},
     },
 };
 

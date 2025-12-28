@@ -1,13 +1,11 @@
 use crate::{
-    pass_parse::ast::{Arg, InternUstr, NodeId, StructuralNode, TypeNode},
+    pass_parse::ast::StructuralNode,
     pass_type_inference::infer_stmt,
     utils::{
-        BindingInfo, BlockTree,
-        type_info_table::{TypeInfo, error_type, primitive_nil, function_type},
+        BindingInfo,
+        type_info_table::{primitive_nil, error_type},
     },
 };
-use logos::Span;
-use ustr::Ustr;
 
 use super::{
     infer_type,

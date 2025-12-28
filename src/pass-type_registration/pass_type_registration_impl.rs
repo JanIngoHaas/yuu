@@ -3,7 +3,7 @@ use ustr::Ustr;
 
 use crate::{
     pass_diagnostics::YuuError, pass_parse::{SourceInfo, ast::*}, pass_type_inference::infer_type, utils::{
-        BlockTree, binding_info::BindingInfo, collections::UstrHashMap, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
+        binding_info::BindingInfo, collections::{UstrHashMap, UstrIndexMap}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
     }
 };
 
@@ -213,7 +213,7 @@ impl<'a> TransientData<'a> {
 fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData) {
     match structural {
         StructuralNode::StructDef(struct_def) => {
-            let mut struct_defs = UstrHashMap::default();
+            let mut struct_defs = UstrIndexMap::default();
 
             for field in &struct_def.fields {
                 let sfi = StructFieldInfo {
@@ -227,7 +227,7 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
                 struct_defs.insert(field.name, sfi);
             }
 
-            data.type_registry.add_struct(
+            let is_new = data.type_registry.add_struct(
                 struct_defs,
                 struct_def.decl.name,
                 BindingInfo {
@@ -235,6 +235,17 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
                     src_location: Some(struct_def.span.clone()),
                 },
             );
+            
+            if !is_new {
+                let error = YuuError::builder()
+                    .kind(crate::pass_diagnostics::error::ErrorKind::InvalidSyntax)
+                    .message(format!("Duplicate struct definition: '{}'", struct_def.decl.name))
+                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .span(struct_def.span.clone(), "duplicate struct definition here")
+                    .help("Struct names must be unique within a module. Consider renaming one of the structs.".to_string())
+                    .build();
+                data.errors.push(error);
+            }
         }
         StructuralNode::EnumDef(ed) => {
             let mut enum_variant_defs = UstrHashMap::default();

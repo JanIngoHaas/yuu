@@ -1,7 +1,7 @@
 use logos::Span;
 use ustr::Ustr;
 
-use crate::utils::collections::{FastHashMap, UstrHashMap};
+use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap};
 use crate::utils::type_info_table::{
     FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool,
     primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
@@ -29,7 +29,7 @@ pub struct EnumVariantInfo {
 
 #[derive(Clone)]
 pub struct StructInfo {
-    pub fields: UstrHashMap<StructFieldInfo>,
+    pub fields: UstrIndexMap<StructFieldInfo>,
     pub name: Ustr,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
@@ -513,7 +513,7 @@ impl TypeRegistry {
 
     pub fn add_struct(
         &mut self,
-        fields: UstrHashMap<StructFieldInfo>,
+        fields: UstrIndexMap<StructFieldInfo>,
         name: Ustr,
         binding_info: BindingInfo,
     ) -> bool {

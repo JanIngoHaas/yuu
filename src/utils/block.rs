@@ -34,10 +34,10 @@ impl Block {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct BlockTree {
+#[derive(Debug)]
+pub struct BlockTree<'a> {
     arena: Vec<Block>,
-    root: usize,
+    root_block: &'a Block,
 }
 
 #[derive(Clone, Debug)]
@@ -69,56 +69,41 @@ impl DerefMut for BindingTable {
     }
 }
 
-impl Default for BlockTree {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
-impl BlockTree {
-    pub fn new() -> Self {
-        let mut arena = Vec::new();
-
-        let top_level_block = Block {
-            bindings: UstrMap::default(),
-            parent: None,
-            id: 0,
-            block_binding: BindingInfo {
-                id: usize::MIN,
-                src_location: None,
-            },
-        };
-
-        arena.push(top_level_block);
-
+impl<'a> BlockTree<'a> {
+    pub fn new(root_block: &'a Block) -> Self {
         Self {
-            root: arena.len() - 1,
-            arena,
+            arena: Vec::new(),
+            root_block,
         }
     }
 
     pub fn root(&self) -> &Block {
-        self.arena.get(self.root).unwrap()
-    }
-
-    pub fn root_mut(&mut self) -> &mut Block {
-        self.arena.get_mut(self.root).unwrap()
+        self.root_block
     }
 
     pub fn root_id(&self) -> usize {
-        self.root
+        0
     }
 
     pub fn get_block(&self, id: usize) -> &Block {
-        self.arena.get(id).unwrap()
+        if id == 0 {
+            self.root_block
+        } else {
+            self.arena.get(id - 1).unwrap()
+        }
     }
 
     pub fn get_block_mut(&mut self, id: usize) -> &mut Block {
-        self.arena.get_mut(id).unwrap()
+        if id == 0 {
+            panic!("Cannot mutably borrow root block")
+        } else {
+            self.arena.get_mut(id - 1).unwrap()
+        }
     }
 
     pub fn make_child(&mut self, parent_id: usize, bi: BindingInfo) -> usize {
-        let id = self.arena.len();
+        let id = self.arena.len() + 1; // +1 because 0 is reserved for root
 
         let child = Block {
             bindings: UstrMap::default(),
