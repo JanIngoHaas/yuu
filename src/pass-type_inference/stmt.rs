@@ -39,7 +39,7 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientData)
     let var = data.block_tree.resolve_variable(
         block_id,
         def_stmt.ident.name,
-        &data.src_code,
+        data.src_code,
         def_stmt.ident.span.clone(),
     );
 

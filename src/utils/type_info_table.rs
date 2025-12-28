@@ -282,7 +282,7 @@ impl TypeInfoTable {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            types: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher::default()),
+            types: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
         }
     }
 
@@ -292,8 +292,7 @@ impl TypeInfoTable {
             "Compiler Bug: Attempted to insert type for non-expression ID {id}. Only expression IDs should have types!"
         );
 
-        let was_there = self.types.insert(id, ty).is_some();
-        was_there
+        self.types.insert(id, ty).is_some()
     }
 
     pub fn get(&self, id: NodeId) -> Option<&'static TypeInfo> {

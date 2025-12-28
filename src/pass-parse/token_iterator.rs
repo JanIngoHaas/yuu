@@ -5,7 +5,7 @@ use crate::{
         token::{Token, TokenKind},
     },
 };
-use logos::{Logos, Span};
+use logos::Span;
 
 pub type ParseError = YuuError;
 

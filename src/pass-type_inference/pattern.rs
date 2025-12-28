@@ -5,7 +5,7 @@ use crate::{
         infer_binding,
         pass_type_inference_impl::TransientData,
     },
-    utils::{Block, type_info_table::TypeInfo},
+    utils::type_info_table::TypeInfo,
 };
 
 fn infer_enum_pattern(

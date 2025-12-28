@@ -1,4 +1,3 @@
-use logos::Span;
 use ustr::Ustr;
 
 use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap};
@@ -6,7 +5,7 @@ use crate::utils::type_info_table::{
     FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool,
     primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
 };
-use crate::utils::{BindingInfo, BindingTable};
+use crate::utils::BindingInfo;
 use crate::{
     pass_diagnostics::levenshtein_distance,
     pass_parse::ast::{InternUstr, NodeId},
@@ -617,8 +616,7 @@ impl TypeRegistry {
             "bool" => Some(primitive_bool()),
             "nil" => Some(primitive_nil()),
             _ => {
-                let resolved_user_type = self.resolve_struct_or_enum(name).map(|info| info.ty());
-                resolved_user_type
+                self.resolve_struct_or_enum(name).map(|info| info.ty())
             }
         }
     }

@@ -40,14 +40,8 @@ pub struct BlockTree<'a> {
     root_block: &'a Block,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BindingTable(FastHashMap<NodeId, NodeId>);
-
-impl Default for BindingTable {
-    fn default() -> Self {
-        Self(FastHashMap::default())
-    }
-}
 
 impl BindingTable {
     pub fn with_capacity(capacity: usize) -> Self {

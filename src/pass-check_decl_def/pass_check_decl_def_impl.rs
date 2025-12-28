@@ -4,7 +4,7 @@ use crate::{
         BlockStmt, ExprNode, StmtNode, StructuralNode,
         ast::{AST, SourceInfo},
     },
-    utils::{TypeRegistry, collections::UstrIndexSet},
+    utils::{collections::UstrIndexSet},
 };
 use miette::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -24,7 +24,6 @@ impl CheckDeclDef {
     pub fn run(
         &self,
         ast: &AST,
-        type_registry: &TypeRegistry,
         src_info: &SourceInfo,
     ) -> Result<CheckDeclDefErrors> {
         let errors: Vec<YuuError> = ast.structurals
@@ -35,11 +34,8 @@ impl CheckDeclDef {
                     src_info,
                 };
 
-                match structural.as_ref() {
-                    StructuralNode::FuncDef(func_def_structural) => {
-                        let _ = analyzer.check_block(&func_def_structural.body);
-                    }
-                    _ => (),
+                if let StructuralNode::FuncDef(func_def_structural) = structural.as_ref() {
+                    let _ = analyzer.check_block(&func_def_structural.body);
                 }
 
                 analyzer.errors
@@ -113,13 +109,13 @@ impl CheckDeclDefAnalyzer<'_> {
         let mut decls = UstrIndexSet::default();
 
         for stmt in stmts {
-            let cont = self.check_stmt(&stmt, &mut defs, &mut decls);
+            let cont = self.check_stmt(stmt, &mut defs, &mut decls);
             if !cont {
                 return defs;
             }
         }
 
-        return defs;
+        defs
     }
 
     fn check_expr(&mut self, expr: &ExprNode, decls: &UstrIndexSet, defs: &UstrIndexSet) {
@@ -191,10 +187,9 @@ impl CheckDeclDefAnalyzer<'_> {
                 self.check_expr(&heap_alloc_expr.expr, decls, defs);
             }
             ExprNode::Array(array_expr) => {
-                array_expr
+                if let Some(expr) = array_expr
                     .init_expr
-                    .as_ref()
-                    .map(|expr| self.check_expr(expr, decls, defs));
+                    .as_ref() { self.check_expr(expr, decls, defs) }
                 self.check_expr(&array_expr.size, decls, defs);
             }
             ExprNode::ArrayLiteral(array_literal_expr) => {
@@ -238,7 +233,7 @@ impl CheckDeclDefAnalyzer<'_> {
 
                 // Now check the else block if it exists
                 if let Some(else_block) = &if_stmt.else_block {
-                    let defs_else: UstrIndexSet = self.check_block(&else_block);
+                    let defs_else: UstrIndexSet = self.check_block(else_block);
                     let not_declared_in_else = defs_if.difference(&defs_else);
                     let not_declared_in_if = defs_else.difference(&defs_if);
                     self.report_inconsistent_defs(
@@ -259,10 +254,10 @@ impl CheckDeclDefAnalyzer<'_> {
                 true
             }
             StmtNode::Block(block_stmt) => {
-                self.check_block(&block_stmt);
+                self.check_block(block_stmt);
                 true
             }
-            StmtNode::Break(b) => false,
+            StmtNode::Break(_b) => false,
             StmtNode::Return(r) => {
                 if let Some(ref e) = r.expr {
                     self.check_expr(e, decls, defs);

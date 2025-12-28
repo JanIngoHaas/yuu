@@ -17,7 +17,7 @@ impl LexingPass {
     pub fn run(&self, source_info: &SourceInfo) -> miette::Result<(Vec<Token>, LexingErrors)> {
         let mut lexer = TokenKind::lexer(source_info.source.as_ref());
         let mut tokens = Vec::new();
-        let mut errors = Vec::new();
+        let errors = Vec::new();
 
         // Pre-lex the entire file at once
         while let Some(token_result) = lexer.next() {

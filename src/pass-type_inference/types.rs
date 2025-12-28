@@ -1,10 +1,9 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError};
 use crate::pass_parse::SourceInfo;
-use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::ast::TypeNode;
 use crate::utils::TypeRegistry;
 use crate::utils::type_info_table::{
-    TypeInfo, TypeInfoTable, error_type, primitive_bool, primitive_f32, primitive_f64,
+    TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64,
     primitive_i64, primitive_u64,
 };
 
@@ -14,7 +13,10 @@ pub fn infer_type(
     errors: &mut Vec<YuuError>,
     src_code: &SourceInfo,
 ) -> &'static TypeInfo {
-    let semantic_type = match ty {
+    // Not an expression - no need to add to
+    // type_info_table
+    //     .insert(ty.node_id(), semantic_type);
+    match ty {
         TypeNode::BuiltIn(built_in) => match built_in.kind {
             crate::pass_parse::ast::BuiltInTypeKind::I64 => primitive_i64(),
             crate::pass_parse::ast::BuiltInTypeKind::F32 => primitive_f32(),
@@ -82,9 +84,5 @@ pub fn infer_type(
             // TODO: Implement Lua meta type inference
             error_type()
         }
-    };
-    // Not an expression - no need to add to
-    // type_info_table
-    //     .insert(ty.node_id(), semantic_type);
-    semantic_type
+    }
 }

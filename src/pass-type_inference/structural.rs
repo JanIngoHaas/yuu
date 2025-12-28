@@ -42,9 +42,9 @@ pub fn infer_structural(
                     // Store the argument type in the TypeInfoTable for expression lookups
                     let arg_type = infer_type(
                         &arg.ty,
-                        &data.type_registry,
-                        &mut data.errors,
-                        &data.src_code,
+                        data.type_registry,
+                        data.errors,
+                        data.src_code,
                     );
                     data.type_info_table.insert(arg.id, arg_type);
                 }
@@ -53,7 +53,7 @@ pub fn infer_structural(
             // Set the current function's return type for return statement validation
             // We need to infer the return type from the function declaration
             let return_type = if let Some(ret_ty) = &def.decl.ret_ty {
-                infer_type(ret_ty, &data.type_registry, &mut data.errors, &data.src_code)
+                infer_type(ret_ty, data.type_registry, data.errors, data.src_code)
             } else {
                 primitive_nil()
             };

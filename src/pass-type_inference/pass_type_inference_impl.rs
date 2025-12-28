@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use super::infer_structural;
 
-pub struct TransientData<'a, 'b> {
+pub(crate) struct TransientData<'a, 'b> {
     pub type_registry: &'a TypeRegistry,
     pub type_info_table: &'a mut TypeInfoTable,
     pub block_tree: &'a mut BlockTree<'b>,

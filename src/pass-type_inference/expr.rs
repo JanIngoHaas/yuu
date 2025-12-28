@@ -52,16 +52,15 @@ fn infer_pointer_op_expr(
     let rhs_type = infer_expr(&pointer_op_expr.right, block_id, data, None);
 
     // Check if LHS is a pointer and RHS is integer
-    if let TypeInfo::Pointer(_) = lhs_type {
-        if matches!(
+    if let TypeInfo::Pointer(_) = lhs_type
+        && matches!(
             rhs_type,
             TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
                 | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
         ) {
-            // Pointer arithmetic: returns same pointer type
-            data.type_info_table.insert(pointer_op_expr.id, lhs_type);
-            return lhs_type;
-        }
+        // Pointer arithmetic: returns same pointer type
+        data.type_info_table.insert(pointer_op_expr.id, lhs_type);
+        return lhs_type;
     }
 
     // Error case - invalid pointer arithmetic
@@ -92,9 +91,9 @@ fn infer_cast_expr(
     let _expr_type = infer_expr(&cast_expr.expr, block_id, data, None);
     let target_type = crate::pass_type_inference::types::infer_type(
         &cast_expr.target_type,
-        &data.type_registry,
-        &mut data.errors,
-        &data.src_code,
+        data.type_registry,
+        data.errors,
+        data.src_code,
     );
     data.type_info_table.insert(cast_expr.id, target_type);
     target_type
@@ -172,7 +171,7 @@ fn resolve_binary_overload(
                 candidates,
                 &[lhs, rhs],
                 data.type_registry,
-                &data.src_code,
+                data.src_code,
                 span,
             );
             data.errors.push(err);
@@ -193,7 +192,7 @@ fn infer_unary_expr(
     let resolved_type = match unary_expr.op {
         UnaryOp::Free => infer_free_op(unary_expr, ty, data),
         _ => {
-            let resolution = match data.type_registry.resolve_function(op_name, &[ty]) {
+            match data.type_registry.resolve_function(op_name, &[ty]) {
                 Ok(res) => res.ty.ret,
                 Err(err) => {
                     let err = create_no_overload_error(
@@ -201,14 +200,13 @@ fn infer_unary_expr(
                         err,
                         &[ty],
                         data.type_registry,
-                        &data.src_code,
+                        data.src_code,
                         unary_expr.span.clone(),
                     );
                     data.errors.push(err);
                     error_type()
                 }
-            };
-            resolution
+            }
         }
     };
 
@@ -236,7 +234,7 @@ fn infer_ident_expr(
                 err,
                 args,
                 data.type_registry,
-                &data.src_code,
+                data.src_code,
                 ident_expr.span.clone(),
             )),
         },
@@ -244,7 +242,7 @@ fn infer_ident_expr(
             match data.block_tree.resolve_variable(
                 block_id,
                 ident_expr.ident,
-                &data.src_code,
+                data.src_code,
                 ident_expr.span.clone(),
             ) {
                 Ok(fr) => {
@@ -896,9 +894,9 @@ fn infer_array_expr(
         // Explicit type provided: [value:type; count] or [:type; count]
         infer_type(
             explicit_type,
-            &data.type_registry,
-            &mut data.errors,
-            &data.src_code,
+            data.type_registry,
+            data.errors,
+            data.src_code,
         )
     } else if let Some(init_value) = &array_expr.init_expr {
         // Type inferred from init value: [value; count]
@@ -953,9 +951,9 @@ fn infer_array_literal_expr(
         // Explicit type provided: [1:i64, 2, 3]
         infer_type(
             explicit_type,
-            &data.type_registry,
-            &mut data.errors,
-            &data.src_code,
+            data.type_registry,
+            data.errors,
+            data.src_code,
         )
     } else {
         // Type inferred from first element: [1, 2, 3]

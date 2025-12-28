@@ -20,6 +20,12 @@ impl TypeRegistrationErrors {
     }
 }
 
+impl Default for TypeRegistrationErrors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Pass that registers user-defined types (structs and enums) in the TypeRegistry
 pub struct TypeRegistration;
 
@@ -77,7 +83,7 @@ fn declare_and_define_functions(
             );
         }
         StructuralNode::FuncDef(def) => {
-            let function_type = declare_function(
+            let _function_type = declare_function(
                 def.decl.name,
                 &def.decl.args,
                 &def.decl.ret_ty,
@@ -101,18 +107,17 @@ pub fn declare_function(
     let func_arg_types = args
         .iter()
         .map(|arg| {
-            let semantic_arg_type = infer_type(
+            infer_type(
                 &arg.ty,
-                &data.type_registry,
-                &mut data.errors,
-                &data.src_code,
-            );
-            semantic_arg_type
+                data.type_registry,
+                data.errors,
+                data.src_code,
+            )
         })
         .collect::<Vec<_>>();
 
     let ret_type = if let Some(ty) = ret_ty {
-        infer_type(ty, &data.type_registry, &mut data.errors, &data.src_code)
+        infer_type(ty, data.type_registry, data.errors, data.src_code)
     } else {
         primitive_nil()
     };
@@ -143,9 +148,9 @@ fn define_user_def_types(
             for field in &struct_def_structural.fields {
                 let ty = infer_type(
                     &field.ty,
-                    &data.type_registry,
-                    &mut data.errors,
-                    &data.src_code,
+                    data.type_registry,
+                    data.errors,
+                    data.src_code,
                 );
                 helper_vec.push(ty);
             }
@@ -164,7 +169,7 @@ fn define_user_def_types(
         StructuralNode::EnumDef(enum_def_structural) => {
             for variant in &enum_def_structural.variants {
                 let ty = variant.data_type.as_ref().map(|ty| {
-                    infer_type(ty, &data.type_registry, &mut data.errors, &data.src_code)
+                    infer_type(ty, data.type_registry, data.errors, data.src_code)
                 });
                 helper_vec.push(ty.unwrap_or_else(|| error_type())); // Use error_type as placeholder for None
             }
@@ -190,7 +195,7 @@ fn define_user_def_types(
     }
 }
 
-struct TransientData<'a> {
+pub struct TransientData<'a> {
     type_registry: &'a mut TypeRegistry,
     errors: &'a mut Vec<YuuError>,
     src_code: &'a SourceInfo,

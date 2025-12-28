@@ -306,7 +306,7 @@ impl Pipeline {
         self.control_flow_errors =
             Some(ControlFlowAnalysis.run(ast, type_registry, source_info)?);
 
-        self.decl_def_errors = Some(CheckDeclDef.run(ast, type_registry, source_info)?);
+        self.decl_def_errors = Some(CheckDeclDef.run(ast, source_info)?);
         let duration = start.elapsed();
 
         self.record_pass_timing("semantic_analysis", duration);

@@ -30,7 +30,7 @@ impl IdGenerator {
     }
 
     pub fn expr_count(&self) -> usize {
-        self.next_expr_id as usize
+        self.next_expr_id
     }
 }
 
