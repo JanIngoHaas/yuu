@@ -11,6 +11,8 @@ pub mod pass_check_decl_def;
 pub mod pass_control_flow_analysis;
 #[path = "pass-diagnostics/mod.rs"]
 pub mod pass_diagnostics;
+#[path = "pass-lexing/mod.rs"]
+pub mod pass_lexing;
 #[path = "pass-parse/mod.rs"]
 pub mod pass_parse;
 #[path = "pass-print_yir/mod.rs"]

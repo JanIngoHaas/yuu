@@ -1,13 +1,13 @@
 pub mod add_ids;
 pub mod ast;
-pub mod lexer;
+pub mod token_iterator;
 pub mod parser;
 pub mod pass_parse_impl;
 pub mod token;
 
 pub use add_ids::*;
 pub use ast::*;
-pub use lexer::*;
+pub use token_iterator::*;
 pub use parser::*;
 pub use pass_parse_impl::*;
 pub use token::*;

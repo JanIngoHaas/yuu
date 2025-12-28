@@ -17,11 +17,57 @@ pub struct SourceInfo {
 }
 
 /// Metadata computed during type inference for structural elements
-#[derive(Debug, Clone)]
+#[derive(Clone, Default)]
 pub struct StructuralMetadata {
     pub type_info_table: TypeInfoTable,
     pub binding_table: BindingTable,
     pub block_tree: BlockTree,
+    pub expr_count: usize,
+}
+
+/// Wrapper for structural nodes that always includes metadata
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StructuralElement {
+    pub node: StructuralNode,
+    #[serde(skip)]
+    pub metadata: StructuralMetadata,
+}
+
+impl StructuralElement {
+    pub fn new(node: StructuralNode) -> Self {
+        Self {
+            node,
+            metadata: StructuralMetadata {
+                type_info_table: TypeInfoTable::new(),
+                binding_table: BindingTable::default(),
+                block_tree: BlockTree::default(),
+                expr_count: 0, // Will be set during add_ids
+            },
+        }
+    }
+}
+
+impl AsRef<StructuralNode> for StructuralElement {
+    fn as_ref(&self) -> &StructuralNode {
+        &self.node
+    }
+}
+
+impl AsMut<StructuralNode> for StructuralElement {
+    fn as_mut(&mut self) -> &mut StructuralNode {
+        &mut self.node
+    }
+}
+
+impl crate::pass_parse::add_ids::AddId for StructuralElement {
+    fn add_id(&mut self, generator: &mut crate::pass_parse::add_ids::IdGenerator) {
+        let expr_count_before = generator.expr_count();
+        self.node.add_id(generator);
+        let expr_count_after = generator.expr_count();
+
+        // TODO: More fine-grained counting for binding table! (#bindings != #exprs)
+        self.metadata.expr_count = expr_count_after - expr_count_before;
+    }
 }
 
 /// Binary operators for arithmetic expressions
@@ -183,7 +229,7 @@ pub struct IdentExpr {
     pub id: NodeId,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum LValueKind {
     Variable,
     FieldAccess,
@@ -315,8 +361,6 @@ pub struct LuaMetaNode {
     pub id: NodeId,
     pub span: Span,
     pub lua_code: String,
-    #[serde(skip)]
-    pub metadata: Option<StructuralMetadata>,
 }
 
 /// Represents an expression in the AST
@@ -390,7 +434,7 @@ pub struct DefStmt {
 //     pub id: NodeId,
 // }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IdentBinding {
     pub id: NodeId,
     pub span: Span,
@@ -429,7 +473,7 @@ pub struct IdentType {
     pub name: Ustr,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum BuiltInTypeKind {
     I64,
     F32,
@@ -495,8 +539,6 @@ pub struct FuncDeclStructural {
     pub name: Ustr,
     pub args: Vec<Arg>,
     pub ret_ty: Option<Box<TypeNode>>,
-    #[serde(skip)]
-    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -513,8 +555,6 @@ pub struct FuncDefStructural {
     pub decl: FuncDeclStructural,
     pub body: BlockStmt,
     pub span: Span,
-    #[serde(skip)]
-    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -522,8 +562,6 @@ pub struct StructDeclStructural {
     pub id: NodeId,
     pub span: Span,
     pub name: Ustr,
-    #[serde(skip)]
-    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -532,8 +570,6 @@ pub struct StructDefStructural {
     pub span: Span,
     pub decl: StructDeclStructural,
     pub fields: Vec<Arg>,
-    #[serde(skip)]
-    pub metadata: Option<StructuralMetadata>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -624,7 +660,7 @@ pub enum Node {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AST {
-    pub structurals: Vec<Box<StructuralNode>>,
+    pub structurals: Vec<StructuralElement>,
 }
 
 // impl Display for Node {

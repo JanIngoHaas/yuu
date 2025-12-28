@@ -1128,9 +1128,8 @@ impl YirLowering {
                         _ => unreachable!("Expected function type"),
                     };
 
-                    // Extract metadata from AST node
-                    let metadata = func.metadata.as_ref()
-                        .expect("Function metadata should be populated by type inference");
+                    // Extract metadata from StructuralElement wrapper
+                    let metadata = &structural.metadata;
 
                     let mut data = TransientData::new(
                         Function::new(func.decl.name, return_type),

@@ -37,7 +37,7 @@ impl ControlFlowAnalysis {
 
         // Analyze all structural nodes (functions)
         for structural in &ast.structurals {
-            analyzer.analyze_structural(structural);
+            analyzer.analyze_structural(structural.as_ref());
         }
 
         Ok(ControlFlowAnalysisErrors(analyzer.errors))

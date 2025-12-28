@@ -49,6 +49,12 @@ impl Default for BindingTable {
     }
 }
 
+impl BindingTable {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(FastHashMap::with_capacity_and_hasher(capacity, Default::default()))
+    }
+}
+
 impl Deref for BindingTable {
     type Target = FastHashMap<NodeId, NodeId>;
 

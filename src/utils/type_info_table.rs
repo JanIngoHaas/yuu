@@ -280,9 +280,9 @@ impl TypeInfoTable {
         }
     }
 
-    pub fn with_size(size: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            types: FxHashMap::with_capacity_and_hasher(size, FxBuildHasher::default()),
+            types: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher::default()),
         }
     }
 

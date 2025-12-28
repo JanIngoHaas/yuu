@@ -2,7 +2,7 @@ use crate::{
     pass_diagnostics::{ErrorKind, YuuError},
     pass_parse::{
         add_ids::add_ids,
-        lexer::{CatchIn, Lexer, ParseError, ParseResult},
+        token_iterator::{CatchIn, TokenIterator, ParseError, ParseResult},
     },
 };
 use crate::{
@@ -13,19 +13,19 @@ use logos::Span;
 use ustr::{Ustr, ustr};
 
 pub struct Parser {
-    lexer: Lexer,
+    lexer: TokenIterator,
     errors: Vec<ParseError>,
 }
 
 impl Parser {
-    pub fn new(code_info: &SourceInfo) -> Self {
+    pub fn new(tokens: Vec<Token>, source_info: SourceInfo) -> Self {
         Self {
-            lexer: Lexer::new(code_info),
+            lexer: TokenIterator::new(tokens, source_info),
             errors: Vec::new(),
         }
     }
 
-    pub fn dismantle(self) -> (Vec<ParseError>, Lexer) {
+    pub fn dismantle(self) -> (Vec<ParseError>, TokenIterator) {
         (self.errors, self.lexer)
     }
     fn get_infix_binding_power(op: &TokenKind) -> (i32, i32) {
@@ -1467,7 +1467,6 @@ impl Parser {
                 name,
                 args,
                 ret_ty,
-                metadata: None,
             },
         )
     }
@@ -1489,7 +1488,6 @@ impl Parser {
             span: span.clone(),
             decl,
             fields,
-            metadata: None,
         };
 
         Ok((span, out))
@@ -1656,7 +1654,7 @@ impl Parser {
 
         let span = struct_tkn.span.start..ident.span.end;
 
-        Ok((span.clone(), StructDeclStructural { id: 0, span, name, metadata: None }))
+        Ok((span.clone(), StructDeclStructural { id: 0, span, name }))
     }
 
     pub fn make_func_def(
@@ -1672,7 +1670,6 @@ impl Parser {
                 decl,
                 body,
                 span,
-                metadata: None,
             },
         )
     }
@@ -1894,10 +1891,10 @@ impl Parser {
 
             let parsed_structural = self.parse_structural();
             match parsed_structural {
-                Ok((_, structural)) => structural_nodes.push(Box::new(structural)),
+                Ok((_, structural)) => structural_nodes.push(StructuralElement::new(structural)),
                 Err(CatchIn::FunctionDecl) => {
                     // Recover here
-                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    structural_nodes.push(StructuralElement::new(StructuralNode::Error(0)));
                     continue;
                 }
                 Err(CatchIn::BlockTerminator) => {
@@ -1905,12 +1902,12 @@ impl Parser {
                     // The synchronizer positioned us AT the BlockTerminator but didn't consume it
                     // We need to consume it to avoid infinite loop, then continue parsing
                     self.lexer.eat(); // Consume the BlockTerminator
-                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    structural_nodes.push(StructuralElement::new(StructuralNode::Error(0)));
                     continue;
                 }
                 Err(_) => {
                     // Unknown error during structural parsing - emergency recovery - just skip until we find a token that has a unique semantic definition
-                    structural_nodes.push(Box::new(StructuralNode::Error(0)));
+                    structural_nodes.push(StructuralElement::new(StructuralNode::Error(0)));
                     self.lexer.unstuck_parser();
                     continue;
                 }
@@ -1921,9 +1918,9 @@ impl Parser {
             structurals: structural_nodes,
         }
     }
-    pub fn parse_and_add_ids(&mut self) -> (AST, usize, crate::pass_parse::add_ids::IdGenerator) {
+    pub fn parse_and_add_ids(&mut self) -> (AST, crate::pass_parse::add_ids::IdGenerator) {
         let mut ast = self.parse();
-        let (expr_count, id_generator) = add_ids(&mut ast);
-        (ast, expr_count, id_generator)
+        let (_, id_generator) = add_ids(&mut ast);
+        (ast, id_generator)
     }
 }

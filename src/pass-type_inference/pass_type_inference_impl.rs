@@ -67,13 +67,12 @@ impl TypeInference {
         let all_errors: Vec<YuuError> = ast.structurals
             .par_iter_mut()
             .flat_map(|structural_node| {
-                // Create isolated metadata for this structural element
-                let mut local_type_info_table = TypeInfoTable::new();
+                let expr_count = structural_node.metadata.expr_count;
+                let mut local_type_info_table = TypeInfoTable::with_capacity(expr_count);
                 let mut local_block_tree = BlockTree::new();
-                let mut local_bindings = BindingTable::default();
+                let mut local_bindings = BindingTable::with_capacity(expr_count);
                 let mut local_errors = Vec::new();
                 
-                // Create local TransientData with read-only type registry access
                 let root_id = local_block_tree.root_id();
                 let mut local_data = TransientData::new(
                     type_registry,
@@ -85,25 +84,16 @@ impl TypeInference {
                 );
                 
                 // Process this structural element
-                infer_structural(structural_node, root_id, &mut local_data);
+                infer_structural(structural_node.as_ref(), root_id, &mut local_data);
                 
-                // Store computed metadata in the AST node (only for non-Error nodes)
+                // Store computed metadata in the StructuralElement (only for non-Error nodes)
                 if !matches!(structural_node.as_ref(), StructuralNode::Error(_)) {
-                    let metadata = StructuralMetadata {
+                    structural_node.metadata = StructuralMetadata {
                         type_info_table: local_type_info_table,
                         binding_table: local_bindings,
                         block_tree: local_block_tree,
+                        expr_count,
                     };
-                    
-                    match structural_node.as_mut() {
-                        StructuralNode::FuncDecl(node) => node.metadata = Some(metadata),
-                        StructuralNode::FuncDef(node) => node.metadata = Some(metadata),
-                        StructuralNode::StructDecl(node) => node.metadata = Some(metadata),
-                        StructuralNode::StructDef(node) => node.metadata = Some(metadata),
-                        StructuralNode::EnumDef(node) => node.metadata = Some(metadata),
-                        StructuralNode::LuaMeta(node) => node.metadata = Some(metadata),
-                        StructuralNode::Error(_) => unreachable!(),
-                    }
                 }
                 
                 local_errors

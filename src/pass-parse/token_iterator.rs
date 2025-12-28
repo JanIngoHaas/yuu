@@ -20,41 +20,18 @@ pub enum CatchIn {
 // Result type for parser functions
 pub type ParseResult<T> = std::result::Result<T, CatchIn>;
 
-pub struct Lexer {
+pub struct TokenIterator {
     tokens: Vec<Token>,
     current: usize,
     pub code_info: SourceInfo,
 }
 
-impl Lexer {
-    pub fn new(code_info: &SourceInfo) -> Self {
-        let mut lexer = TokenKind::lexer(code_info.source.as_ref());
-        //let estimated_tokens = (code_info.source.len() / 4).max(1000); // No meaningful performance increase.
-        let mut tokens = Vec::default();
-
-        // Pre-lex the entire file at once
-        while let Some(token_result) = lexer.next() {
-            let span = lexer.span();
-            match token_result {
-                Ok(kind) => tokens.push(Token { kind, span }),
-                Err(_) => {
-                    // TODO: Improve error handling
-                    panic!("Unknown Token lexed");
-                }
-            }
-        }
-
-        // Add an explicit EOF token at the end
-        let end_pos = code_info.source.len();
-        tokens.push(Token {
-            kind: TokenKind::EOF,
-            span: end_pos..end_pos,
-        });
-
+impl TokenIterator {
+    pub fn new(tokens: Vec<Token>, code_info: SourceInfo) -> Self {
         Self {
             tokens,
             current: 0,
-            code_info: code_info.clone(),
+            code_info,
         }
     }
 

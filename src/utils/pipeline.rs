@@ -213,17 +213,30 @@ impl Pipeline {
             .as_ref()
             .ok_or_else(|| miette::miette!("No source provided"))?;
 
+        // First run lexing pass
+        let lexing_pass = crate::pass_lexing::LexingPass::new();
+        let lexing_start = Instant::now();
+        let (tokens, lexing_errors) = lexing_pass.run(source_info)?;
+        let lexing_duration = lexing_start.elapsed();
+
+        // TODO: Handle lexing errors - for now we'll continue with parsing even if there are lexing errors
+        if !lexing_errors.0.is_empty() {
+            eprintln!("Warning: {} lexing errors found", lexing_errors.0.len());
+        }
+
+        // Then run parsing pass
         let parse_pass = Parse::new();
-        let start = Instant::now();
-        let (ast, id_generator, syntax_errors) = parse_pass.run(source_info)?;
-        let parse_duration = start.elapsed();
+        let parse_start = Instant::now();
+        let (ast, id_generator, syntax_errors) = parse_pass.run(tokens, source_info.clone())?;
+        let parse_duration = parse_start.elapsed();
 
         self.ast = Some(ast);
         self.id_generator = Some(id_generator);
         self.syntax_errors = Some(syntax_errors);
         self.parse_done = true;
 
-        self.record_pass_timing("parse", parse_duration);
+        self.record_pass_timing("lexing", lexing_duration);
+        self.record_pass_timing("parsing", parse_duration);
         Ok(())
     }
 
