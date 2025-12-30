@@ -349,12 +349,12 @@ impl CLowering {
             }
             Instruction::HeapAlloc {
                 target,
-                element_size,
-                total_size,
+                count,
                 align,
                 init,
             } => {
                 // Generate heap allocation
+                let element_type = target.ty().deref_ptr();
                 Self::gen_type(data, target.ty())?;
                 write!(data.output, " ")?;
                 Self::write_var_name(target, &mut data.output)?;
@@ -365,29 +365,39 @@ impl CLowering {
                     Some(crate::pass_yir_lowering::yir::ArrayInit::Zero) => {
                         // Use calloc for zero initialization
                         if let Some(align_val) = align {
-                            write!(data.output, "aligned_alloc({}, ", align_val)?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, "); memset(")?;
+                            write!(data.output, "aligned_alloc({}, (", align_val)?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ") * sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, ")); memset(")?;
                             Self::write_var_name(target, &mut data.output)?;
-                            write!(data.output, ", 0, ")?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, ");")?;
+                            write!(data.output, ", 0, (")?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ") * sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, "));")?;
                         } else {
                             write!(data.output, "calloc(")?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, " / {}, {});", element_size, element_size)?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ", sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, "));")?;
                         }
                     }
                     _ => {
                         // Regular malloc for non-zero or no initialization
                         if let Some(align_val) = align {
-                            write!(data.output, "aligned_alloc({}, ", align_val)?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, ");")?;
+                            write!(data.output, "aligned_alloc({}, (", align_val)?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ") * sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, "));")?;
                         } else {
-                            write!(data.output, "malloc(")?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, ");")?;
+                            write!(data.output, "malloc((")?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ") * sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, "));")?;
                         }
                     }
                 }
@@ -401,14 +411,16 @@ impl CLowering {
                         crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
                             // Use template_fill helper function
                             write!(data.output, " ")?;
-                            Self::gen_type(data, target.ty().deref_ptr())?; // Element type
+                            Self::gen_type(data, element_type)?; // Element type
                             write!(data.output, " __template = ")?;
                             self.gen_operand(data, operand)?;
                             write!(data.output, "; __yuu_template_fill(")?;
                             Self::write_var_name(target, &mut data.output)?;
-                            write!(data.output, ", &__template, {}, (", element_size)?;
-                            self.gen_operand(data, total_size)?;
-                            write!(data.output, ") / {});", element_size)?;
+                            write!(data.output, ", &__template, sizeof(")?;
+                            Self::gen_type(data, element_type)?;
+                            write!(data.output, "), ")?;
+                            self.gen_operand(data, count)?;
+                            write!(data.output, ");")?;
                         }
                         crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
                             // Generate individual stores

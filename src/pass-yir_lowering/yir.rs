@@ -230,9 +230,8 @@ pub enum Instruction {
     // Heap allocation - returns a pointer to allocated memory
     HeapAlloc {
         target: Variable,        // Pointer variable to store the heap address
-        element_size: u64,       // Size of one element in bytes (static)
-        total_size: Operand,     // Total allocation size in bytes (in case of arrays, could be > element_size, can be dynamic)
-        align: Option<u64>,      // Optional alignment requirement
+        count: Operand,         // Number of elements to allocate (can be dynamic)
+        align: Option<u64>,
         init: Option<ArrayInit>, // Array initialization (None for uninitialized)
     },
 
@@ -792,29 +791,20 @@ impl Function {
         target
     }
 
-    // Builder method for heap allocation
+    // Unified heap alloc builder method
     pub fn make_heap_alloc(
         &mut self,
         name_hint: Ustr,
-        ty: &'static TypeInfo,
-        element_size: u64,
-        total_size: Operand,
-        align: Option<u64>,
+        element_ty: &'static TypeInfo,
+        count: Operand,
         init: Option<ArrayInit>,
     ) -> Variable {
-        debug_assert_eq!(
-            total_size.ty(),
-            primitive_u64(),
-            "HeapAlloc total_size must be u64, got {}",
-            total_size.ty()
-        );
-
-        let target = self.fresh_variable(name_hint, ty);
+        let dest_ty = element_ty.ptr_to();
+        let target = self.fresh_variable(name_hint, dest_ty);
         let instr = Instruction::HeapAlloc {
             target,
-            element_size,
-            total_size,
-            align,
+            count,
+            align: None,
             init,
         };
         self.get_current_block_mut().instructions.push(instr);
@@ -825,58 +815,35 @@ impl Function {
     pub fn make_heap_alloc_single(
         &mut self,
         name_hint: Ustr,
-        ptr_ty: &'static TypeInfo,
+        ty: &'static TypeInfo,
         init_value: Option<Operand>,
-        tr: &TypeRegistry,
     ) -> Variable {
-        let element_ty = ptr_ty.deref_ptr();
-        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
-        let element_size = layout.size as u64;
-        let total_size = Operand::U64Const(element_size);
         let init = init_value.map(ArrayInit::Splat);
-        self.make_heap_alloc(name_hint, ptr_ty, element_size, total_size, None, init)
+        self.make_heap_alloc(name_hint, ty, Operand::U64Const(1), init)
     }
 
-    // Convenience method for zero-initialized heap array (count must be static for simplicity)
+    // Convenience method for zero-initialized heap array
     pub fn make_heap_alloc_zeroed(
         &mut self,
         name_hint: Ustr,
-        ptr_ty: &'static TypeInfo,
-        count: u64,
-        tr: &TypeRegistry,
+        element_ty: &'static TypeInfo,
+        count: Operand,
     ) -> Variable {
-        let element_ty = ptr_ty.deref_ptr();
-        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
-        let element_size = layout.size as u64;
-        let total_size = Operand::U64Const(count * element_size);
-        self.make_heap_alloc(
-            name_hint,
-            ptr_ty,
-            element_size,
-            total_size,
-            None,
-            Some(ArrayInit::Zero),
-        )
+        self.make_heap_alloc(name_hint, element_ty, count, Some(ArrayInit::Zero))
     }
 
     // Convenience method for heap array with explicit values
     pub fn make_heap_alloc_with_values(
         &mut self,
         name_hint: Ustr,
-        ptr_ty: &'static TypeInfo,
+        element_ty: &'static TypeInfo,
         values: Vec<Operand>,
-        tr: &TypeRegistry,
     ) -> Variable {
-        let element_ty = ptr_ty.deref_ptr();
-        let layout = crate::utils::c_packing::calculate_type_layout(element_ty, tr);
-        let element_size = layout.size as u64;
-        let total_size = Operand::U64Const(values.len() as u64 * element_size);
+        let count = Operand::U64Const(values.len() as u64);
         self.make_heap_alloc(
             name_hint,
-            ptr_ty,
-            element_size,
-            total_size,
-            None,
+            element_ty,
+            count,
             Some(ArrayInit::Elements(values)),
         )
     }

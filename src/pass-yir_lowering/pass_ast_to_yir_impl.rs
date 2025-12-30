@@ -585,10 +585,8 @@ impl<'a> TransientData<'a> {
 
                         let ptr_var = self.function.make_heap_alloc(
                             "heap_array".intern(),
-                            expr_type,
-                            element_layout.size as u64, // element_size
-                            Operand::Variable(total_size_var), // total_size
-                            None,                       // No alignment requirement for now
+                            element_type,
+                            count_operand,
                             init,
                         );
                         self.add_temporary(ptr_var);
@@ -610,37 +608,23 @@ impl<'a> TransientData<'a> {
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays decay to pointers
                         // IMMEDIATELY
-                        let element_layout = calculate_type_layout(element_type, self.tr);
-                        let total_size = Operand::U64Const(
-                            element_layout.size as u64 * array_literal_expr.elements.len() as u64,
-                        );
 
-                        let init =
-                            crate::pass_yir_lowering::yir::ArrayInit::Elements(element_operands);
-                        let ptr_var = self.function.make_heap_alloc(
+                        let ptr_var = self.function.make_heap_alloc_with_values(
                             "heap_array_literal".intern(),
-                            expr_type,
-                            element_layout.size as u64, // element_size
-                            total_size,                 // total_size
-                            None,                       // No alignment requirement for now
-                            Some(init),
+                            element_type,
+                            element_operands,
                         );
                         self.add_temporary(ptr_var);
                         Operand::Variable(ptr_var)
                     }
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
                         let value_type = self.get_type(struct_instantiation_expr.id);
-                        let layout = calculate_type_layout(value_type, self.tr);
-                        let size_operand = Operand::U64Const(layout.size as u64);
 
                         // Allocate memory on heap first
-                        let ptr_var = self.function.make_heap_alloc(
+                        let ptr_var = self.function.make_heap_alloc_single(
                             "heap_ptr".intern(),
-                            expr_type,
-                            layout.size as u64, // element_size
-                            size_operand,       // total_size
-                            None,               // No alignment requirement for now
-                            None, // No init for struct instantiation as we fill fields
+                            value_type,
+                            None,
                         );
                         self.add_temporary(ptr_var);
 
@@ -671,17 +655,12 @@ impl<'a> TransientData<'a> {
                     }
                     _ => {
                         let value_type = self.get_type(heap_alloc_expr.expr.node_id());
-                        let layout = calculate_type_layout(value_type, self.tr);
-                        let size_operand = Operand::U64Const(layout.size as u64);
 
                         // For non-struct/array literals, fall back to stack-then-copy
-                        let ptr_var = self.function.make_heap_alloc(
+                        let ptr_var = self.function.make_heap_alloc_single(
                             "heap_ptr".intern(),
-                            expr_type,
-                            layout.size as u64, // element_size
-                            size_operand,       // total_size
-                            None,               // No alignment requirement for now
-                            None,               // No init
+                            value_type,
+                            None,
                         );
                         self.add_temporary(ptr_var);
 

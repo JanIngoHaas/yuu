@@ -513,39 +513,43 @@ pub fn format_instruction(
         }
         Instruction::HeapAlloc {
             target,
-            element_size,
-            total_size,
+            count,
             align,
             init,
         } => {
-            if let Some(alignment) = align {
-                write!(
-                    f,
-                    "{} := {} {} {} {} {}",
-                    format_variable(target, do_color),
-                    format_keyword("HEAP_ALLOC", do_color),
-                    colorize(&element_size.to_string(), "constant", do_color),
-                    format_operand(total_size, do_color),
-                    format_keyword("ALIGN", do_color),
-                    colorize(&alignment.to_string(), "constant", do_color)
-                )?;
-            } else {
-                write!(
-                    f,
-                    "{} := {} {} {}",
-                    format_variable(target, do_color),
-                    format_keyword("HEAP_ALLOC", do_color),
-                    colorize(&element_size.to_string(), "constant", do_color),
-                    format_operand(total_size, do_color)
-                )?;
-            }
-
-            if let Some(array_init) = init {
-                write!(
-                    f,
-                    " {}",
-                    colorize(&format!("{:?}", array_init), "keyword", do_color)
-                )?;
+            let align_str = align
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "natural".to_string());
+            write!(
+                f,
+                "{} := {}[{}; {}], {} {}",
+                format_variable(target, do_color),
+                colorize("HEAP_ALLOC", "keyword", do_color),
+                format_type(target.ty().deref_ptr(), do_color),
+                format_operand(count, do_color),
+                colorize("ALIGN", "keyword", do_color),
+                colorize(&align_str, "constant", do_color)
+            )?;
+            if let Some(init) = init {
+                write!(f, ", {} ", colorize("INIT", "keyword", do_color))?;
+                match init {
+                    crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                        write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                        write!(f, "{}", format_operand(operand, do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                        write!(f, "[")?;
+                        for (i, element) in elements.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", format_operand(element, do_color))?;
+                        }
+                        write!(f, "]")?;
+                    }
+                }
             }
             writeln!(f)
         }
