@@ -10,19 +10,44 @@ use thiserror::Error;
 /// Error kind enum to categorize different errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
+    // Syntax/Parse errors
     UnexpectedToken,
     UnexpectedEOF,
     InvalidSyntax,
     MissingToken,
+
+    // Type errors
+    TypeIncompatible,
+    ReturnTypeMismatch,
+    ConditionNotBoolean,
+
+    // Callable errors
+    NotCallable,
+    NoMatchingOverload,
+    UndefinedFunction,
+
+    // Struct/Enum errors
+    UndefinedStruct,
+    UndefinedField,
+    UndefinedEnum,
+    UndefinedVariant,
+    NotAStruct,
+    VariantBindingMismatch,
+
+    // Pointer/Memory errors
+    NotAPointer,
+    InvalidPointerArithmetic,
+    FreeNonPointer,
+
+    // Other semantic errors
     InvalidExpression,
     InvalidStatement,
-    FunctionOverloadError,
-    TypeMismatch,
-    ReferencedUndefinedStruct,
-    ReferencedUndeclaredField,
-    ReferencedUndefinedEnum,
-    ReferencedUndeclaredVariant,
     InfinitelySizedType,
+    VariableAlreadyDefined,
+    NonExhaustiveMatch,
+
+    // Lua plugin errors
+    LuaPluginError,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -32,15 +57,27 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::UnexpectedEOF => write!(f, "Unexpected end of file"),
             ErrorKind::InvalidSyntax => write!(f, "Invalid syntax"),
             ErrorKind::MissingToken => write!(f, "Missing token"),
+            ErrorKind::TypeIncompatible => write!(f, "Incompatible types"),
+            ErrorKind::ReturnTypeMismatch => write!(f, "Return type mismatch"),
+            ErrorKind::ConditionNotBoolean => write!(f, "Condition must be boolean"),
+            ErrorKind::NotCallable => write!(f, "Not callable"),
+            ErrorKind::NoMatchingOverload => write!(f, "No matching function overload"),
+            ErrorKind::UndefinedFunction => write!(f, "Undefined function"),
+            ErrorKind::UndefinedStruct => write!(f, "Undefined struct"),
+            ErrorKind::UndefinedField => write!(f, "Undefined field"),
+            ErrorKind::UndefinedEnum => write!(f, "Undefined enum"),
+            ErrorKind::UndefinedVariant => write!(f, "Undefined variant"),
+            ErrorKind::NotAStruct => write!(f, "Not a struct type"),
+            ErrorKind::VariantBindingMismatch => write!(f, "Variant binding mismatch"),
+            ErrorKind::NotAPointer => write!(f, "Not a pointer type"),
+            ErrorKind::InvalidPointerArithmetic => write!(f, "Invalid pointer arithmetic"),
+            ErrorKind::FreeNonPointer => write!(f, "Cannot free non-pointer"),
             ErrorKind::InvalidExpression => write!(f, "Invalid expression"),
             ErrorKind::InvalidStatement => write!(f, "Invalid statement"),
-            ErrorKind::FunctionOverloadError => write!(f, "No matching function overload"),
-            ErrorKind::TypeMismatch => write!(f, "Types do not match"),
-            ErrorKind::ReferencedUndefinedStruct => write!(f, "Referenced undeclared struct"),
-            ErrorKind::ReferencedUndeclaredField => write!(f, "Referenced undeclared field"),
-            ErrorKind::ReferencedUndefinedEnum => write!(f, "Referenced undeclared enum"),
-            ErrorKind::ReferencedUndeclaredVariant => write!(f, "Referenced undeclared variant"),
             ErrorKind::InfinitelySizedType => write!(f, "Infinitely sized type"),
+            ErrorKind::VariableAlreadyDefined => write!(f, "Variable already defined"),
+            ErrorKind::NonExhaustiveMatch => write!(f, "Non-exhaustive match"),
+            ErrorKind::LuaPluginError => write!(f, "Lua plugin error"),
         }
     }
 }
@@ -965,7 +1002,7 @@ pub fn create_no_overload_error(
         let suggestions = reg.get_similar_names_func(name.intern(), 3);
 
         let builder = YuuError::builder()
-            .kind(ErrorKind::InvalidExpression)
+            .kind(ErrorKind::UndefinedFunction)
             .message(format!("Function '{}' not declared", name))
             .source(src.source.clone(), src.file_name.clone())
             .span((sp.start, (sp.end - sp.start)), "undefined function");
@@ -990,7 +1027,7 @@ pub fn create_no_overload_error(
         return builder.help(help).build();
     }
     let mut builder = YuuError::builder()
-        .kind(ErrorKind::FunctionOverloadError)
+        .kind(ErrorKind::NoMatchingOverload)
         .message(format!(
             "No matching overload found for function '{}'",
             name

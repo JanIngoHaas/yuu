@@ -53,12 +53,12 @@ pub fn infer_type(
                         };
 
                         let mut message = YuuError::builder()
-                            .kind(ErrorKind::ReferencedUndefinedStruct)
-                            .message(format!("Cannot find struct type '{}'", ident.name))
+                            .kind(ErrorKind::UndefinedStruct)
+                            .message(format!("Struct or enum type '{}' not found", ident.name))
                             .source(src_code.source.clone(), src_code.file_name.clone())
                             .span(
                                 ident.span.clone(),
-                                format!("'{}' is not defined", ident.name),
+                                format!("type '{}' is not defined", ident.name),
                             );
 
                         if let Some(help_msg) = help_msg {

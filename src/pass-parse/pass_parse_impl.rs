@@ -1,8 +1,8 @@
 use crate::pass_diagnostics::error::YuuError;
+use crate::pass_lexing::Token;
 use crate::pass_parse::{
     ast::{AST, SourceInfo},
     parser::Parser,
-    token::Token,
 };
 
 pub struct SyntaxErrors(pub Vec<YuuError>);

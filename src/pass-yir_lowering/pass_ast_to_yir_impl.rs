@@ -1,22 +1,19 @@
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-    pass_parse::{
+    pass_lexing::{Integer, Token, TokenKind}, pass_parse::{
         BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode,
         ast::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode,
             UnaryOp,
         },
-        token::{Integer, Token, TokenKind},
-    },
-    pass_yir_lowering::yir::{
+    }, pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
-    },
-    utils::{
+    }, utils::{
         TypeRegistry, calculate_type_layout,
         collections::{FastHashMap, IndexMap},
         type_info_table::{TypeInfo, primitive_u64},
-    },
+    }
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

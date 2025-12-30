@@ -488,11 +488,11 @@ pub struct UnificationError {
 
 impl UnificationError {
     pub fn to_yuu_error(&self, info: SourceInfo, span: impl Into<miette::SourceSpan>) -> YuuError {
-        YuuError::builder().kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
-            .message("Type mismatch: cannot unify types".to_string())
+        YuuError::builder().kind(crate::pass_diagnostics::error::ErrorKind::TypeIncompatible)
+            .message(format!("Cannot unify incompatible types '{}' and '{}'", self.left, self.right))
             .source(info.source, info.file_name)
             .span(span, format!("expected '{}', found '{}'", self.right, self.left))
-            .help("These types are incompatible. Consider adding an explicit type conversion or changing your expression to match the expected type.".to_string())
+            .help("These types are incompatible. Consider adding an explicit type conversion or changing your expression to match the expected type.")
             .build()
     }
 }

@@ -1,13 +1,11 @@
 use crate::{
-    pass_diagnostics::{ErrorKind, YuuError},
-    pass_parse::{
+    pass_diagnostics::{ErrorKind, YuuError}, pass_lexing::{Token, TokenKind}, pass_parse::{
         add_ids::add_ids,
-        token_iterator::{CatchIn, TokenIterator, ParseError, ParseResult},
-    },
+        token_iterator::{CatchIn, ParseError, ParseResult, TokenIterator},
+    }
 };
 use crate::{
     pass_parse::ast::*,
-    pass_parse::token::{Token, TokenKind},
 };
 use logos::Span;
 use ustr::{Ustr, ustr};
@@ -124,7 +122,7 @@ impl Parser {
                 Ok(self.make_literal_expr(t))
             }
 
-            TokenKind::Hash => {
+            TokenKind::LuaMetaRaw => {
                 self.parse_lua_expr()
             }
 
@@ -626,7 +624,7 @@ impl Parser {
                 });
                 (span, ty)
             }
-            TokenKind::Hash => self.parse_lua_type()?,
+            TokenKind::LuaMetaRaw => self.parse_lua_type()?,
             _ => {
                 self.errors.push(
                     YuuError::unexpected_token(
@@ -664,16 +662,11 @@ impl Parser {
         Ok((final_span, StmtNode::Atomic(expr)))
     }
 
-    pub fn parse_lua_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
-        let (r, node) = self.parse_lua_node()?;
-        Ok((r, BindingNode::LuaMeta(node)))
-    }
-
     pub fn parse_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
         // Check if we have a mut keyword
         let tkn = self.lexer.peek();
 
-        if tkn.kind == TokenKind::Hash {
+        if tkn.kind == TokenKind::LuaMetaRaw {
             return self.parse_lua_binding();
         }
 
@@ -1681,23 +1674,111 @@ impl Parser {
         Ok(self.make_func_def(span, decl, block))
     }
 
-    pub fn parse_lua_node(&mut self) -> ParseResult<(Span, LuaMetaNode)> {
-        todo!()
-    }
-
-    pub fn parse_lua_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        let (r, node) = self.parse_lua_node()?;
-        Ok((r, StmtNode::LuaMeta(node)))
-    }
-
-    pub fn parse_lua_type(&mut self) -> ParseResult<(Span, TypeNode)> {
-        let (r, node) = self.parse_lua_node()?;
-        Ok((r, TypeNode::LuaMeta(node)))
+    fn extract_lua_code(&self, token: &Token) -> String {
+        let source = &self.lexer.code_info.source;
+        let full = &source[token.span.clone()];
+        let inner = &full[1..full.len()-1];
+        inner.replace("##", "#")
     }
 
     pub fn parse_lua_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
-        let (r, node) = self.parse_lua_node()?;
-        Ok((r, ExprNode::LuaMeta(node)))
+        use crate::pass_parse::ast::{LuaMetaExpr, LuaMetaSingleValued};
+
+        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let lua_code = self.extract_lua_code(&token);
+        let span = token.span.clone();
+
+        let lua_meta = LuaMetaExpr {
+            id: 0,
+            span: span.clone(),
+            lua_meta: LuaMetaSingleValued {
+                lua_code,
+                value: None,
+                is_active: true,
+            },
+        };
+
+        Ok((span, ExprNode::LuaMeta(lua_meta)))
+    }
+
+    pub fn parse_lua_type(&mut self) -> ParseResult<(Span, TypeNode)> {
+        use crate::pass_parse::ast::{LuaMetaType, LuaMetaSingleValued};
+
+        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let lua_code = self.extract_lua_code(&token);
+        let span = token.span.clone();
+
+        let lua_meta = LuaMetaType {
+            id: 0,
+            span: span.clone(),
+            lua_meta: LuaMetaSingleValued {
+                lua_code,
+                value: None,
+                is_active: true,
+            },
+        };
+
+        Ok((span.clone(), TypeNode::LuaMeta(lua_meta)))
+    }
+
+    pub fn parse_lua_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
+        use crate::pass_parse::ast::{LuaMetaBinding, LuaMetaSingleValued};
+
+        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let lua_code = self.extract_lua_code(&token);
+        let span = token.span.clone();
+
+        let lua_meta = LuaMetaBinding {
+            id: 0,
+            span: span.clone(),
+            lua_meta: LuaMetaSingleValued {
+                lua_code,
+                value: None,
+                is_active: true,
+            },
+        };
+
+        Ok((span, BindingNode::LuaMeta(lua_meta)))
+    }
+
+    pub fn parse_lua_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
+        use crate::pass_parse::ast::{LuaMetaStmt, LuaMetaNMultiValued};
+
+        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let lua_code = self.extract_lua_code(&token);
+        let span = token.span.clone();
+
+        let lua_meta = LuaMetaStmt {
+            id: 0,
+            span: span.clone(),
+            lua_meta: LuaMetaNMultiValued {
+                lua_code,
+                values: Vec::new(),
+                is_active: true,
+            },
+        };
+
+        Ok((span, StmtNode::LuaMeta(lua_meta)))
+    }
+
+    pub fn parse_lua_structural(&mut self) -> ParseResult<(Span, StructuralNode)> {
+        use crate::pass_parse::ast::{LuaMetaStructural, LuaMetaNMultiValued};
+
+        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let lua_code = self.extract_lua_code(&token);
+        let span = token.span.clone();
+
+        let lua_meta = LuaMetaStructural {
+            id: 0,
+            span: span.clone(),
+            lua_meta: LuaMetaNMultiValued {
+                lua_code,
+                values: Vec::new(),
+                is_active: true,
+            },
+        };
+
+        Ok((span, StructuralNode::LuaMeta(lua_meta)))
     }
 
     pub fn parse_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
@@ -1714,7 +1795,7 @@ impl Parser {
             TokenKind::WhileKw => self.parse_while_stmt(),
             TokenKind::MatchKw => self.parse_match_stmt(),
             TokenKind::Colon => self.parse_block_stmt(),
-            TokenKind::Hash => self.parse_lua_stmt(),
+            TokenKind::LuaMetaRaw => self.parse_lua_stmt(),
             _ => self.parse_atomic_stmt(),
         }
     }
@@ -1844,9 +1925,8 @@ impl Parser {
     pub fn parse_structural(&mut self) -> ParseResult<(Span, StructuralNode)> {
         let t = self.lexer.peek();
         let x = match t.kind {
-            TokenKind::Hash => {
-                let (range, node) = self.parse_lua_node()?;
-                (range, StructuralNode::LuaMeta(node))
+            TokenKind::LuaMetaRaw => {
+                self.parse_lua_structural()?
             }
             TokenKind::FnKw => {
                 let (range, res) = self.parse_func_def()?;

@@ -198,7 +198,7 @@ impl<'a> ControlFlowAnalyzer<'a> {
         func_span: logos::Span,
     ) {
         let error = YuuError::builder()
-                .kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
+                .kind(crate::pass_diagnostics::error::ErrorKind::ReturnTypeMismatch)
                 .message(format!(
                     "Function '{}' may reach end without returning, but is declared to return '{}'",
                     func_name.as_str(),

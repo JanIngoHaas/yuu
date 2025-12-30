@@ -167,7 +167,7 @@ impl<'a> BlockTree<'a> {
         sp: Span,
     ) -> YuuError {
         let mut builder = YuuError::builder()
-            .kind(ErrorKind::FunctionOverloadError)
+            .kind(ErrorKind::InvalidExpression)
             .message(format!("Variable '{}' not found", name));
 
         builder = builder

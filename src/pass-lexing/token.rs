@@ -215,9 +215,6 @@ pub enum TokenKind {
     #[token("@")]
     At,
 
-    #[token("#")]
-    Hash,
-
     #[token("&")]
     Ampersand,
 
@@ -234,14 +231,9 @@ pub enum TokenKind {
     #[token("~")]
     Tilde,
 
-    // This would work... But, then we would have to parse into Ustr which results in performance loss!
-    // #[regex(r"#([^#]|##)*?#", |lex| {
-    //     let full = lex.slice();
-    //     let inner = &full[1..full.len()-1];
-    //     let processed = inner.replace("##", "#");
-    //     Some(ustr(&processed))
-    // })]
-    // LuaMeta(Ustr),
+    #[regex(r"#([^#]|##)*?#")]
+    #[logos(priority = 2)]
+    LuaMetaRaw,
 
     EOF,
 }
@@ -301,7 +293,6 @@ impl Display for TokenKind {
             TokenKind::RBracket => "']'".fmt(f),
             TokenKind::EOF => "'EOF'".fmt(f),
             TokenKind::StructKw => "'struct'".fmt(f),
-            TokenKind::Hash => "'#'".fmt(f),
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
             TokenKind::EnumKw => "'enum'".fmt(f),
@@ -312,7 +303,7 @@ impl Display for TokenKind {
             TokenKind::MultiDeref(count) => write!(f, "'.{}'", "*".repeat(*count)),
             TokenKind::DotAmpersand => "'.&'".fmt(f),
             TokenKind::Tilde => "'~'".fmt(f),
-            //TokenKind::LuaMeta(code) => write!(f, "'#{}#' (Lua meta)", code),
+            TokenKind::LuaMetaRaw => "'#...#' (Lua meta)".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),
             TokenKind::CaseKw => "'case'".fmt(f),
             TokenKind::DefaultKw => "'default'".fmt(f),

@@ -1,4 +1,5 @@
 use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
+use crate::pass_lexing::{Integer, TokenKind};
 use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::ast::{
     NodeId, AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
@@ -11,6 +12,7 @@ use crate::utils::type_info_table::PrimitiveType;
 use crate::utils::type_info_table::{
     TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
 };
+use crate::utils::EnumVariantInfo;
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
@@ -19,8 +21,8 @@ use crate::utils::type_info_table::{
 pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Option<i64> {
     match expr {
         crate::pass_parse::ast::ExprNode::Literal(lit_expr) => match &lit_expr.lit.kind {
-            crate::pass_parse::token::TokenKind::Integer(
-                crate::pass_parse::token::Integer::I64(val),
+            TokenKind::Integer(
+                Integer::I64(val),
             ) => Some(*val),
             _ => None,
         },
@@ -30,13 +32,13 @@ pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Optio
 
 fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static TypeInfo {
     let out = match lit.lit.kind {
-        crate::pass_parse::token::TokenKind::Integer(integer) => match integer {
-            crate::pass_parse::token::Integer::I64(_) => primitive_i64(),
-            crate::pass_parse::token::Integer::U64(_) => primitive_u64(),
+        TokenKind::Integer(integer) => match integer {
+            Integer::I64(_) => primitive_i64(),
+            Integer::U64(_) => primitive_u64(),
         },
-        crate::pass_parse::token::TokenKind::F32(_) => primitive_f32(),
-        crate::pass_parse::token::TokenKind::F64(_) => primitive_f64(),
-        crate::pass_parse::token::TokenKind::NilKw => primitive_nil(),
+        TokenKind::F32(_) => primitive_f32(),
+        TokenKind::F64(_) => primitive_f64(),
+        TokenKind::NilKw => primitive_nil(),
         _ => unreachable!("Compiler bug: Literal not implemented"),
     };
     data.type_info_table.insert(lit.id, out);
@@ -63,9 +65,8 @@ fn infer_pointer_op_expr(
         return lhs_type;
     }
 
-    // Error case - invalid pointer arithmetic
     let err = YuuError::builder()
-        .kind(ErrorKind::TypeMismatch)
+        .kind(ErrorKind::InvalidPointerArithmetic)
         .message(format!(
             "Invalid pointer arithmetic: '{}' @ '{}'",
             lhs_type, rhs_type
@@ -75,7 +76,7 @@ fn infer_pointer_op_expr(
             data.src_code.file_name.clone(),
         )
         .span(pointer_op_expr.span.clone(), "invalid pointer operation")
-        .help("The @ operator requires a pointer on the left and an integer offset on the right. Note: @ is not overloadable")
+        .help("The @ operator requires a pointer on the left and an integer offset on the right")
         .build();
     data.errors.push(err);
     data.type_info_table
@@ -108,17 +109,17 @@ fn infer_free_op(
         primitive_nil()
     } else {
         let err = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
+            .kind(ErrorKind::FreeNonPointer)
             .message(format!(
-                "Cannot free a non-pointer type: '{}'",
+                "Cannot free a non-pointer type '{}'",
                 operand_type
             ))
             .source(
                 data.src_code.source.clone(),
                 data.src_code.file_name.clone(),
             )
-            .span(unary_expr.expr.span().clone(), "expected a pointer type")
-            .help("The `~` operator (free) can only be applied to pointer types.")
+            .span(unary_expr.expr.span().clone(), format!("has type '{}', expected pointer", operand_type))
+            .help("The `~` operator (free) can only be applied to pointer types")
             .build();
         data.errors.push(err);
         error_type()
@@ -214,72 +215,85 @@ fn infer_unary_expr(
     resolved_type
 }
 
+fn resolve_function_ident(
+    ident_expr: &IdentExpr,
+    args: &[&'static TypeInfo],
+    data: &mut TransientData,
+) -> Result<&'static TypeInfo, Box<YuuError>> {
+    match data.type_registry.resolve_function(ident_expr.ident, args) {
+        Ok(res) => {
+            data.type_info_table.insert(ident_expr.id, res.general_ty);
+            data.bindings.insert(ident_expr.id, res.binding_info.id);
+            Ok(res.general_ty)
+        }
+        Err(err) => Err(Box::new(create_no_overload_error(
+            ident_expr.ident.as_str(),
+            err,
+            args,
+            data.type_registry,
+            data.src_code,
+            ident_expr.span.clone(),
+        ))),
+    }
+}
+
+fn resolve_variable_ident(
+    ident_expr: &IdentExpr,
+    block_id: usize,
+    data: &mut TransientData,
+) -> Result<&'static TypeInfo, Box<YuuError>> {
+    match data.block_tree.resolve_variable(
+        block_id,
+        ident_expr.ident,
+        data.src_code,
+        ident_expr.span.clone(),
+    ) {
+        Ok(fr) => {
+            let ty = data.type_info_table.get(fr.binding_info.id).expect(
+                "Compiler bug: binding not found in type table - but it should be there",
+            );
+
+            if matches!(ty, TypeInfo::Unknown) {
+                let err = YuuError::builder()
+                    .kind(ErrorKind::InvalidExpression)
+                    .message(format!(
+                        "Cannot infer type of '{}' - variable has unknown type",
+                        ident_expr.ident
+                    ))
+                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .span(ident_expr.span.clone(), "unknown type")
+                    .help("Define the variable with 'def' before using it to establish its type")
+                    .build();
+                return Err(Box::new(err));
+            }
+
+            data.type_info_table.insert(ident_expr.id, ty);
+            data.bindings.insert(ident_expr.id, fr.binding_info.id);
+            Ok(ty)
+        }
+        Err(err) => Err(err),
+    }
+}
+
 fn infer_ident_expr(
     ident_expr: &IdentExpr,
     block_id: usize,
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) -> &'static TypeInfo {
-    let err = match function_args {
-        Some(args) => match data.type_registry.resolve_function(ident_expr.ident, args) {
-            Ok(res) => {
-                data.type_info_table.insert(ident_expr.id, res.general_ty);
-                data
-                    .bindings
-                    .insert(ident_expr.id, res.binding_info.id);
-                return res.general_ty;
-            }
-            Err(err) => Box::new(create_no_overload_error(
-                ident_expr.ident.as_str(),
-                err,
-                args,
-                data.type_registry,
-                data.src_code,
-                ident_expr.span.clone(),
-            )),
-        },
-        None => {
-            match data.block_tree.resolve_variable(
-                block_id,
-                ident_expr.ident,
-                data.src_code,
-                ident_expr.span.clone(),
-            ) {
-                Ok(fr) => {
-                    let ty = data.type_info_table.get(fr.binding_info.id).expect(
-                        "Compiler bug: binding not found in type table - but it should be there",
-                    );
-
-                    // Check if the variable was declared but not yet defined (has unknown type)
-                    if matches!(ty, TypeInfo::Unknown) {
-                        let err = YuuError::builder()
-                            .kind(ErrorKind::TypeMismatch)
-                            .message(format!(
-                                "Cannot infer type of '{}' - variable has unknown type, but should be known at this point",
-                                ident_expr.ident
-                            ))
-                            .source(data.src_code.source.clone(), data.src_code.file_name.clone())
-                            .span(ident_expr.span.clone(), "unknown type")
-                            .help("Define the variable with 'def' before using it to establish its type")
-                            .build();
-                        data.errors.push(err);
-                        data.type_info_table.insert(ident_expr.id, error_type());
-                        return error_type();
-                    }
-
-                    data.type_info_table.insert(ident_expr.id, ty);
-                    data
-                        .bindings
-                        .insert(ident_expr.id, fr.binding_info.id);
-                    return ty;
-                }
-                Err(err) => err,
-            }
-        }
+    let result = match function_args {
+        Some(args) => resolve_function_ident(ident_expr, args, data),
+        None => resolve_variable_ident(ident_expr, block_id, data),
     };
-    data.errors.push(*err);
-    data.type_info_table.insert(ident_expr.id, error_type());
-    error_type()
+
+    match result {
+        Ok(ty) => ty,
+        Err(err) => {
+            data.errors.push(*err);
+            data.type_info_table.insert(ident_expr.id, error_type());
+            error_type()
+        }
+    }
 }
 
 fn infer_func_call_expr(
@@ -300,7 +314,7 @@ fn infer_func_call_expr(
         TypeInfo::Function(func) => func.ret,
         TypeInfo::BuiltInPrimitive(prim) => {
             let err = YuuError::builder()
-                .kind(ErrorKind::InvalidExpression)
+                .kind(ErrorKind::NotCallable)
                 .message(format!(
                     "Cannot call primitive type '{}' as a function",
                     prim
@@ -309,7 +323,7 @@ fn infer_func_call_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "not callable")
+                .span(func_call_expr.lhs.span().clone(), format!("has type '{}', not callable", prim))
                 .help("Only function types can be called with parentheses")
                 .build();
             data.errors.push(err);
@@ -317,28 +331,29 @@ fn infer_func_call_expr(
         }
         TypeInfo::Pointer(_) => {
             let err = YuuError::builder()
-                .kind(ErrorKind::InvalidExpression)
+                .kind(ErrorKind::NotCallable)
                 .message("Cannot call a pointer as a function")
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "pointer type")
+                .span(func_call_expr.lhs.span().clone(), "pointer type, not callable")
                 .help("Function pointers are not supported yet")
                 .build();
             data.errors.push(err);
             error_type()
         }
 
-        TypeInfo::Struct(_struct_type) => {
+        TypeInfo::Struct(struct_type) => {
             let err = YuuError::builder()
-                .kind(ErrorKind::InvalidExpression)
-                .message("Cannot call a struct type identifier as a function")
+                .kind(ErrorKind::NotCallable)
+                .message(format!("Cannot call struct type '{}' as a function", struct_type.name))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "struct type")
+                .span(func_call_expr.lhs.span().clone(), format!("struct type '{}', not callable", struct_type.name))
+                .help("Structs are instantiated with braces, like: StructName { field: value }")
                 .build();
             data.errors.push(err);
             error_type()
@@ -346,20 +361,21 @@ fn infer_func_call_expr(
         TypeInfo::Error => error_type(),
         TypeInfo::Unknown => {
             let err = YuuError::builder()
-                .kind(ErrorKind::InvalidExpression)
+                .kind(ErrorKind::NotCallable)
                 .message("Cannot call an identifier of unknown type as a function")
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "unknown type")
+                .span(func_call_expr.lhs.span().clone(), "unknown type, not callable")
+                .help("Ensure the identifier is defined and has a known type")
                 .build();
             data.errors.push(err);
             error_type()
         }
         TypeInfo::Enum(e) => {
             let err = YuuError::builder()
-                .kind(ErrorKind::InvalidExpression)
+                .kind(ErrorKind::NotCallable)
                 .message(format!(
                     "Cannot call enum type '{}' as a function",
                     e.name
@@ -368,7 +384,7 @@ fn infer_func_call_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "enum type")
+                .span(func_call_expr.lhs.span().clone(), format!("enum type '{}', not callable", e.name))
                 .help("Enums cannot be called as functions. Use enum variant syntax like 'EnumName::Variant' instead")
                 .build();
             data.errors.push(err);
@@ -407,9 +423,9 @@ fn infer_assignment(
         Ok(unified) => unified,
         Err(err) => {
             let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+                .kind(ErrorKind::TypeIncompatible)
                 .message(format!(
-                    "Cannot unify type '{}' and type '{}' in assignment expression",
+                    "Cannot assign incompatible types: '{}' and '{}'",
                     err.left, err.right
                 ))
                 .source(
@@ -418,11 +434,11 @@ fn infer_assignment(
                 )
                 .span(
                     assignment_expr.rhs.span().clone(),
-                    format!("has type {}", err.left),
+                    format!("has type '{}'", err.left),
                 )
                 .label(
                     assignment_expr.lhs.span().clone(),
-                    format!("has type {}", err.right),
+                    format!("has type '{}'", err.right),
                 )
                 .help("The types must be compatible for assignment")
                 .build();
@@ -452,9 +468,9 @@ fn infer_struct_instantiation(
 
     if struct_opt.is_none() {
         let err = YuuError::builder()
-            .kind(ErrorKind::ReferencedUndefinedStruct)
+            .kind(ErrorKind::UndefinedStruct)
             .message(format!(
-                "Cannot instantiate struct '{}' because it has not been defined",
+                "Cannot instantiate undefined struct '{}'",
                 struct_name
             ))
             .source(
@@ -463,7 +479,7 @@ fn infer_struct_instantiation(
             )
             .span(
                 struct_instantiation_expr.span.clone(),
-                "attempted to instantiate undefined struct",
+                format!("struct '{}' is not defined", struct_name),
             )
             .help("Define this struct before using it")
             .build();
@@ -487,17 +503,17 @@ fn infer_struct_instantiation(
                 Ok(_) => {}
                 Err(err) => {
                     let err_msg = YuuError::builder()
-                        .kind(ErrorKind::TypeMismatch)
+                        .kind(ErrorKind::TypeIncompatible)
                         .message(format!(
-                            "Cannot assign {} to field '{}' of type {}",
+                            "Cannot assign incompatible type '{}' to field '{}' of type '{}'",
                             err.left, field.name, err.right
                         ))
                         .source(
                             data.src_code.source.clone(),
                             data.src_code.file_name.clone(),
                         )
-                        .span(expr_node.span().clone(), format!("has type {}", err.left))
-                        .label(field.span.clone(), format!("expected type {}", err.right))
+                        .span(expr_node.span().clone(), format!("has type '{}'", err.left))
+                        .label(field.span.clone(), format!("expected type '{}'", err.right))
                         .help("The types must be compatible for assignment")
                         .build();
                     data.errors.push(err_msg);
@@ -505,7 +521,7 @@ fn infer_struct_instantiation(
             }
         } else {
             let err = YuuError::builder()
-                .kind(ErrorKind::ReferencedUndeclaredField)
+                .kind(ErrorKind::UndefinedField)
                 .message(format!(
                     "Cannot assign to undeclared field '{}' of struct '{}'",
                     field.name, struct_name
@@ -555,7 +571,7 @@ fn infer_member_access(
                 }
                 None => {
                     let err = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndeclaredField)
+                        .kind(ErrorKind::UndefinedField)
                         .message(format!(
                             "Struct '{}' has no field named '{}'",
                             s.name, member_access_expr.field.name
@@ -566,7 +582,7 @@ fn infer_member_access(
                         )
                         .span(
                             member_access_expr.field.span.clone(),
-                            "attempted to access undefined field",
+                            format!("field '{}' not defined", member_access_expr.field.name),
                         )
                         .label(
                             member_access_expr.lhs.span().clone(),
@@ -628,6 +644,82 @@ fn infer_member_access(
     }
 }
 
+fn validate_enum_variant_binding(
+    ei: &EnumInstantiationExpr,
+    variant_info: &EnumVariantInfo,
+    block_id: usize,
+    data: &mut TransientData,
+    function_args: Option<&[&'static TypeInfo]>,
+) {
+    // Left: Maybe data associated with the enum instantiation, i.e. Option::Some(x) where x would be the data (syntactical), Right: Semantic type information about the enum variant, i.e. data type that the variant is associated and registered with
+    match (&ei.data, variant_info.variant) {
+        // Yes, we have both
+        (Some(dexpr), Some(reg_ty)) => {
+            // Calculate type (semantic) from associated data (syntactical)
+            let ty = infer_expr(dexpr, block_id, data, function_args);
+            // See if the types match
+            if let Err(err) = ty.unify(reg_ty) {
+                let err_msg = YuuError::builder()
+                    .kind(ErrorKind::TypeIncompatible)
+                    .message(format!(
+                        "Cannot assign incompatible type '{}' to enum variant '{}::{}' which expects '{}'",
+                        err.left, ei.enum_name, ei.variant_name, err.right
+                    ))
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(dexpr.span().clone(), format!("has type '{}'", err.left))
+                    .label(ei.span.clone(), format!("expected type '{}'", err.right))
+                    .help("The types must be compatible for enum variant instantiation")
+                    .build();
+                data.errors.push(err_msg);
+            }
+        }
+        // Unit Variant, good!
+        (None, None) => {
+            // Nothing to do here...
+        }
+
+        // Left: Syntactically, we have data (user made an error and mistakingly provided data), Right: No data was expected
+        (Some(dexpr), None) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Enum variant '{}::{}' does not accept data, but data was provided",
+                    ei.enum_name, ei.variant_name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(dexpr.span().clone(), "unexpected data provided here")
+                .label(ei.span.clone(), "for this unit variant")
+                .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
+                .build();
+            data.errors.push(err);
+        }
+
+        // Left: No data was provided, Right: But there is associated data registered => User error
+        (None, Some(expected_ty)) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::InvalidExpression)
+                .message(format!(
+                    "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
+                    ei.enum_name, ei.variant_name, expected_ty
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(ei.span.clone(), "missing required data")
+                .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
+                .build();
+            data.errors.push(err);
+        }
+    }
+}
+
 fn infer_enum_instantiation(
     ei: &EnumInstantiationExpr,
     block_id: usize,
@@ -640,79 +732,12 @@ fn infer_enum_instantiation(
             let variant_info_registered = enum_info.variants.get(&ei.variant_name);
             match variant_info_registered {
                 Some(variant) => {
-                    let ty = enum_info.ty;
-                    // Left: Maybe data associated with the enum instantiation, i.e. Option::Some(x) where x would be the data (syntactical), Right: Semantic type information about the enum variant, i.e. data type that the variant is associated and registered with
-                    match (&ei.data, variant.variant) {
-                        // Yes, we have both
-                        (Some(dexpr), Some(reg_ty)) => {
-                            // Calculate type (semantic) from associated data (syntactical)
-                            let ty = infer_expr(dexpr, block_id, data, function_args);
-                            // See if the types match
-                            if let Err(err) = ty.unify(reg_ty) {
-                                let err_msg = YuuError::builder()
-                                    .kind(ErrorKind::TypeMismatch)
-                                    .message(format!(
-                                        "Cannot assign '{}' to enum variant '{}::{}' which expects '{}'",
-                                        err.left, ei.enum_name, ei.variant_name, err.right
-                                    ))
-                                    .source(
-                                        data.src_code.source.clone(),
-                                        data.src_code.file_name.clone(),
-                                    )
-                                    .span(dexpr.span().clone(), format!("has type '{}'", err.left))
-                                    .label(ei.span.clone(), format!("expected type '{}'", err.right))
-                                    .help("The types must be compatible for enum variant instantiation")
-                                    .build();
-                                data.errors.push(err_msg);
-                            }
-                        }
-                        // Unit Variant, good!
-                        (None, None) => {
-                            // Nothing to do here...
-                        }
-
-                        // Left: Syntactically, we have data (user made an error and mistakingly provided data), Right: No data was expected
-                        (Some(dexpr), None) => {
-                            let err = YuuError::builder()
-                                .kind(ErrorKind::InvalidExpression)
-                                .message(format!(
-                                    "Enum variant '{}::{}' does not accept data, but data was provided",
-                                    ei.enum_name, ei.variant_name
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(dexpr.span().clone(), "unexpected data provided here")
-                                .label(ei.span.clone(), "for this unit variant")
-                                .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
-                                .build();
-                            data.errors.push(err);
-                        }
-
-                        // Left: No data was provided, Right: But there is associated data registered => User error
-                        (None, Some(expected_ty)) => {
-                            let err = YuuError::builder()
-                                .kind(ErrorKind::InvalidExpression)
-                                .message(format!(
-                                    "Enum variant '{}::{}' expects data of type '{}', but no data was provided",
-                                    ei.enum_name, ei.variant_name, expected_ty
-                                ))
-                                .source(
-                                    data.src_code.source.clone(),
-                                    data.src_code.file_name.clone(),
-                                )
-                                .span(ei.span.clone(), "missing required data")
-                                .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
-                                .build();
-                            data.errors.push(err);
-                        }
-                    }
-                    ty
+                    validate_enum_variant_binding(ei, variant, block_id, data, function_args);
+                    enum_info.ty
                 }
                 None => {
                     let err = YuuError::builder()
-                        .kind(ErrorKind::ReferencedUndeclaredVariant)
+                        .kind(ErrorKind::UndefinedVariant)
                         .message(format!(
                             "Enum '{}' has no variant named '{}'",
                             ei.enum_name, ei.variant_name
@@ -721,7 +746,7 @@ fn infer_enum_instantiation(
                             data.src_code.source.clone(),
                             data.src_code.file_name.clone(),
                         )
-                        .span(ei.span.clone(), "attempted to use undefined variant")
+                        .span(ei.span.clone(), format!("variant '{}' not defined", ei.variant_name))
                         .help(format!(
                             "Available variants for enum '{}': {}",
                             ei.enum_name,
@@ -744,16 +769,16 @@ fn infer_enum_instantiation(
         }
         None => {
             let err = YuuError::builder()
-                .kind(ErrorKind::ReferencedUndefinedEnum)
+                .kind(ErrorKind::UndefinedEnum)
                 .message(format!(
-                    "Cannot instantiate enum '{}' because it has not been defined",
+                    "Cannot instantiate undefined enum '{}'",
                     ei.enum_name
                 ))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(ei.span.clone(), "attempted to instantiate undefined enum")
+                .span(ei.span.clone(), format!("enum '{}' not defined", ei.enum_name))
                 .help("Define this enum before using it")
                 .build();
             data.errors.push(err);
@@ -845,18 +870,18 @@ fn infer_deref_expr(
     let result_type = match operand_type {
         TypeInfo::Pointer(pointee_type) => pointee_type,
         _ => {
-            // Error: trying to dereference non-pointer
             let error = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
-                .message("Cannot dereference non-pointer type".to_string())
+                .kind(ErrorKind::NotAPointer)
+                .message(format!("Cannot dereference non-pointer type '{}'", operand_type))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
                 .span(
                     deref_expr.span.clone(),
-                    "This expression is not a pointer".to_string(),
+                    format!("has type '{}', expected pointer", operand_type),
                 )
+                .help("The dereference operator (*) can only be applied to pointer types")
                 .build();
             data.errors.push(error);
             error_type()
@@ -911,16 +936,16 @@ fn infer_array_expr(
     // Verify size is an integer type
     let size_type = infer_expr(&array_expr.size, block_id, data, None);
     if !matches!(size_type, TypeInfo::BuiltInPrimitive(PrimitiveType::I64)) {
-        // Emit proper error for user mistake
         data.errors.push(
             crate::pass_diagnostics::error::YuuError::builder()
-                .kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
-                .message(format!("Array size must be i64, found {}", size_type))
+                .kind(crate::pass_diagnostics::error::ErrorKind::TypeIncompatible)
+                .message(format!("Array size must be 'i64', found '{}'", size_type))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(array_expr.size.span(), "expected i64 for array size")
+                .span(array_expr.size.span(), format!("has type '{}', expected 'i64'", size_type))
+                .help("Array sizes must be of type i64")
                 .build(),
         );
         return error_type();
@@ -967,16 +992,17 @@ fn infer_array_literal_expr(
         if element_type_inferred != element_type {
             data.errors.push(
                 crate::pass_diagnostics::error::YuuError::builder()
-                    .kind(crate::pass_diagnostics::error::ErrorKind::TypeMismatch)
+                    .kind(crate::pass_diagnostics::error::ErrorKind::TypeIncompatible)
                     .message(format!(
-                        "Array element {} has type {}, but expected {}",
+                        "Array element {} has incompatible type '{}', expected '{}'",
                         i, element_type_inferred, element_type
                     ))
                     .source(
                         data.src_code.source.clone(),
                         data.src_code.file_name.clone(),
                     )
-                    .span(element.span(), format!("element {} has wrong type", i))
+                    .span(element.span(), format!("has type '{}', expected '{}'", element_type_inferred, element_type))
+                    .help("All array elements must have the same type")
                     .build(),
             );
         }

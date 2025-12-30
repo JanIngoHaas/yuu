@@ -1,7 +1,7 @@
 use crate::pass_diagnostics::error::YuuError;
+use crate::pass_lexing::{Token, TokenKind};
 use crate::pass_parse::{
     ast::SourceInfo,
-    token::{Token, TokenKind},
 };
 use logos::Logos;
 

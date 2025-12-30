@@ -3,7 +3,7 @@ use ustr::Ustr;
 
 use crate::{
     pass_diagnostics::YuuError, pass_parse::{SourceInfo, ast::*}, pass_type_inference::infer_type, utils::{
-        binding_info::BindingInfo, collections::{UstrHashMap, UstrIndexMap}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
+        binding_info::BindingInfo, collections::{UstrHashMap, UstrIndexMap}, lua_executor::{LuaCommand, LuaContext, LuaExecutor}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
     }
 };
 

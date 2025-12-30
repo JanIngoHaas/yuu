@@ -87,7 +87,7 @@ fn infer_return_stmt(
         // Unify return_ty with function's declared return type
         if let Err(err) = unification {
             let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+                .kind(ErrorKind::ReturnTypeMismatch)
                 .message(format!(
                     "Return type mismatch: expected '{}', found '{}'",
                     data.current_function_return_type, err.left
@@ -108,7 +108,7 @@ fn infer_return_stmt(
         // We return "nil"; check if that is also the function's return type...
         if let Err(_err) = primitive_nil().unify(data.current_function_return_type) {
             let error = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+                .kind(ErrorKind::ReturnTypeMismatch)
                 .message(format!(
                     "Function expects return type '{}', but no explicit return value provided (implicitly returns nil)",
                     data.current_function_return_type
@@ -172,9 +172,9 @@ fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientData) {
     let cond_ty = infer_expr(&if_stmt.if_block.condition, block_id, data, None);
     if let Err(err) = cond_ty.unify(primitive_bool()) {
         let err_msg = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
+            .kind(ErrorKind::ConditionNotBoolean)
             .message(format!(
-                "If condition must be of type bool, got {}",
+                "If condition must be of type 'bool', got '{}'",
                 err.left
             ))
             .source(
@@ -198,9 +198,9 @@ fn infer_if_stmt(if_stmt: &IfStmt, block_id: usize, data: &mut TransientData) {
         let cond_ty = infer_expr(&else_if_block.condition, block_id, data, None);
         if let Err(err) = cond_ty.unify(primitive_bool()) {
             let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+                .kind(ErrorKind::ConditionNotBoolean)
                 .message(format!(
-                    "Else-if condition must be of type bool, got {}",
+                    "Else-if condition must be of type 'bool', got '{}'",
                     err.left
                 ))
                 .source(
@@ -229,7 +229,7 @@ fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut Transien
 
     if let Err(err) = cond_ty.unify(primitive_bool()) {
         let err_msg = YuuError::builder()
-            .kind(ErrorKind::TypeMismatch)
+            .kind(ErrorKind::ConditionNotBoolean)
             .message(format!(
                 "While condition must be of type 'bool', got '{}'",
                 err.left

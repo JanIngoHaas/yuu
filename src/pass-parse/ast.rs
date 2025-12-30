@@ -2,8 +2,7 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::pass_parse::token::Token;
-use crate::utils::{BindingTable, type_info_table::TypeInfoTable};
+use crate::{pass_lexing::Token, utils::{BindingTable, type_info_table::TypeInfoTable}};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -355,15 +354,41 @@ pub struct CastExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct LuaMetaNode {
+pub struct LuaMetaSingleValued<T> {
+    pub lua_code: String,
+    pub value: Option<Box<T>>,
+    pub is_active: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LuaMetaNMultiValued<T> {
+    pub lua_code: String,
+    pub values: Vec<T>,
+    pub is_active: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LuaMetaNodeSingle<T> {
     pub id: NodeId,
     pub span: Span,
-    pub lua_code: String,
+    pub lua_meta: LuaMetaSingleValued<T>,
 }
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LuaMetaNodeMulti<T> {
+    pub id: NodeId,
+    pub span: Span,
+    pub lua_meta: LuaMetaNMultiValued<T>,
+}
+
+pub type LuaMetaExpr = LuaMetaNodeSingle<ExprNode>;
+pub type LuaMetaType = LuaMetaNodeSingle<TypeNode>;
+pub type LuaMetaBinding = LuaMetaNodeSingle<BindingNode>;
+pub type LuaMetaStructural = LuaMetaNodeMulti<StructuralNode>;
+pub type LuaMetaStmt = LuaMetaNodeMulti<StmtNode>;
 
 /// Represents an expression in the AST
 #[derive(Serialize, Deserialize, Clone)]
-
 pub enum ExprNode {
     Literal(LiteralExpr),
 
@@ -397,7 +422,7 @@ pub enum ExprNode {
 
     Cast(CastExpr),
 
-    LuaMeta(LuaMetaNode),
+    LuaMeta(LuaMetaExpr),
     //Error,
 }
 
@@ -443,7 +468,7 @@ pub struct IdentBinding {
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BindingNode {
     Ident(IdentBinding),
-    LuaMeta(LuaMetaNode),
+    LuaMeta(LuaMetaBinding),
 }
 
 impl BindingNode {
@@ -459,7 +484,7 @@ impl Display for BindingNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BindingNode::Ident(ident) => write!(f, "{}(id: {})", ident.name, ident.id),
-            BindingNode::LuaMeta(lua_meta) => write!(f, "{}(id: {})", lua_meta.lua_code, lua_meta.id),
+            BindingNode::LuaMeta(lua_meta) => write!(f, "Lua Meta Binding(id: {})", lua_meta.id),
         }
     }
 }
@@ -518,7 +543,7 @@ pub enum TypeNode {
     Ident(IdentType),
     Pointer(PointerType),
     Array(ArrayType),
-    LuaMeta(LuaMetaNode),
+    LuaMeta(LuaMetaType),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -604,7 +629,7 @@ pub enum StructuralNode {
     StructDecl(StructDeclStructural),
     StructDef(StructDefStructural),
     EnumDef(EnumDefStructural),
-    LuaMeta(LuaMetaNode),
+    LuaMeta(LuaMetaStructural),
     Error(NodeId),
 }
 
@@ -643,7 +668,7 @@ pub enum StmtNode {
     Error(NodeId),
     Decl(DeclStmt),
     Def(DefStmt),
-    LuaMeta(LuaMetaNode)
+    LuaMeta(LuaMetaStmt)
 }
 
 /// Represents a node in the AST

@@ -21,7 +21,7 @@ fn infer_enum_pattern(
             // Check if this enum pattern matches the scrutinee's enum
             if enum_type.name != enum_pattern.enum_name {
                 let err_msg = YuuError::builder()
-                    .kind(ErrorKind::TypeMismatch)
+                    .kind(ErrorKind::TypeIncompatible)
                     .message(format!(
                         "Cannot match '{}' pattern against '{}' enum type",
                         enum_pattern.enum_name, enum_type.name
@@ -53,13 +53,13 @@ fn infer_enum_pattern(
 
             if opt_enum.is_none() {
                 let error = YuuError::builder()
-                    .kind(ErrorKind::ReferencedUndefinedEnum)
+                    .kind(ErrorKind::UndefinedEnum)
                     .message(format!("Enum '{}' is not defined", enum_pattern.enum_name))
                     .source(
                         data.src_code.source.clone(),
                         data.src_code.file_name.clone(),
                     )
-                    .span(enum_pattern.span.clone(), "undefined enum")
+                    .span(enum_pattern.span.clone(), format!("enum '{}' not defined", enum_pattern.enum_name))
                     .help("Make sure the enum is declared and in scope")
                     .build();
                 data.errors.push(error);
@@ -79,7 +79,7 @@ fn infer_enum_pattern(
                     (Some(_), None) => {
                         // Unit variant with binding - invalid
                         let err_msg = YuuError::builder()
-                            .kind(ErrorKind::TypeMismatch)
+                            .kind(ErrorKind::VariantBindingMismatch)
                             .message(format!(
                                 "Unit variant '{}::{}' cannot be destructured",
                                 enum_pattern.enum_name, enum_pattern.variant_name
@@ -99,7 +99,7 @@ fn infer_enum_pattern(
                     (None, Some(_)) => {
                         // Data variant without binding - invalid
                         let err_msg = YuuError::builder()
-                            .kind(ErrorKind::TypeMismatch)
+                            .kind(ErrorKind::VariantBindingMismatch)
                             .message(format!(
                                 "Data variant '{}::{}' must be destructured",
                                 enum_pattern.enum_name, enum_pattern.variant_name
@@ -120,7 +120,7 @@ fn infer_enum_pattern(
                 }
             } else {
                 let err_msg = YuuError::builder()
-                    .kind(ErrorKind::TypeMismatch)
+                    .kind(ErrorKind::UndefinedVariant)
                     .message(format!(
                         "Variant '{}' does not exist on enum '{}'",
                         enum_pattern.variant_name, enum_pattern.enum_name
@@ -131,7 +131,7 @@ fn infer_enum_pattern(
                     )
                     .span(
                         enum_pattern.span.clone(),
-                        format!("unknown variant '{}'", enum_pattern.variant_name),
+                        format!("variant '{}' not defined", enum_pattern.variant_name),
                     )
                     .build();
                 data.errors.push(err_msg);
@@ -139,7 +139,7 @@ fn infer_enum_pattern(
         }
         _ => {
             let err_msg = YuuError::builder()
-                .kind(ErrorKind::TypeMismatch)
+                .kind(ErrorKind::TypeIncompatible)
                 .message(format!(
                     "Cannot match enum pattern against non-enum type '{}'",
                     scrutinee_ty
@@ -148,7 +148,7 @@ fn infer_enum_pattern(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(enum_pattern.span.clone(), "enum pattern")
+                .span(enum_pattern.span.clone(), format!("has type '{}', not an enum", scrutinee_ty))
                 .help("Enum patterns can only match against enum types")
                 .build();
             data.errors.push(err_msg);
