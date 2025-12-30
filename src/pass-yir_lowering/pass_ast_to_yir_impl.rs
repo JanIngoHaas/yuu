@@ -1,19 +1,22 @@
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-    pass_lexing::{Integer, Token, TokenKind}, pass_parse::{
+    pass_lexing::{Integer, Token, TokenKind},
+    pass_parse::{
         BlockStmt, GetId, IdentExpr, LValueKind, RefutablePatternNode,
         ast::{
             AST, BinOp, BindingNode, ExprNode, InternUstr, NodeId, StmtNode, StructuralNode,
             UnaryOp,
         },
-    }, pass_yir_lowering::yir::{
+    },
+    pass_yir_lowering::yir::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
-    }, utils::{
+    },
+    utils::{
         TypeRegistry, calculate_type_layout,
         collections::{FastHashMap, IndexMap},
-        type_info_table::{TypeInfo, PrimitiveType, primitive_u64},
-    }
+        type_info_table::{PrimitiveType, TypeInfo, primitive_u64},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,7 +58,7 @@ impl<'a> TransientData<'a> {
         tr: &'a TypeRegistry,
         type_info_table: &'a crate::utils::type_info_table::TypeInfoTable,
         bindings: &'a crate::utils::BindingTable,
-        emit_kill_sets: bool
+        emit_kill_sets: bool,
     ) -> Self {
         Self {
             function,
@@ -136,8 +139,8 @@ impl<'a> TransientData<'a> {
         result_ty: &'static TypeInfo,
         context: ContextKind,
     ) -> Option<Operand> {
-        use TypeInfo::*;
         use PrimitiveType::*;
+        use TypeInfo::*;
 
         let result_operand = match (bin_expr.op, lhs_type, rhs_type) {
             // pointer + integer = pointer
@@ -193,11 +196,9 @@ impl<'a> TransientData<'a> {
         Some(match context {
             ContextKind::AsIs => result_operand,
             ContextKind::StorageLocation => {
-                let storage_var = self.function.make_alloca_single(
-                    "ptr_storage".intern(),
-                    result_ty,
-                    None,
-                );
+                let storage_var =
+                    self.function
+                        .make_alloca_single("ptr_storage".intern(), result_ty, None);
                 self.add_temporary(storage_var);
                 self.function.make_store(storage_var, result_operand);
                 Operand::Variable(storage_var)
@@ -342,19 +343,40 @@ impl<'a> TransientData<'a> {
                 // Type-based dispatch following the same pattern as type inference
 
                 // Case 1: Built-in primitive arithmetic (i64 + i64, f32 * f32, etc.)
-                if let (TypeInfo::BuiltInPrimitive(a), TypeInfo::BuiltInPrimitive(b)) = (lhs_type, rhs_type)
-                && a == b
+                if let (TypeInfo::BuiltInPrimitive(a), TypeInfo::BuiltInPrimitive(b)) =
+                    (lhs_type, rhs_type)
+                    && a == b
                 {
-                    return self.lower_builtin_binary_op(bin_expr, lhs_operand, rhs_operand, result_ty, context);
+                    return self.lower_builtin_binary_op(
+                        bin_expr,
+                        lhs_operand,
+                        rhs_operand,
+                        result_ty,
+                        context,
+                    );
                 }
 
                 // Case 2: Try pointer arithmetic operations
-                if let Some(result) = self.try_lower_pointer_arithmetic(bin_expr, lhs_operand, rhs_operand, lhs_type, rhs_type, result_ty, context) {
+                if let Some(result) = self.try_lower_pointer_arithmetic(
+                    bin_expr,
+                    lhs_operand,
+                    rhs_operand,
+                    lhs_type,
+                    rhs_type,
+                    result_ty,
+                    context,
+                ) {
                     return result;
                 }
 
                 // Case 3: User-defined operations - emit function call
-                self.lower_user_defined_binary_op(bin_expr, lhs_operand, rhs_operand, result_ty, context)
+                self.lower_user_defined_binary_op(
+                    bin_expr,
+                    lhs_operand,
+                    rhs_operand,
+                    result_ty,
+                    context,
+                )
             }
             ExprNode::Unary(un_expr) => {
                 let operand = self.lower_expr(&un_expr.expr, ContextKind::AsIs);
@@ -1196,12 +1218,7 @@ impl YirLowering {
         Self
     }
 
-    fn lower_ast(
-        &self,
-        ast: &AST,
-        tr: &TypeRegistry,
-        emit_kill_sets: bool
-    ) -> Module {
+    fn lower_ast(&self, ast: &AST, tr: &TypeRegistry, emit_kill_sets: bool) -> Module {
         let functions: Vec<Function> = ast
             .structurals
             .par_iter()

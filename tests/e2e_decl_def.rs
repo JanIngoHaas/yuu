@@ -25,7 +25,7 @@ fn test_basic_decl_def() {
 fn test_decl_def_with_heap_allocation() {
     let source = r#"fn main() -> i64:
         dec ptr;
-        def ptr = @42;
+        def ptr = new 42;
         let value = ptr.*;
         ~ptr;
         return value .
@@ -45,7 +45,7 @@ fn test_decl_def_with_stack_arrays() {
     let source = r#"fn main() -> i64:
         dec arr;
         def arr = [10; 5];  // Array of 5 elements, all initialized to 10
-        return (arr@2).* .
+        return (arr+2).* .
     "#;
 
     let executable = run_to_executable(source, "test_decl_def_with_stack_arrays.yuu")
@@ -61,8 +61,8 @@ fn test_decl_def_with_stack_arrays() {
 fn test_decl_def_with_heap_arrays() {
     let source = r#"fn main() -> i64:
         dec heap_arr;
-        def heap_arr = @[7; 3];  // Heap-allocated array of 3 elements, all initialized to 7
-        let value = (heap_arr@1).*;
+        def heap_arr = new [7; 3];  // Heap-allocated array of 3 elements, all initialized to 7
+        let value = (heap_arr+1).*;
         ~heap_arr;
         return value .
     "#;
@@ -81,7 +81,7 @@ fn test_decl_def_with_array_literals() {
     let source = r#"fn main() -> i64:
         dec arr;
         def arr = [1, 2, 3, 4, 5];
-        return (arr@3).* .
+        return (arr+3).* .
     "#;
 
     let executable = run_to_executable(source, "test_decl_def_with_array_literals.yuu")
@@ -97,8 +97,8 @@ fn test_decl_def_with_array_literals() {
 fn test_decl_def_with_heap_array_literals() {
     let source = r#"fn main() -> i64:
         dec heap_lit;
-        def heap_lit = @[10, 20, 30];
-        let value = (heap_lit@1).*;
+        def heap_lit = new [10, 20, 30];
+        let value = (heap_lit+1).*;
         ~heap_lit;
         return value .
     "#;
@@ -144,7 +144,7 @@ fn test_decl_def_with_heap_structs() {
 
         fn main() -> i64:
             dec ptr;
-            def ptr = @Data { value: 99 };
+            def ptr = new Data { value: 99 };
             let result = ptr.value;
             ~ptr;
             return result .
@@ -199,7 +199,7 @@ fn test_decl_def_complex_mixed_types() {
             dec container;
             dec result;
 
-            def heap_val = @77;
+            def heap_val = new 77;
             def container = Container { data: heap_val }; 
             def result = container.data.*;
 
@@ -225,7 +225,7 @@ fn test_decl_def_with_pointer_arithmetic() {
 
         def arr = [5, 10, 15, 20];
         def ptr = arr;
-        def offset_ptr = ptr @ 2;
+        def offset_ptr = ptr + 2;
 
         return offset_ptr.* .
     "#;
