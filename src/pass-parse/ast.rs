@@ -334,18 +334,6 @@ pub struct EnumInstantiationExpr {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-
-pub struct PointerOpExpr {
-    pub left: Box<ExprNode>,
-
-    pub right: Box<ExprNode>,
-
-    pub span: Span,
-
-    pub id: NodeId,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct CastExpr {
     pub expr: Box<ExprNode>,
     pub target_type: TypeNode,
@@ -412,7 +400,6 @@ pub enum ExprNode {
 
     AddressOf(AddressOfExpr),
 
-    PointerOp(PointerOpExpr),
 
     HeapAlloc(HeapAllocExpr),
 
@@ -729,7 +716,6 @@ impl Spanned for ExprNode {
             ExprNode::MemberAccess(member_access_expr) => member_access_expr.span.clone(),
             ExprNode::Deref(deref_expr) => deref_expr.span.clone(),
             ExprNode::AddressOf(address_of_expr) => address_of_expr.span.clone(),
-            ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.span.clone(),
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.span.clone(),
             ExprNode::Array(array_expr) => array_expr.span.clone(),
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.span.clone(),

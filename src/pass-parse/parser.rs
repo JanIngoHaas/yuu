@@ -31,7 +31,6 @@ impl Parser {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
             TokenKind::MultiDeref(_) | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
-            TokenKind::At => (12, 11), // Pointer instantiation type@expr (right-associative for chaining: i64@ptr@addr)
             TokenKind::AsKw => (11, 12), // Type casting expr as Type (left-associative)
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
@@ -45,7 +44,7 @@ impl Parser {
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
             TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => 13, // Unary operators bind tighter than * and +
-            TokenKind::At => 13, // Heap allocation operator @expr
+            TokenKind::NewKw => 13, // Heap allocation operator new expr
             _ => -1,
         }
     }
@@ -57,8 +56,8 @@ impl Parser {
         span: Span,
     ) -> ParseResult<(Span, ExprNode)> {
         match op.kind {
-            TokenKind::At => {
-                // Handle heap allocation: @expr
+            TokenKind::NewKw => {
+                // Handle heap allocation: new expr
                 let span_copy = span.clone();
                 let heap_alloc = HeapAllocExpr {
                     expr: Box::new(operand),
@@ -148,7 +147,7 @@ impl Parser {
                 }
             }
 
-            TokenKind::Plus | TokenKind::Minus | TokenKind::At | TokenKind::Tilde => {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::NewKw | TokenKind::Tilde => {
                 let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
@@ -448,24 +447,6 @@ impl Parser {
             }
         }
     }
-    pub fn parse_pointer_op_expr(
-        &mut self,
-        lhs: ExprNode,
-        _op_token: Token,
-        min_binding_power: i32,
-    ) -> ParseResult<(Span, ExprNode)> {
-        let (rhs_span, rhs) = self.parse_expr_chain(min_binding_power)?;
-        let span = lhs.span().start..rhs_span.end;
-        Ok((
-            span.clone(),
-            ExprNode::PointerOp(PointerOpExpr {
-                left: Box::new(lhs),
-                right: Box::new(rhs),
-                span,
-                id: 0,
-            }),
-        ))
-    }
 
     pub fn parse_cast_expr(
         &mut self,
@@ -518,9 +499,6 @@ impl Parser {
                 | TokenKind::GtEq
                 | TokenKind::EqEq => {
                     lhs = self.parse_bin_expr(lhs.1, op.clone(), right_binding_power)?;
-                }
-                TokenKind::At => {
-                    lhs = self.parse_pointer_op_expr(lhs.1, op.clone(), right_binding_power)?;
                 }
                 TokenKind::AsKw => {
                     lhs = self.parse_cast_expr(lhs.1, op.clone())?;

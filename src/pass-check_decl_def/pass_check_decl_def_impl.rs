@@ -179,10 +179,6 @@ impl CheckDeclDefAnalyzer<'_> {
             ExprNode::AddressOf(address_of_expr) => {
                 self.check_expr(&address_of_expr.expr, decls, defs);
             }
-            ExprNode::PointerOp(pointer_op_expr) => {
-                self.check_expr(&pointer_op_expr.left, decls, defs);
-                self.check_expr(&pointer_op_expr.right, decls, defs);
-            }
             ExprNode::HeapAlloc(heap_alloc_expr) => {
                 self.check_expr(&heap_alloc_expr.expr, decls, defs);
             }

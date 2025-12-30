@@ -12,7 +12,7 @@ use crate::{
     }, utils::{
         TypeRegistry, calculate_type_layout,
         collections::{FastHashMap, IndexMap},
-        type_info_table::{TypeInfo, primitive_u64},
+        type_info_table::{TypeInfo, PrimitiveType, primitive_u64},
     }
 };
 
@@ -74,6 +74,152 @@ impl<'a> TransientData<'a> {
         self.type_info_table
             .get(node_id)
             .unwrap_or_else(|| panic!("No type info found for node {}", node_id))
+    }
+
+    /// Lower built-in primitive arithmetic operations (i64 + i64, f32 * f32, etc.)
+    fn lower_builtin_binary_op(
+        &mut self,
+        bin_expr: &crate::pass_parse::ast::BinaryExpr,
+        lhs_operand: Operand,
+        rhs_operand: Operand,
+        result_ty: &'static TypeInfo,
+        context: ContextKind,
+    ) -> Operand {
+        let op = match bin_expr.op {
+            BinOp::Add => YirBinOp::Add,
+            BinOp::Subtract => YirBinOp::Sub,
+            BinOp::Multiply => YirBinOp::Mul,
+            BinOp::Divide => YirBinOp::Div,
+            BinOp::Modulo => YirBinOp::Mod,
+            BinOp::Eq => YirBinOp::Eq,
+            BinOp::NotEq => YirBinOp::NotEq,
+            BinOp::Lt => YirBinOp::LessThan,
+            BinOp::LtEq => YirBinOp::LessThanEq,
+            BinOp::Gt => YirBinOp::GreaterThan,
+            BinOp::GtEq => YirBinOp::GreaterThanEq,
+        };
+
+        let result_var = self.function.make_binary(
+            "bin_result".intern(),
+            op,
+            lhs_operand,
+            rhs_operand,
+            result_ty,
+        );
+        self.add_temporary(result_var);
+        let result_operand = Operand::Variable(result_var);
+
+        match context {
+            ContextKind::AsIs => result_operand,
+            ContextKind::StorageLocation => {
+                let storage_var = self.function.make_alloca_single(
+                    "bin_result_storage".intern(),
+                    result_ty,
+                    None,
+                );
+                self.add_temporary(storage_var);
+                self.function.make_store(storage_var, result_operand);
+                Operand::Variable(storage_var)
+            }
+        }
+    }
+
+    /// Lower pointer arithmetic operations (ptr + int, ptr - int, ptr - ptr)
+    /// Returns Some(operand) if this is a valid pointer arithmetic operation, None otherwise
+    fn try_lower_pointer_arithmetic(
+        &mut self,
+        bin_expr: &crate::pass_parse::ast::BinaryExpr,
+        lhs_operand: Operand,
+        rhs_operand: Operand,
+        lhs_type: &'static TypeInfo,
+        rhs_type: &'static TypeInfo,
+        result_ty: &'static TypeInfo,
+        context: ContextKind,
+    ) -> Option<Operand> {
+        use TypeInfo::*;
+        use PrimitiveType::*;
+
+        let result_operand = match (bin_expr.op, lhs_type, rhs_type) {
+            // pointer + integer = pointer
+            (BinOp::Add, Pointer(_), BuiltInPrimitive(I64 | U64)) => {
+                let result_var = self.function.make_get_element_ptr(
+                    "ptr_offset".intern(),
+                    lhs_operand,
+                    rhs_operand,
+                );
+                self.add_temporary(result_var);
+                Operand::Variable(result_var)
+            }
+
+            // pointer - integer = pointer
+            (BinOp::Subtract, Pointer(_), BuiltInPrimitive(I64 | U64)) => {
+                // Negate the index for subtraction
+                let negated_var = self.function.make_unary(
+                    "negated_index".intern(),
+                    rhs_type,
+                    YirUnaryOp::Neg,
+                    rhs_operand,
+                );
+                self.add_temporary(negated_var);
+
+                let result_var = self.function.make_get_element_ptr(
+                    "ptr_offset".intern(),
+                    lhs_operand,
+                    Operand::Variable(negated_var),
+                );
+                self.add_temporary(result_var);
+                Operand::Variable(result_var)
+            }
+
+            // pointer - pointer = integer (distance calculation)
+            (BinOp::Subtract, Pointer(_), Pointer(_)) => {
+                // Emit a binary operation for pointer subtraction
+                // This should calculate the distance between pointers
+                let result_var = self.function.make_binary(
+                    "ptr_distance".intern(),
+                    YirBinOp::Sub,
+                    lhs_operand,
+                    rhs_operand,
+                    result_ty,
+                );
+                self.add_temporary(result_var);
+                Operand::Variable(result_var)
+            }
+
+            // Not a pointer arithmetic operation
+            _ => return None,
+        };
+
+        Some(match context {
+            ContextKind::AsIs => result_operand,
+            ContextKind::StorageLocation => {
+                let storage_var = self.function.make_alloca_single(
+                    "ptr_storage".intern(),
+                    result_ty,
+                    None,
+                );
+                self.add_temporary(storage_var);
+                self.function.make_store(storage_var, result_operand);
+                Operand::Variable(storage_var)
+            }
+        })
+    }
+
+    /// Placeholder for lowering user-defined operator function calls
+    fn lower_user_defined_binary_op(
+        &mut self,
+        _bin_expr: &crate::pass_parse::ast::BinaryExpr,
+        _lhs_operand: Operand,
+        _rhs_operand: Operand,
+        _result_ty: &'static TypeInfo,
+        _context: ContextKind,
+    ) -> Operand {
+        // TODO: Implement user-defined operator function calls
+        // This will involve:
+        // 1. Looking up the binding ID from the bindings table
+        // 2. Emitting a function call instruction with the operands as arguments
+        // 3. Handling the return value properly based on context
+        todo!("User-defined operator function calls not yet implemented in YIR lowering")
     }
 
     fn push_scope(&mut self) {
@@ -184,55 +330,31 @@ impl<'a> TransientData<'a> {
                 }
             }
             ExprNode::Binary(bin_expr) => {
-                // Determine operands. Note: these are "values", not necessarily storage locations.
-                let lhs_val_operand = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
-                let rhs_val_operand = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
+                // Lower operands first
+                let lhs_operand = self.lower_expr(&bin_expr.left, ContextKind::AsIs);
+                let rhs_operand = self.lower_expr(&bin_expr.right, ContextKind::AsIs);
 
-                // The overall type of the binary expression, as inferred by the type checker.
+                // Get operand types for dispatch
+                let lhs_type = self.get_type(bin_expr.left.node_id());
+                let rhs_type = self.get_type(bin_expr.right.node_id());
                 let result_ty = self.get_type(bin_expr.id);
 
-                let op = match bin_expr.op {
-                    BinOp::Add => YirBinOp::Add,
-                    BinOp::Subtract => YirBinOp::Sub,
-                    BinOp::Multiply => YirBinOp::Mul,
-                    BinOp::Divide => YirBinOp::Div,
-                    BinOp::Modulo => YirBinOp::Mod,
-                    BinOp::Eq => YirBinOp::Eq,
-                    BinOp::NotEq => YirBinOp::NotEq,
-                    BinOp::Lt => YirBinOp::LessThan,
-                    BinOp::LtEq => YirBinOp::LessThanEq,
-                    BinOp::Gt => YirBinOp::GreaterThan,
-                    BinOp::GtEq => YirBinOp::GreaterThanEq,
-                };
+                // Type-based dispatch following the same pattern as type inference
 
-                let result_var = self.function.make_binary(
-                    "bin_result".intern(),
-                    op,
-                    lhs_val_operand,
-                    rhs_val_operand,
-                    result_ty,
-                );
-                self.add_temporary(result_var);
-                let result_operand = Operand::Variable(result_var);
-
-                match context {
-                    ContextKind::AsIs => result_operand,
-                    ContextKind::StorageLocation => {
-                        if result_operand == Operand::NoOp {
-                            unreachable!(
-                                "Compiler bug: Cannot get storage location for NoOp operand from binary expression"
-                            );
-                        }
-                        let storage_var = self.function.make_alloca_single(
-                            "bin_result_storage".intern(),
-                            result_ty,
-                            None,
-                        );
-                        self.add_temporary(storage_var);
-                        self.function.make_store(storage_var, result_operand);
-                        Operand::Variable(storage_var)
-                    }
+                // Case 1: Built-in primitive arithmetic (i64 + i64, f32 * f32, etc.)
+                if let (TypeInfo::BuiltInPrimitive(a), TypeInfo::BuiltInPrimitive(b)) = (lhs_type, rhs_type)
+                && a == b
+                {
+                    return self.lower_builtin_binary_op(bin_expr, lhs_operand, rhs_operand, result_ty, context);
                 }
+
+                // Case 2: Try pointer arithmetic operations
+                if let Some(result) = self.try_lower_pointer_arithmetic(bin_expr, lhs_operand, rhs_operand, lhs_type, rhs_type, result_ty, context) {
+                    return result;
+                }
+
+                // Case 3: User-defined operations - emit function call
+                self.lower_user_defined_binary_op(bin_expr, lhs_operand, rhs_operand, result_ty, context)
             }
             ExprNode::Unary(un_expr) => {
                 let operand = self.lower_expr(&un_expr.expr, ContextKind::AsIs);
@@ -733,20 +855,6 @@ impl<'a> TransientData<'a> {
 
                 self.add_temporary(ptr_var);
                 Operand::Variable(ptr_var)
-            }
-            ExprNode::PointerOp(pointer_op_expr) => {
-                debug_assert_eq!(context, ContextKind::AsIs);
-
-                let lhs_operand = self.lower_expr(&pointer_op_expr.left, ContextKind::AsIs);
-                let rhs_operand = self.lower_expr(&pointer_op_expr.right, ContextKind::AsIs);
-
-                let result_var = self.function.make_get_element_ptr(
-                    "ptr_offset".intern(),
-                    lhs_operand,
-                    rhs_operand,
-                );
-                self.add_temporary(result_var);
-                Operand::Variable(result_var)
             }
             ExprNode::Cast(cast_expr) => {
                 debug_assert_eq!(context, ContextKind::AsIs);

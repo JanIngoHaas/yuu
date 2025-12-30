@@ -6,9 +6,9 @@ use crate::pass_parse::ast::{
     LValueKind, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
     UnaryOp,
 };
-use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, DerefExpr, HeapAllocExpr};
+use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, BinOp, DerefExpr, HeapAllocExpr};
 use crate::pass_type_inference::pass_type_inference_impl::TransientData;
-use crate::utils::type_info_table::PrimitiveType;
+use crate::utils::type_info_table::{PrimitiveType, primitive_bool};
 use crate::utils::type_info_table::{
     TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
 };
@@ -45,44 +45,6 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
     out
 }
 
-fn infer_pointer_op_expr(
-    pointer_op_expr: &crate::pass_parse::ast::PointerOpExpr,
-    block_id: usize,
-    data: &mut TransientData,
-) -> &'static TypeInfo {
-    let lhs_type = infer_expr(&pointer_op_expr.left, block_id, data, None);
-    let rhs_type = infer_expr(&pointer_op_expr.right, block_id, data, None);
-
-    // Check if LHS is a pointer and RHS is integer
-    if let TypeInfo::Pointer(_) = lhs_type
-        && matches!(
-            rhs_type,
-            TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
-                | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
-        ) {
-        // Pointer arithmetic: returns same pointer type
-        data.type_info_table.insert(pointer_op_expr.id, lhs_type);
-        return lhs_type;
-    }
-
-    let err = YuuError::builder()
-        .kind(ErrorKind::InvalidPointerArithmetic)
-        .message(format!(
-            "Invalid pointer arithmetic: '{}' @ '{}'",
-            lhs_type, rhs_type
-        ))
-        .source(
-            data.src_code.source.clone(),
-            data.src_code.file_name.clone(),
-        )
-        .span(pointer_op_expr.span.clone(), "invalid pointer operation")
-        .help("The @ operator requires a pointer on the left and an integer offset on the right")
-        .build();
-    data.errors.push(err);
-    data.type_info_table
-        .insert(pointer_op_expr.id, error_type());
-    error_type()
-}
 
 fn infer_cast_expr(
     cast_expr: &crate::pass_parse::ast::CastExpr,
@@ -126,6 +88,68 @@ fn infer_free_op(
     }
 }
 
+/// Fast-path for built-in primitive arithmetic operations.
+///
+/// This handles operations between identical primitive types (i64 + i64, f32 * f32, etc.)
+/// without going through function resolution. This prevents users from overloading
+/// core arithmetic operations and provides better performance.
+///
+/// Returns Some(result_type) if this is a built-in operation, None otherwise.
+fn try_builtin_primitive_arithmetic(
+    op: BinOp,
+    lhs_type: &'static TypeInfo,
+    rhs_type: &'static TypeInfo,
+) -> Option<&'static TypeInfo> {
+    // Only handle operations between identical primitive types
+    if let (TypeInfo::BuiltInPrimitive(prim_a), TypeInfo::BuiltInPrimitive(prim_b)) = (lhs_type, rhs_type) && prim_a == prim_b {
+        match op {
+            // Arithmetic operations return the same type
+            BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide | BinOp::Modulo => {
+                Some(lhs_type)
+            }
+            // Comparison operations return bool
+            BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq => {
+                Some(primitive_bool())
+            }
+        }
+    } else {
+        None
+    }
+}
+
+/// Fast-path for pointer arithmetic operations.
+///
+/// This handles:
+/// - pointer + integer = pointer (offset calculation)
+/// - pointer - integer = pointer (offset calculation)
+/// - pointer - pointer = integer (distance calculation)
+///
+/// These operations don't go through function resolution as they're fundamental
+/// to the language's pointer semantics.
+///
+/// Returns Some(result_type) if this is pointer arithmetic, None otherwise.
+fn try_pointer_arithmetic(
+    op: BinOp,
+    lhs_type: &'static TypeInfo,
+    rhs_type: &'static TypeInfo,
+) -> Option<&'static TypeInfo> {
+    use TypeInfo::*;
+    use PrimitiveType::*;
+
+    match (op, lhs_type, rhs_type) {
+        // pointer + integer = pointer
+        (BinOp::Add, Pointer(_), BuiltInPrimitive(I64 | U64)) => Some(lhs_type),
+
+        // pointer - integer = pointer
+        (BinOp::Subtract, Pointer(_), BuiltInPrimitive(I64 | U64)) => Some(lhs_type),
+
+        // pointer - pointer = integer (distance)
+        (BinOp::Subtract, Pointer(_), Pointer(_)) => Some(primitive_i64()),
+
+        _ => None,
+    }
+}
+
 fn infer_binary_expr(
     binary_expr: &BinaryExpr,
     block_id: usize,
@@ -135,9 +159,25 @@ fn infer_binary_expr(
     let expr_span = binary_expr.span.clone();
     let op_name = binary_expr.op.static_name();
 
-    // Standard logic for all binary ops
     let lhs_type_actual = infer_expr(&binary_expr.left, block_id, data, None);
     let rhs_type_actual = infer_expr(&binary_expr.right, block_id, data, None);
+
+    // Fast-path 1: Built-in primitive arithmetic (i64 + i64, f32 * f32, etc.)
+    // This prevents users from overloading core arithmetic operations
+    if let Some(result_type) = try_builtin_primitive_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual) {
+        data.type_info_table.insert(expr_id, result_type);
+        return result_type;
+    }
+
+    // Fast-path 2: Pointer arithmetic (ptr + int, ptr - ptr, etc.)
+    // These are fundamental language operations, not user-overloadable
+    if let Some(result_type) = try_pointer_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual) {
+        data.type_info_table.insert(expr_id, result_type);
+        return result_type;
+    }
+
+    // Standard path: Function resolution for user-defined types and mixed operations
+    // This handles user-defined operators, type conversions, and error cases
     let resolved_type = resolve_binary_overload(
         op_name,
         lhs_type_actual,
@@ -821,9 +861,6 @@ pub fn infer_expr(
         ExprNode::Array(array_expr) => infer_array_expr(array_expr, block_id, data),
         ExprNode::ArrayLiteral(array_literal_expr) => {
             infer_array_literal_expr(array_literal_expr, block_id, data)
-        }
-        ExprNode::PointerOp(pointer_op_expr) => {
-            infer_pointer_op_expr(pointer_op_expr, block_id, data)
         }
         ExprNode::Cast(cast_expr) => infer_cast_expr(cast_expr, block_id, data),
         ExprNode::LuaMeta(_) => {

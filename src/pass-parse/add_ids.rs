@@ -131,11 +131,6 @@ impl AddId for ExprNode {
                     element_type.add_id(generator);
                 }
             }
-            ExprNode::PointerOp(pointer_op_expr) => {
-                pointer_op_expr.id = generator.next_expr();
-                pointer_op_expr.left.add_id(generator);
-                pointer_op_expr.right.add_id(generator);
-            }
             ExprNode::Cast(cast_expr) => {
                 cast_expr.id = generator.next_expr();
                 cast_expr.expr.add_id(generator);
@@ -409,7 +404,6 @@ impl GetId for ExprNode {
             ExprNode::HeapAlloc(heap_alloc_expr) => heap_alloc_expr.id,
             ExprNode::Array(array_expr) => array_expr.id,
             ExprNode::ArrayLiteral(array_literal_expr) => array_literal_expr.id,
-            ExprNode::PointerOp(pointer_op_expr) => pointer_op_expr.id,
             ExprNode::Cast(cast_expr) => cast_expr.id,
             ExprNode::LuaMeta(lua_meta) => lua_meta.id,
         }

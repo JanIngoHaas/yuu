@@ -129,6 +129,9 @@ pub enum TokenKind {
     #[token("fn")]
     FnKw,
 
+    #[token("new")]
+    NewKw,
+
     #[token("as")]
     AsKw,
 
@@ -263,6 +266,7 @@ impl Display for TokenKind {
             TokenKind::LetKw => "'let'".fmt(f),
             TokenKind::MutKw => "'mut'".fmt(f),
             TokenKind::FnKw => "'fn'".fmt(f),
+            TokenKind::NewKw => "'new'".fmt(f),
             TokenKind::AsKw => "'as'".fmt(f),
             TokenKind::Arrow => "'->'".fmt(f),
             TokenKind::FatArrow => "'=>'".fmt(f),
