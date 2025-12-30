@@ -6,7 +6,7 @@ fn test_basic_heap_allocation() {
     let source = r#"
 fn main() -> i64:
     let heap_ptr = new 42;
-    return heap_ptr.* .
+    return *heap_ptr .
     "#;
 
     let executable =
@@ -21,7 +21,7 @@ fn test_heap_allocation_with_expressions() {
 fn main() -> i64:
     let base = 10;
     let heap_ptr = new (base * 4 + 2);
-    let out = heap_ptr.*;
+    let out = *heap_ptr;
     ~heap_ptr;
     return out .
     "#;
@@ -43,7 +43,7 @@ end
 
 fn main() -> i64:
     let heap_point = new Point { x: 15, y: 25 };
-    let result = heap_point.*.x + heap_point.*.y;
+    let result = heap_point.x + heap_point.y;
     ~heap_point;
     return result .
     "#;
@@ -60,9 +60,9 @@ fn test_heap_allocation_modification() {
     let source = r#"
 fn main() -> i64:
     let heap_ptr = new 100;
-    heap_ptr.* = heap_ptr.* + 50;
-    heap_ptr.* = heap_ptr.* / 3;
-    let result = heap_ptr.*;
+    *heap_ptr = *heap_ptr + 50;
+    *heap_ptr = *heap_ptr / 3;
+    let result = *heap_ptr;
     ~heap_ptr;
     return result .
     "#;
@@ -82,7 +82,7 @@ fn main() -> i64:
     let ptr2 = new 20;
     let ptr3 = new 30;
 
-    let result = ptr1.* + ptr2.* + ptr3.*;
+    let result = *ptr1 + *ptr2 + *ptr3;
     ~ptr1;
     ~ptr2;
     ~ptr3;
@@ -107,7 +107,7 @@ end
 fn main() -> i64:
     let heap_status = new Status::Processing(42);
     let result = 0;
-    match heap_status.*:
+    match *heap_status:
         Status::Ready: result = 0 .
         Status::Processing(value): result = value .
     end
@@ -129,7 +129,7 @@ fn allocate_and_return(value: i64) -> *i64:
 
 fn main() -> i64:
     let ptr = allocate_and_return(99);
-    let result = ptr.*;
+    let result = *ptr;
     ~ptr;
     return result .
     "#;
@@ -145,8 +145,8 @@ fn test_nested_heap_allocations() {
     let source = r#"
 fn main() -> i64:
     let ptr_to_ptr = new new 42;  // Heap allocate a heap-allocated value
-    let inner_ptr = ptr_to_ptr.*;
-    let result = inner_ptr.*;
+    let inner_ptr = *ptr_to_ptr;
+    let result = *inner_ptr;
     ~inner_ptr;
     ~ptr_to_ptr;
     return result .
@@ -163,7 +163,7 @@ fn test_heap_free() {
     let source = r#"
 fn main() -> i64:
     let heap_ptr = new 42;
-    let result = heap_ptr.*;
+    let result = *heap_ptr;
     ~heap_ptr;
     return result .
     "#;
@@ -183,7 +183,7 @@ end
 
 fn main() -> i64:
     let p = new Point { x: 10, y: 20 };
-    let val = p.*.x + p.*.y;
+    let val = p.x + p.y;
     ~p;
     return val .
     "#;

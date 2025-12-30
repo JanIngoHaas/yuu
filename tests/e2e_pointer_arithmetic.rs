@@ -19,7 +19,7 @@ fn main() -> i64:
     let ptr4 = base_ptr + 3;  // points to arr[3] = 40
 
     // Dereference and sum the values
-    let sum = ptr1.* + ptr2.* + ptr3.* + ptr4.*;
+    let sum = *ptr1 + *ptr2 + *ptr3 + *ptr4;
     return sum .  // Should be 10 + 20 + 30 + 40 = 100
     "#;
 
@@ -46,7 +46,7 @@ fn main() -> i64:
     let forward2 = middle_ptr + 2;  // points to arr[4] = 5
 
     // Sum all accessed values
-    let sum = back2.* + back1.* + middle_ptr.* + forward1.* + forward2.*;
+    let sum = *back2 + *back1 + *middle_ptr + *forward1 + *forward2;
     return sum .  // Should be 1 + 2 + 3 + 4 + 5 = 15
     "#;
 
@@ -74,8 +74,8 @@ fn main() -> i64:
     let p2 = points + 2;
 
     // Access fields through pointers
-    let sum_x = p0.*.x + p1.*.x + p2.*.x;  // Should be 1 + 1 + 1 = 3
-    let sum_y = p0.*.y + p1.*.y + p2.*.y;  // Should be 2 + 2 + 2 = 6
+    let sum_x = p0.x + p1.x + p2.x;  // Should be 1 + 1 + 1 = 3
+    let sum_y = p0.y + p1.y + p2.y;  // Should be 2 + 2 + 2 = 6
 
     return sum_x + sum_y .  // Should be 3 + 6 = 9
     "#;
@@ -103,8 +103,8 @@ fn main() -> i64:
     let direct_ptr = base + 4;  // should also point to arr[4] = 500
 
     // Both should access the same value
-    let val1 = ptr3.*;
-    let val2 = direct_ptr.*;
+    let val1 = *ptr3;
+    let val2 = *direct_ptr;
 
     return val1 + val2 .  // Should be 500 + 500 = 1000
     "#;
@@ -131,7 +131,7 @@ fn main() -> i64:
     let second = arr_ptr + 1;
     let third = arr_ptr + 2;
 
-    let sum = first.* + second.* + third.*;
+    let sum = *first + *second + *third;
     return sum .  // Should be 42 + 84 + 126 = 252
     "#;
 
@@ -146,7 +146,7 @@ fn test_dynamic_pointer_arithmetic() {
     let source = r#"
 fn access_element(arr: *i64, index: i64) -> i64:
     let ptr = arr + index;
-    return ptr.* .
+    return *ptr .
 
 fn main() -> i64:
     let numbers = [5, 10, 15, 20, 25];
@@ -181,7 +181,7 @@ fn main() -> i64:
     let ptr4 = heap_arr + 4;   // points to heap_arr[4] = 500
 
     // Sum values accessed through pointer arithmetic
-    let sum = ptr0.* + ptr1.* + ptr2.* + ptr4.*;
+    let sum = *ptr0 + *ptr1 + *ptr2 + *ptr4;
 
     // Free the heap memory
     ~heap_arr;
@@ -214,8 +214,8 @@ fn main() -> i64:
     let p3 = heap_points + 3;
 
     // Access struct fields through pointers
-    let total_x = p0.*.x + p1.*.x + p2.*.x + p3.*.x;  // 10 * 4 = 40
-    let total_y = p0.*.y + p1.*.y + p2.*.y + p3.*.y;  // 20 * 4 = 80
+    let total_x = p0.x + p1.x + p2.x + p3.x;  // 10 * 4 = 40
+    let total_y = p0.y + p1.y + p2.y + p3.y;  // 20 * 4 = 80
 
     // Free the heap memory
     ~heap_points;

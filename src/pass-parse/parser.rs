@@ -30,7 +30,6 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
-            TokenKind::MultiDeref(_) | TokenKind::DotAmpersand => (13, 0), // Postfix operators: no right-hand side
             TokenKind::AsKw => (11, 12), // Type casting expr as Type (left-associative)
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
@@ -44,6 +43,7 @@ impl Parser {
     fn get_prefix_precedence(op: &TokenKind) -> i32 {
         match op {
             TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => 13, // Unary operators bind tighter than * and +
+            TokenKind::Asterix | TokenKind::Ampersand => 12, // Dereference and address-of have lower precedence than member access (like C)
             TokenKind::NewKw => 13, // Heap allocation operator new expr
             _ => -1,
         }
@@ -65,6 +65,26 @@ impl Parser {
                     id: 0,
                 };
                 Ok((span_copy, ExprNode::HeapAlloc(heap_alloc)))
+            }
+            TokenKind::Asterix => {
+                // Handle dereference: *expr
+                let span_copy = span.clone();
+                let deref_expr = DerefExpr {
+                    expr: Box::new(operand),
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::Deref(deref_expr)))
+            }
+            TokenKind::Ampersand => {
+                // Handle address-of: &expr
+                let span_copy = span.clone();
+                let address_of_expr = AddressOfExpr {
+                    expr: Box::new(operand),
+                    span,
+                    id: 0,
+                };
+                Ok((span_copy, ExprNode::AddressOf(address_of_expr)))
             }
             TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => {
                 let unary_op = match op.kind {
@@ -147,7 +167,7 @@ impl Parser {
                 }
             }
 
-            TokenKind::Plus | TokenKind::Minus | TokenKind::NewKw | TokenKind::Tilde => {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::NewKw | TokenKind::Tilde | TokenKind::Asterix | TokenKind::Ampersand => {
                 let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
@@ -385,7 +405,7 @@ impl Parser {
         Ok((overall_span, StmtNode::If(if_stmt)))
     }
 
-    // What if member is a function pointer? Then transforming as we do it here, won't work. The function pointer call has to be resolved explicitly through "a.*b()" syntax...
+    // What if member is a function pointer? Then transforming as we do it here, won't work. The function pointer call has to be resolved explicitly through "*a.b()" syntax...
     pub fn parse_member_access_expr(
         &mut self,
         lhs: ExprNode,
@@ -511,12 +531,6 @@ impl Parser {
                 }
                 TokenKind::Dot => {
                     lhs = self.parse_member_access_expr(lhs.1, op.clone(), right_binding_power)?;
-                }
-                TokenKind::MultiDeref(count) => {
-                    lhs = self.parse_multi_deref_expr(lhs.1, op.clone(), count)?;
-                }
-                TokenKind::DotAmpersand => {
-                    lhs = self.parse_address_of_expr(lhs.1, op.clone())?;
                 }
                 _ => break,
             }

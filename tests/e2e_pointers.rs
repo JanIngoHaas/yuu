@@ -7,12 +7,12 @@ fn test_basic_pointer_arithmetic() {
 fn main() -> i64:
     let x = 12;
     let y = 4;
-    let ptr_x = x.&;
-    let ptr_y = y.&;
+    let ptr_x = &x;
+    let ptr_y = &y;
 
     // Mixed arithmetic operations through pointers
-    let result1 = ptr_x.* * ptr_y.* / 2 + ptr_x.* % ptr_y.*;
-    let result2 = (ptr_x.* + ptr_y.*) * (ptr_x.* - ptr_y.*) / ptr_y.*;
+    let result1 = *ptr_x * *ptr_y / 2 + *ptr_x % *ptr_y;
+    let result2 = (*ptr_x + *ptr_y) * (*ptr_x - *ptr_y) / *ptr_y;
 
     return result1 + result2 .
     "#;
@@ -29,12 +29,12 @@ fn test_multi_level_pointer_arithmetic() {
     let source = r#"
 fn main() -> i64:
     let base = 8;
-    let ptr1 = base.&;
-    let ptr2 = ptr1.&;
-    let ptr3 = ptr2.&;
+    let ptr1 = &base;
+    let ptr2 = &ptr1;
+    let ptr3 = &ptr2;
 
     // Complex nested arithmetic
-    return ptr3.*** * ptr2.** / ptr1.* + ptr3.*** % 5 .
+    return ***ptr3 * **ptr2 / *ptr1 + ***ptr3 % 5 .
     "#;
 
     let executable = run_to_executable(source, "test_multi_level_pointer_arithmetic.yuu")
@@ -49,10 +49,10 @@ fn test_pointer_assignment_with_arithmetic() {
     let source = r#"
 fn main() -> i64:
     let mut accumulator = 100;
-    let acc_ptr = accumulator.&;
+    let acc_ptr = &accumulator;
 
-    acc_ptr.* = acc_ptr.* * 2 / 3 + 15;
-    acc_ptr.* = acc_ptr.* - acc_ptr.* % 7;
+    *acc_ptr = *acc_ptr * 2 / 3 + 15;
+    *acc_ptr = *acc_ptr - *acc_ptr % 7;
 
     return accumulator .
     "#;
@@ -73,10 +73,10 @@ fn calculate(a: i64, b: i64) -> i64:
 fn main() -> i64:
     let a = 15;
     let b = 3;
-    let ptr_a = a.&;
-    let ptr_b = b.&;
+    let ptr_a = &a;
+    let ptr_b = &b;
 
-    return calculate(ptr_a.* * 2, ptr_b.* + 1) .
+    return calculate(*ptr_a * 2, *ptr_b + 1) .
     "#;
 
     let executable = run_to_executable(source, "test_function_with_pointer_arithmetic.yuu")
@@ -95,8 +95,8 @@ fn main() -> i64:
 //     let option2: i64 = 30;
 //     let multiplier: i64 = 3;
 
-//     let selected_ptr = if flag: option1.& . else { option2.& }
-//     return selected_ptr.* * multiplier / 2 + selected_ptr.* % multiplier .
+//     let selected_ptr = if flag: &option1 . else { &option2 }
+//     return *selected_ptr * multiplier / 2 + *selected_ptr % multiplier .
 //     "#;
 
 //     let executable = run_to_executable(source, "test_conditional_pointer_arithmetic.yuu").expect("Failed to compile");
@@ -110,13 +110,13 @@ fn test_quadruple_pointer_arithmetic() {
     let source = r#"
 fn main() -> i64:
     let mut deep_value = 6;
-    let level1 = deep_value.&;
-    let level2 = level1.&;
-    let level3 = level2.&;
-    let level4 = level3.&;
+    let level1 = &deep_value;
+    let level2 = &level1;
+    let level3 = &level2;
+    let level4 = &level3;
 
     // Deep arithmetic assignment
-    level4.**** = level4.**** * level4.**** / 2 + level4.**** % 3;
+    ****level4 = ****level4 * ****level4 / 2 + ****level4 % 3;
 
     return deep_value .
     "#;
@@ -134,13 +134,13 @@ fn test_pointer_arithmetic_swap() {
 fn main() -> i64:
     let mut val1 = 45;
     let mut val2 = 18;
-    let p1 = val1.&;
-    let p2 = val2.&;
+    let p1 = &val1;
+    let p2 = &val2;
 
     // Arithmetic swap
-    p1.* = p1.* + p2.*;
-    p2.* = p1.* - p2.*;
-    p1.* = p1.* - p2.*;
+    *p1 = *p1 + *p2;
+    *p2 = *p1 - *p2;
+    *p1 = *p1 - *p2;
 
     return val1 + val2 .
     "#;
@@ -160,14 +160,14 @@ fn main() -> i64:
     let y = 5;
     let z = 2;
 
-    let px = x.&;
-    let py = y.&;
-    let pz = z.&;
+    let px = &x;
+    let py = &y;
+    let pz = &z;
 
-    let ppy = py.&;
+    let ppy = &py;
 
     // Complex expression mixing single and double pointers
-    return (px.* * ppy.** / pz.* + px.* % ppy.**) * (pz.* + 1) .
+    return (*px * **ppy / *pz + *px % **ppy) * (*pz + 1) .
     "#;
 
     let executable = run_to_executable(source, "test_complex_pointer_expression.yuu")
@@ -181,11 +181,11 @@ fn main() -> i64:
 fn test_pointer_function_modification() {
     let source = r#"
 fn modify_through_pointer(ptr: *i64, factor: i64):
-    ptr.* = ptr.* * factor / 2 + factor % 3 .
+    *ptr = *ptr * factor / 2 + factor % 3 .
 
 fn main() -> i64:
     let mut value = 20;
-    let ptr = value.&;
+    let ptr = &value;
 
     modify_through_pointer(ptr, 7);
 
@@ -209,14 +209,14 @@ end
 
 fn process_container(c: Container) -> i64:
     match c:
-        Container::IntPtr(ptr): return ptr.* * 2 .
+        Container::IntPtr(ptr): return *ptr * 2 .
         Container::Value(val): return val + 10 .
     end
 end
 
 fn main() -> i64:
     let mut x = 15;
-    let ptr = x.&;
+    let ptr = &x;
 
     let container1 = Container::IntPtr(ptr);
     let container2 = Container::Value(25);
@@ -244,15 +244,15 @@ struct PointerPair:
 end
 
 fn compute_through_pointers(pp: PointerPair) -> i64:
-    return pp.ptr1.* + pp.ptr2.* + pp.offset .
+    return *pp.ptr1 + *pp.ptr2 + pp.offset .
 
 fn main() -> i64:
     let mut a = 10;
     let mut b = 20;
 
     let pair = PointerPair {
-        ptr1: a.&,
-        ptr2: b.&,
+        ptr1: &a,
+        ptr2: &b,
         offset: 5
     };
 
@@ -276,7 +276,7 @@ enum Status:
 end
 
 fn get_status_value(status_ptr: *Status) -> i64:
-    match status_ptr.*:
+    match *status_ptr:
         Status::Ready: return 0 .
         Status::Processing(progress): return progress .
         Status::Done(result): return result + 100 .
@@ -288,9 +288,9 @@ fn main() -> i64:
     let mut status2 = Status::Processing(50);
     let mut status3 = Status::Done(42);
 
-    let ptr1 = status1.&;
-    let ptr2 = status2.&;
-    let ptr3 = status3.&;
+    let ptr1 = &status1;
+    let ptr2 = &status2;
+    let ptr3 = &status3;
 
     let r1 = get_status_value(ptr1);
     let r2 = get_status_value(ptr2);
@@ -315,11 +315,11 @@ struct Point:
 end
 
 fn distance_squared(p_ptr: *Point) -> i64:
-    return p_ptr.*.x * p_ptr.*.x + p_ptr.*.y * p_ptr.*.y .
+    return p_ptr.x * p_ptr.x + p_ptr.y * p_ptr.y .
 
 fn main() -> i64:
     let mut point = Point { x: 3, y: 4 };
-    let ptr = point.&;
+    let ptr = &point;
 
     return distance_squared(ptr) .
     "#;
@@ -349,7 +349,7 @@ fn process_data_container(dc: DataContainer) -> i64:
     match dc:
         DataContainer::Empty: return 0 .
         DataContainer::Reference(data_ptr):
-            return data_ptr.*.value * data_ptr.*.multiplier .
+            return data_ptr.value * data_ptr.multiplier .
         DataContainer::Copy(data):
             return data.value + data.multiplier .
     end
@@ -357,7 +357,7 @@ end
 
 fn main() -> i64:
     let mut data = Data { value: 6, multiplier: 7 };
-    let data_ptr = data.&;
+    let data_ptr = &data;
 
     let container1 = DataContainer::Empty;
     let container2 = DataContainer::Reference(data_ptr);
@@ -394,16 +394,16 @@ fn process_list_operation(op: ListOperation) -> i64:
     match op:
         ListOperation::Sum(total): return total .
         ListOperation::Traverse(node_ptr):
-            return node_ptr.*.value + node_ptr.*.next.*.value .
+            return node_ptr.value + node_ptr.next.value .
     end
 end
 
 fn main() -> i64:
     let mut node2 = Node { value: 20, next: 0 as *Node };
-    let mut node1 = Node { value: 10, next: node2.& };
+    let mut node1 = Node { value: 10, next: &node2 };
 
     let op1 = ListOperation::Sum(100);
-    let op2 = ListOperation::Traverse(node1.&);
+    let op2 = ListOperation::Traverse(&node1);
 
     let r1 = process_list_operation(op1);
     let r2 = process_list_operation(op2);
@@ -427,11 +427,11 @@ struct Calculator:
 end
 
 fn operate_through_pointer(calc_ptr: *Calculator, operand: i64):
-    calc_ptr.*.accumulator = calc_ptr.*.accumulator * calc_ptr.*.multiplier + operand .
+    calc_ptr.accumulator = calc_ptr.accumulator * calc_ptr.multiplier + operand .
 
 fn main() -> i64:
     let mut calc = Calculator { accumulator: 5, multiplier: 3 };
-    let ptr = calc.&;
+    let ptr = &calc;
 
     operate_through_pointer(ptr, 7);
 
@@ -461,8 +461,8 @@ end
 
 fn extract_value(pv: PointerVariants) -> i64:
     match pv:
-        PointerVariants::IntPtr(int_ptr): return int_ptr.* .
-        PointerVariants::StructPtr(point_ptr): return point_ptr.*.x + point_ptr.*.y .
+        PointerVariants::IntPtr(int_ptr): return *int_ptr .
+        PointerVariants::StructPtr(point_ptr): return point_ptr.x + point_ptr.y .
         PointerVariants::Nothing: return -1 .
     end
 end
@@ -471,8 +471,8 @@ fn main() -> i64:
     let mut num = 42;
     let mut point = Point { x: 10, y: 15 };
 
-    let variant1 = PointerVariants::IntPtr(num.&);
-    let variant2 = PointerVariants::StructPtr(point.&);
+    let variant1 = PointerVariants::IntPtr(&num);
+    let variant2 = PointerVariants::StructPtr(&point);
     let variant3 = PointerVariants::Nothing;
 
     let r1 = extract_value(variant1);

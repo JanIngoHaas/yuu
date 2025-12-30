@@ -221,15 +221,7 @@ pub enum TokenKind {
     #[token("&")]
     Ampersand,
 
-    #[regex(r"\.\*+", |lex| {
-        let s = lex.slice();
-        // Count asterisks after the dot
-        Some(s.chars().filter(|&c| c == '*').count())
-    })]
-    MultiDeref(usize),
 
-    #[token(".&")]
-    DotAmpersand,
 
     #[token("~")]
     Tilde,
@@ -304,8 +296,6 @@ impl Display for TokenKind {
             TokenKind::Dot => "'.'".fmt(f),
             TokenKind::At => "'@'".fmt(f),
             TokenKind::Ampersand => "'&'".fmt(f),
-            TokenKind::MultiDeref(count) => write!(f, "'.{}'", "*".repeat(*count)),
-            TokenKind::DotAmpersand => "'.&'".fmt(f),
             TokenKind::Tilde => "'~'".fmt(f),
             TokenKind::LuaMetaRaw => "'#...#' (Lua meta)".fmt(f),
             TokenKind::BlockTerminator => ".".fmt(f),

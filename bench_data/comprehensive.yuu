@@ -59,7 +59,7 @@ fn complex_calculation(n: i64) -> i64:
     };
 
     // Do some pointer arithmetic
-    let point_ptr = heap_point.*.x.&;
+    let point_ptr = heap_point.*.&x;
     point_ptr.* = point_ptr.* + 5;
 
     let area = rectangle_area(heap_rect.*);
