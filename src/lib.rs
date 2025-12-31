@@ -26,3 +26,6 @@ pub mod pass_yir_lowering;
 
 #[path = "pass-type_registration/mod.rs"]
 pub mod pass_type_registration;
+
+#[path = "pass-cranelift_lowering/mod.rs"]
+pub mod pass_yir_to_cranelift;

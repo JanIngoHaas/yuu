@@ -1233,7 +1233,7 @@ impl YirLowering {
                     let metadata = &structural.metadata;
 
                     let mut data = TransientData::new(
-                        Function::new(func.decl.name, return_type),
+                        Function::new(func.decl.name, structural.node.node_id(), return_type),
                         tr,
                         &metadata.type_info_table,
                         &metadata.binding_table,

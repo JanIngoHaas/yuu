@@ -330,6 +330,7 @@ impl BasicBlock {
 
 #[derive(Clone)]
 pub struct Function {
+    pub ast_id: usize,
     pub name: Ustr,
     pub params: Vec<Variable>,
     pub return_type: &'static TypeInfo,
@@ -342,14 +343,24 @@ pub struct Function {
 }
 
 impl Function {
+
+    pub fn split_ast_id(&self) -> (u32, u32) {
+        // TODO: Forbid usize == u32 ---> should be u64
+        // Assume usize == u64
+        let high = (self.ast_id >> 32) as u32;
+        let low = (self.ast_id & 0xFFFFFFFF) as u32;
+        (high, low)
+    }
+
     pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
         self.blocks
             .values()
             .flat_map(|block| block.calculate_var_decls())
     }
 
-    pub fn new(name: Ustr, return_type: &'static TypeInfo) -> Self {
+    pub fn new(name: Ustr, ast_id: usize, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
+            ast_id,
             name,
             params: Vec::new(),
             return_type,
