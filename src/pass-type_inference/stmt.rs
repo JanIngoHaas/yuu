@@ -310,7 +310,7 @@ fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut Transien
         && let TypeInfo::Enum(enum_type) = scrutinee_ty
         && let Some(enum_info) = data.type_registry.resolve_enum(enum_type.name)
     {
-        let all_variants: UstrIndexSet = enum_info.variants.keys().copied().collect();
+        let all_variants: UstrIndexSet = enum_info.variants_info.fields.keys().copied().collect();
         let missing_variants: Vec<_> = all_variants
             .difference(&covered_variants)
             .map(|v| format!("'{}'", v))

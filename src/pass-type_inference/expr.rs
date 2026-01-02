@@ -12,7 +12,7 @@ use crate::utils::type_info_table::{PrimitiveType, primitive_bool};
 use crate::utils::type_info_table::{
     TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
 };
-use crate::utils::EnumVariantInfo;
+use crate::utils::{UnionFieldInfo};
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
 
@@ -430,6 +430,23 @@ fn infer_func_call_expr(
             data.errors.push(err);
             error_type()
         }
+        TypeInfo::Union(u) => {
+            let err = YuuError::builder()
+                .kind(ErrorKind::NotCallable)
+                .message(format!(
+                    "Cannot call union type '{}' as a function",
+                    u.name
+                ))
+                .source(
+                    data.src_code.source.clone(),
+                    data.src_code.file_name.clone(),
+                )
+                .span(func_call_expr.lhs.span().clone(), format!("union type '{}', not callable", u.name))
+                .help("Unions cannot be called as functions")
+                .build();
+            data.errors.push(err);
+            error_type()
+        }
     };
 
     data.type_info_table
@@ -686,13 +703,13 @@ fn infer_member_access(
 
 fn validate_enum_variant_binding(
     ei: &EnumInstantiationExpr,
-    variant_info: &EnumVariantInfo,
+    variant_info: &UnionFieldInfo,
     block_id: usize,
     data: &mut TransientData,
     function_args: Option<&[&'static TypeInfo]>,
 ) {
     // Left: Maybe data associated with the enum instantiation, i.e. Option::Some(x) where x would be the data (syntactical), Right: Semantic type information about the enum variant, i.e. data type that the variant is associated and registered with
-    match (&ei.data, variant_info.variant) {
+    match (&ei.data, variant_info.ty.as_option_if_nil()) {
         // Yes, we have both
         (Some(dexpr), Some(reg_ty)) => {
             // Calculate type (semantic) from associated data (syntactical)
@@ -769,11 +786,11 @@ fn infer_enum_instantiation(
     let enum_type = data.type_registry.resolve_enum(ei.enum_name);
     let inferred_ty = match enum_type {
         Some(enum_info) => {
-            let variant_info_registered = enum_info.variants.get(&ei.variant_name);
+            let variant_info_registered = enum_info.variants_info.fields.get(&ei.variant_name);
             match variant_info_registered {
                 Some(variant) => {
                     validate_enum_variant_binding(ei, variant, block_id, data, function_args);
-                    enum_info.ty
+                    enum_info.wrapper_info.ty
                 }
                 None => {
                     let err = YuuError::builder()
@@ -790,11 +807,12 @@ fn infer_enum_instantiation(
                         .help(format!(
                             "Available variants for enum '{}': {}",
                             ei.enum_name,
-                            if enum_info.variants.is_empty() {
+                            if enum_info.variants_info.fields.is_empty() {
                                 "none".to_string()
                             } else {
                                 enum_info
-                                    .variants
+                                    .variants_info
+                                    .fields
                                     .keys()
                                     .map(|k| k.as_str())
                                     .collect::<Vec<_>>()
@@ -935,6 +953,22 @@ fn infer_address_of_expr(
     block_id: usize,
     data: &mut TransientData,
 ) -> &'static TypeInfo {
+    // Check that we can only take address of lvalues
+    if !address_of_expr.expr.is_lvalue() {
+        let error = YuuError::builder()
+            .kind(ErrorKind::InvalidAddressOfExpression)
+            .message("Can only take address of lvalues (variables, fields, array elements)")
+            .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+            .span(
+                (address_of_expr.span.start, address_of_expr.span.end - address_of_expr.span.start),
+                "cannot take address of expression"
+            )
+            .help("Bind the expression first and then take the address of the identifier. For example: let temp = a + b; &temp")
+            .build();
+        data.errors.push(error);
+        return crate::utils::type_info_table::error_type();
+    }
+
     let operand_type = infer_expr(&address_of_expr.expr, block_id, data, None);
 
     let result_type = operand_type.ptr_to();

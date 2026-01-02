@@ -42,6 +42,7 @@ pub enum ErrorKind {
     // Other semantic errors
     InvalidExpression,
     InvalidStatement,
+    InvalidAddressOfExpression,
     InfinitelySizedType,
     VariableAlreadyDefined,
     NonExhaustiveMatch,
@@ -74,6 +75,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::FreeNonPointer => write!(f, "Cannot free non-pointer"),
             ErrorKind::InvalidExpression => write!(f, "Invalid expression"),
             ErrorKind::InvalidStatement => write!(f, "Invalid statement"),
+            ErrorKind::InvalidAddressOfExpression => write!(f, "Invalid address-of expression"),
             ErrorKind::InfinitelySizedType => write!(f, "Infinitely sized type"),
             ErrorKind::VariableAlreadyDefined => write!(f, "Variable already defined"),
             ErrorKind::NonExhaustiveMatch => write!(f, "Non-exhaustive match"),

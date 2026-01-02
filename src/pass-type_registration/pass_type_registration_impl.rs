@@ -3,7 +3,7 @@ use ustr::Ustr;
 
 use crate::{
     pass_diagnostics::YuuError, pass_parse::{SourceInfo, ast::*}, pass_type_inference::infer_type, utils::{
-        binding_info::BindingInfo, collections::{UstrHashMap, UstrIndexMap}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
+        UnionFieldInfo, binding_info::BindingInfo, collections::{UstrIndexMap}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{StructFieldInfo, TypeRegistry}
     }
 };
 
@@ -186,8 +186,8 @@ fn define_user_def_types(
                 .zip(helper_vec.iter())
             {
                 if variant.data_type.is_some() {
-                    let evi_info = evi.variants.get_mut(&variant.name).unwrap();
-                    evi_info.variant = Some(*ty);
+                    let evi_info = evi.variants_info.fields.get_mut(&variant.name).unwrap();
+                    evi_info.ty = *ty;
                 }
             }
         }
@@ -253,17 +253,17 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
             }
         }
         StructuralNode::EnumDef(ed) => {
-            let mut enum_variant_defs = UstrHashMap::default();
+            let mut enum_variant_defs = UstrIndexMap::default();
 
             for (idx, variant) in ed.variants.iter().enumerate() {
-                let evi = EnumVariantInfo {
-                    variant_name: variant.name,
-                    variant_idx: idx as u64,
+                let evi = UnionFieldInfo {
+                    name: variant.name,
+                    field_idx: idx as u64,
                     binding_info: BindingInfo {
                         id: variant.id,
                         src_location: Some(variant.span.clone()),
                     },
-                    variant: variant.data_type.as_ref().map(|_x| unknown_type()),
+                    ty: variant.data_type.as_ref().map(|_x| unknown_type()).unwrap_or(primitive_nil()),
                 };
                 enum_variant_defs.insert(variant.name, evi);
             }

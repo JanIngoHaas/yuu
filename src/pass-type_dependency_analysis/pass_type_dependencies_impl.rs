@@ -8,7 +8,7 @@ use crate::{
     pass_parse::SourceInfo,
     pass_type_dependency_analysis::TypeDependencyGraph,
     utils::{
-        StructOrEnumInfo, TypeRegistry,
+        ComposableTypeInfo, TypeRegistry,
         collections::{UstrIndexMap, UstrIndexSet},
         type_info_table::TypeInfo,
     },
@@ -21,7 +21,7 @@ impl TypeDependencyAnalysis {
         Self
     }
 
-    fn build_dependency_graph(data: &mut TransientData, info: StructOrEnumInfo<'_>) {
+    fn build_dependency_graph(data: &mut TransientData, info: ComposableTypeInfo<'_>) {
         if data.dependency_graph.contains_key(&info.name()) {
             // Already processed
             return;
@@ -32,7 +32,7 @@ impl TypeDependencyAnalysis {
         for (field_name, field_ty, field_binding_info, field_discr) in info.iterate() {
             let field_ty_name = match field_ty {
                 TypeInfo::Struct(si) => si.name,
-                TypeInfo::Enum(ei) => ei.name,
+                TypeInfo::Union(ui) => ui.name,
                 _ => continue,
             };
 
@@ -45,8 +45,8 @@ impl TypeDependencyAnalysis {
             // Check for immediate cycle
             if data.current_path.contains(&field_ty_name) {
                 let (type_kind_label, type_binding_info_opt) = match info {
-                    StructOrEnumInfo::Struct(si) => ("struct", Some(&si.binding_info)),
-                    StructOrEnumInfo::Enum(ei) => ("enum", Some(&ei.binding_info)),
+                    ComposableTypeInfo::Struct(si) => ("struct", Some(&si.binding_info)),
+                    ComposableTypeInfo::Union(ui) => ("union", Some(&ui.binding_info)),
                 };
 
                 let type_binding_info = type_binding_info_opt.unwrap();
@@ -94,15 +94,15 @@ impl TypeDependencyAnalysis {
                             "Compiler Bug: Struct not found, but should be present at this point",
                         );
                         data.current_path.insert(field_ty_name);
-                        Self::build_dependency_graph(data, StructOrEnumInfo::Struct(si));
+                        Self::build_dependency_graph(data, ComposableTypeInfo::Struct(si));
                         data.current_path.pop();
                     }
-                    TypeInfo::Enum(_) => {
-                        let ei = data.type_registry.resolve_enum(field_ty_name).expect(
-                            "Compiler Bug: Enum not found, but should be present at this point",
+                    TypeInfo::Union(_) => {
+                        let ui = data.type_registry.resolve_union(field_ty_name).expect(
+                            "Compiler Bug: Union not found, but should be present at this point",
                         );
                         data.current_path.insert(field_ty_name);
-                        Self::build_dependency_graph(data, StructOrEnumInfo::Enum(ei));
+                        Self::build_dependency_graph(data, ComposableTypeInfo::Union(ui));
                         data.current_path.pop();
                     }
                     _ => continue,
@@ -122,13 +122,13 @@ impl TypeDependencyAnalysis {
         for (name, info) in type_registry.all_structs() {
             data.current_path.clear();
             data.current_path.insert(*name);
-            Self::build_dependency_graph(&mut data, StructOrEnumInfo::Struct(info));
+            Self::build_dependency_graph(&mut data, ComposableTypeInfo::Struct(info));
         }
 
-        for (name, info) in type_registry.all_enums() {
+        for (name, info) in type_registry.all_unions() {
             data.current_path.clear();
             data.current_path.insert(*name);
-            Self::build_dependency_graph(&mut data, StructOrEnumInfo::Enum(info));
+            Self::build_dependency_graph(&mut data, ComposableTypeInfo::Union(info));
         }
         
         (TypeDependencyGraph(data.dependency_graph), data.errors)

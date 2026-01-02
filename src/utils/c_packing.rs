@@ -1,5 +1,5 @@
 use crate::utils::{
-    EnumInfo, StructInfo, TypeRegistry,
+    StructInfo, TypeRegistry, UnionInfo,
     type_info_table::{PrimitiveType, TypeInfo},
 };
 
@@ -28,18 +28,16 @@ pub struct StructLayout {
     pub total_alignment: usize,
 }
 
+
 #[derive(Debug, Clone)]
-pub struct EnumLayout {
-    pub discriminant_size: usize,
-    pub discriminant_alignment: usize,
-    pub payload_offset: usize,
-    pub max_variant_size: usize,
+pub struct UnionLayout {
     pub total_size: usize,
     pub total_alignment: usize,
 }
 
 pub fn calculate_primitive_layout(prim: PrimitiveType) -> LayoutInfo {
     match prim {
+        PrimitiveType::I8 | PrimitiveType::U8 => LayoutInfo::new(1, 1),
         PrimitiveType::I64 | PrimitiveType::U64 => LayoutInfo::new(8, 8),
         PrimitiveType::F32 => LayoutInfo::new(4, 4),
         PrimitiveType::F64 => LayoutInfo::new(8, 8),
@@ -66,7 +64,15 @@ pub fn calculate_type_layout(ty: &TypeInfo, type_registry: &TypeRegistry) -> Lay
             let enum_info = type_registry
                 .resolve_enum(enum_type.name)
                 .unwrap_or_else(|| panic!("Compiler Error: Unknown enum type: {}", enum_type.name));
-            let layout = calculate_enum_layout(enum_info, type_registry);
+            // Enum layout is just the wrapper struct layout
+            let struct_layout = calculate_struct_layout(enum_info.wrapper_info, type_registry);
+            LayoutInfo::new(struct_layout.total_size, struct_layout.total_alignment)
+        }
+        TypeInfo::Union(union_type) => {
+            let union_info = type_registry
+                .resolve_union(union_type.name)
+                .unwrap_or_else(|| panic!("Compiler Error: Unknown union type: {}", union_type.name));
+            let layout = calculate_union_layout(union_info, type_registry);
             LayoutInfo::new(layout.total_size, layout.total_alignment)
         }
         TypeInfo::Error => {
@@ -119,32 +125,22 @@ pub fn calculate_array_layout(
     LayoutInfo::new(total_size, element_layout.alignment)
 }
 
-pub fn calculate_enum_layout(enum_info: &EnumInfo, type_registry: &TypeRegistry) -> EnumLayout {
-    let discriminant_size = 8;
-    let discriminant_alignment = 8;
 
-    let mut max_variant_size = 0;
-    let mut max_variant_alignment = 1;
+pub fn calculate_union_layout(union_info: &UnionInfo, type_registry: &TypeRegistry) -> UnionLayout {
+    let mut max_size = 0;
+    let mut max_alignment = 1;
 
-    for variant_info in enum_info.variants.values() {
-        if let Some(variant_type) = variant_info.variant {
-            let layout = calculate_type_layout(variant_type, type_registry);
-            max_variant_size = max_variant_size.max(layout.size);
-            max_variant_alignment = max_variant_alignment.max(layout.alignment);
-        }
+    for field_info in union_info.fields.values() {
+        let layout = calculate_type_layout(field_info.ty, type_registry);
+        max_size = max_size.max(layout.size);
+        max_alignment = max_alignment.max(layout.alignment);
     }
 
-    let payload_offset = align_to(discriminant_size, max_variant_alignment);
-    let total_alignment = discriminant_alignment.max(max_variant_alignment);
-    let total_size = align_to(payload_offset + max_variant_size, total_alignment);
+    let total_size = align_to(max_size, max_alignment);
 
-    EnumLayout {
-        discriminant_size,
-        discriminant_alignment,
-        payload_offset,
-        max_variant_size,
+    UnionLayout {
         total_size,
-        total_alignment,
+        total_alignment: max_alignment,
     }
 }
 

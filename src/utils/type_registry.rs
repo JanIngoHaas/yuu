@@ -1,9 +1,12 @@
+use std::str::FromStr;
+
 use ustr::Ustr;
 
-use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap};
+use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap, UstrIndexSet};
 use crate::utils::type_info_table::{
-    FunctionType, GiveMePtrHashes, TypeInfo, enum_type, function_type, primitive_bool,
+    FunctionType, GiveMePtrHashes, TypeInfo, function_type, primitive_bool,
     primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
+    union_type,
 };
 use crate::utils::BindingInfo;
 use crate::{
@@ -18,11 +21,11 @@ pub struct StructFieldInfo {
     pub binding_info: BindingInfo,
 }
 
-#[derive(Clone, Debug)]
-pub struct EnumVariantInfo {
-    pub variant_name: Ustr,
-    pub variant_idx: u64,
-    pub variant: Option<&'static TypeInfo>,
+#[derive(Clone)]
+pub struct UnionFieldInfo {
+    pub name: Ustr,
+    pub ty: &'static TypeInfo,
+    pub field_idx: u64,
     pub binding_info: BindingInfo,
 }
 
@@ -34,55 +37,66 @@ pub struct StructInfo {
     pub binding_info: BindingInfo,
 }
 
+#[derive(Copy, Clone)]
+pub struct EnumInfo<'a> {
+    pub wrapper_info: &'a StructInfo,
+    pub variants_info: &'a UnionInfo,
+}
+
+pub struct EnumInfoMut<'a> {
+    pub wrapper_info: &'a mut StructInfo,
+    pub variants_info: &'a mut UnionInfo,
+}
+
 #[derive(Clone)]
-pub struct EnumInfo {
-    pub variants: UstrHashMap<EnumVariantInfo>,
+pub struct UnionInfo {
     pub name: Ustr,
+    pub fields: UstrIndexMap<UnionFieldInfo>,
     pub ty: &'static TypeInfo,
     pub binding_info: BindingInfo,
 }
 
 /// Combined type for resolving either struct or enum information - this is just for convenience -> Represents the Discriminant
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UserDefinedTypeDiscriminant {
+pub enum ComposableTypeDiscriminant {
     Struct,
-    Enum,
+    Union,
 }
 
-impl UserDefinedTypeDiscriminant {
+impl ComposableTypeDiscriminant {
     pub fn as_str(&self) -> &'static str {
         match self {
-            UserDefinedTypeDiscriminant::Struct => "struct",
-            UserDefinedTypeDiscriminant::Enum => "enum",
+            ComposableTypeDiscriminant::Struct => "struct",
+            ComposableTypeDiscriminant::Union => "union",
         }
     }
 }
 
 #[derive(Clone, Copy)]
-pub enum StructOrEnumInfo<'a> {
+pub enum ComposableTypeInfo<'a> {
     Struct(&'a StructInfo),
-    Enum(&'a EnumInfo),
+    Union(&'a UnionInfo),
 }
 
-impl<'a> StructOrEnumInfo<'a> {
-    pub fn discriminant(&self) -> UserDefinedTypeDiscriminant {
+impl<'a> ComposableTypeInfo<'a> {
+    pub fn discriminant(&self) -> ComposableTypeDiscriminant {
         match self {
-            StructOrEnumInfo::Struct(_) => UserDefinedTypeDiscriminant::Struct,
-            StructOrEnumInfo::Enum(_) => UserDefinedTypeDiscriminant::Enum,
+            ComposableTypeInfo::Struct(_) => ComposableTypeDiscriminant::Struct,
+            ComposableTypeInfo::Union(_) => ComposableTypeDiscriminant::Union,
         }
     }
 
     pub fn ty(&self) -> &'static TypeInfo {
         match self {
-            StructOrEnumInfo::Struct(info) => info.ty,
-            StructOrEnumInfo::Enum(info) => info.ty,
+            ComposableTypeInfo::Struct(info) => info.ty,
+            ComposableTypeInfo::Union(info) => info.ty,
         }
     }
 
     pub fn name(&self) -> Ustr {
         match self {
-            StructOrEnumInfo::Struct(info) => info.name,
-            StructOrEnumInfo::Enum(info) => info.name,
+            ComposableTypeInfo::Struct(info) => info.name,
+            ComposableTypeInfo::Union(info) => info.name,
         }
     }
 
@@ -93,7 +107,7 @@ impl<'a> StructOrEnumInfo<'a> {
             Ustr,
             &'static TypeInfo,
             BindingInfo,
-            UserDefinedTypeDiscriminant,
+            ComposableTypeDiscriminant,
         ),
     > {
         let out: Box<
@@ -102,30 +116,26 @@ impl<'a> StructOrEnumInfo<'a> {
                     Ustr,
                     &'static TypeInfo,
                     BindingInfo,
-                    UserDefinedTypeDiscriminant,
+                    ComposableTypeDiscriminant,
                 ),
             >,
         > = match self {
-            StructOrEnumInfo::Struct(info) => Box::new(info.fields.iter().map(|(n, i)| {
+            ComposableTypeInfo::Struct(info) => Box::new(info.fields.iter().map(|(n, i)| {
                 (
                     *n,
                     i.ty,
                     i.binding_info.clone(),
-                    UserDefinedTypeDiscriminant::Struct,
+                    ComposableTypeDiscriminant::Struct,
                 )
             })),
-            StructOrEnumInfo::Enum(info) => {
-                Box::new(info.variants.iter().filter_map(|(n, evi)| {
-                    evi.variant.map(|v| {
-                        (
-                            *n,
-                            v,
-                            evi.binding_info.clone(),
-                            UserDefinedTypeDiscriminant::Enum,
-                        )
-                    })
-                }))
-            }
+            ComposableTypeInfo::Union(info) => Box::new(info.fields.iter().map(|(n, i)| {
+                (
+                    *n,
+                    i.ty,
+                    i.binding_info.clone(),
+                    ComposableTypeDiscriminant::Union,
+                )
+            })),
         };
         out
     }
@@ -141,7 +151,8 @@ pub struct FunctionInfo {
 
 pub struct TypeRegistry {
     structs: UstrHashMap<StructInfo>,
-    enums: UstrHashMap<EnumInfo>,
+    enums: UstrHashMap<(Ustr, Ustr)>, // wrapper struct name + union name
+    unions: UstrHashMap<UnionInfo>,
     functions: UstrHashMap<FastHashMap<Vec<GiveMePtrHashes<TypeInfo>>, FunctionInfo>>, // Maps from Name -> (types of Args -> FunctionInfo).
     structural_types_by_node: FastHashMap<NodeId, &'static TypeInfo>, // Cache structural types by their definition NodeId
 }
@@ -157,6 +168,7 @@ impl TypeRegistry {
         let mut reg = Self {
             structs: UstrHashMap::default(),
             enums: UstrHashMap::default(),
+            unions: UstrHashMap::default(),
             functions: UstrHashMap::default(),
             structural_types_by_node: FastHashMap::default(),
         };
@@ -506,8 +518,14 @@ impl TypeRegistry {
         &self.structs
     }
 
-    pub fn all_enums(&self) -> &UstrHashMap<EnumInfo> {
-        &self.enums
+    pub fn all_unions(&self) -> &UstrHashMap<UnionInfo> {
+        &self.unions
+    }
+
+    pub fn all_enums<'a>(&'a self) -> impl Iterator<Item = EnumInfo<'a>> + 'a {
+        self.enums.keys().flat_map(
+            |n| self.resolve_enum(*n)
+        )
     }
 
     pub fn add_struct(
@@ -533,21 +551,63 @@ impl TypeRegistry {
     pub fn add_enum(
         &mut self,
         name: Ustr,
-        variants: UstrHashMap<EnumVariantInfo>,
+        variants: UstrIndexMap<UnionFieldInfo>,
         definition_location: BindingInfo,
     ) -> bool {
-        let ty = enum_type(name);
-        let info = EnumInfo {
-            ty,
-            name,
-            variants,
+        let uty = union_type(name);
+        let union_name: Ustr = format!("_U_{}", name).intern();
+        
+        let union_info = UnionInfo {
+            ty: uty,
+            name: union_name,
+            fields: variants,
             binding_info: definition_location.clone(),
         };
+
+        if self.unions.insert(union_name, union_info).is_some() {
+            return false;
+        }
         
+        let struct_name: Ustr = format!("_S_{}", name).intern();
+        let sty = struct_type(struct_name);
+        let fields = vec![
+            StructFieldInfo {
+                name: "tag".intern(),
+                ty: primitive_u64(),
+                binding_info: definition_location.clone(),
+            },
+            StructFieldInfo {
+                name: "payload".intern(),
+                ty: uty,
+                binding_info: definition_location.clone(),
+            },
+        ];
+
+        let wrapper_struct_info = StructInfo {
+            fields: fields.into_iter().map(|f| (f.name, f)).collect(),
+            name: struct_name,
+            ty: sty,
+            binding_info: definition_location.clone(),
+        };
+
+        if self.structs.insert(wrapper_struct_info.name, wrapper_struct_info).is_some() {
+            return false;
+        }
+
         // Cache the enum type by its definition NodeId
-        self.structural_types_by_node.insert(definition_location.id, ty);
-        
-        self.enums.insert(name, info).is_none()
+        self.structural_types_by_node.insert(definition_location.id, sty);
+        self.enums.insert(name, (struct_name, union_name)).is_none()
+    }
+
+    pub fn add_union(
+        &mut self,
+        name: Ustr,
+        fields: UstrIndexMap<UnionFieldInfo>,
+        ty: &'static TypeInfo,
+        binding_info: BindingInfo,
+    ) -> bool {
+        let union_info = UnionInfo { name, fields, ty, binding_info: binding_info.clone() };
+        self.unions.insert(name, union_info).is_none()
     }
 
     pub fn add_function(
@@ -588,20 +648,36 @@ impl TypeRegistry {
         self.structs.get_mut(&name)
     }
 
-    pub fn resolve_enum(&self, name: Ustr) -> Option<&EnumInfo> {
-        self.enums.get(&name)
+    pub fn resolve_enum(&self, name: Ustr) -> Option<EnumInfo<'_>> {
+        let (struct_name, union_name) = self.enums.get(&name)?;
+        Some(EnumInfo {
+            wrapper_info: self.structs.get(struct_name).expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
+            variants_info: self.unions.get(union_name).expect("Compiler Bug: Enum name registered, but variants union not found"),
+        })
     }
 
-    pub fn resolve_enum_mut(&mut self, name: Ustr) -> Option<&mut EnumInfo> {
-        self.enums.get_mut(&name)
+    pub fn resolve_enum_mut(&mut self, name: Ustr) -> Option<EnumInfoMut<'_>> {
+        let (struct_name, union_name) = self.enums.get(&name)?;
+        Some(EnumInfoMut {
+            wrapper_info: self.structs.get_mut(struct_name).expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
+            variants_info: self.unions.get_mut(union_name).expect("Compiler Bug: Enum name registered, but variants union not found"),
+        })
     }
 
-    /// Resolves either a struct or enum type by name
-    pub fn resolve_struct_or_enum(&self, name: Ustr) -> Option<StructOrEnumInfo<'_>> {
+    pub fn resolve_union(&self, name: Ustr) -> Option<&UnionInfo> {
+        self.unions.get(&name)
+    }
+
+    pub fn resolve_union_mut(&mut self, name: Ustr) -> Option<&mut UnionInfo> {
+        self.unions.get_mut(&name)
+    }
+
+    /// Resolves either a struct, enum or union type by name
+    pub fn resolve_composable_type(&self, name: Ustr) -> Option<ComposableTypeInfo<'_>> {
         if let Some(struct_info) = self.resolve_struct(name) {
-            Some(StructOrEnumInfo::Struct(struct_info))
+            Some(ComposableTypeInfo::Struct(struct_info))
         } else {
-            self.resolve_enum(name).map(StructOrEnumInfo::Enum)
+            self.resolve_union(name).map(ComposableTypeInfo::Union)
         }
     }
 
@@ -616,7 +692,7 @@ impl TypeRegistry {
             "bool" => Some(primitive_bool()),
             "nil" => Some(primitive_nil()),
             _ => {
-                self.resolve_struct_or_enum(name).map(|info| info.ty())
+                self.resolve_composable_type(name).map(|info| info.ty())
             }
         }
     }

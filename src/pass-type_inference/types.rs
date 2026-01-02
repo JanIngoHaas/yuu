@@ -33,7 +33,7 @@ pub fn infer_type(
                 "bool" => primitive_bool(),
                 _ => {
                     // Try to resolve as either a struct or enum
-                    let type_info = registry.resolve_struct_or_enum(ident.name);
+                    let type_info = registry.resolve_composable_type(ident.name);
                     if let Some(info) = type_info {
                         info.ty()
                     } else {

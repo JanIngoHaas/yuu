@@ -413,6 +413,44 @@ pub enum ExprNode {
     //Error,
 }
 
+impl ExprNode {
+    /// Returns true if this expression represents an lvalue (can have its address taken)
+    pub fn is_lvalue(&self) -> bool {
+        match self {
+            // Variables are lvalues
+            ExprNode::Ident(_) => true,
+
+            // Field access is lvalue if the base is lvalue
+            ExprNode::MemberAccess(_) => true,
+
+            // Array access is lvalue if the array is lvalue
+            ExprNode::Array(_) => true,
+
+            // Dereferencing a pointer gives an lvalue
+            ExprNode::Deref(_) => true,
+
+            // All other expressions are rvalues (temporaries)
+            ExprNode::Literal(_) |
+            ExprNode::Binary(_) |
+            ExprNode::Unary(_) |
+            ExprNode::FuncCall(_) |
+            ExprNode::Assignment(_) |
+            ExprNode::StructInstantiation(_) |
+            ExprNode::EnumInstantiation(_) |
+            ExprNode::AddressOf(_) |
+            ExprNode::HeapAlloc(_) |
+            ExprNode::ArrayLiteral(_) |
+            ExprNode::Cast(_) |
+            ExprNode::LuaMeta(_) => false,
+        }
+    }
+
+    /// Returns true if this expression represents an rvalue (temporary value)
+    pub fn is_rvalue(&self) -> bool {
+        !self.is_lvalue()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LetStmt {
     pub span: Span,
@@ -584,10 +622,10 @@ pub struct StructDefStructural {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumVariant {
-    pub id: NodeId,
+    pub data_type: Option<TypeNode>, // None for unit variants, Some(T) for data variants
     pub span: Span,
     pub name: Ustr,
-    pub data_type: Option<TypeNode>, // None for unit variants, Some(T) for data variants
+    pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -601,12 +639,12 @@ pub struct EnumDeclStructural {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EnumDefStructural {
-    pub id: NodeId,
-    pub span: Span,
     pub decl: EnumDeclStructural,
-    pub variants: Vec<EnumVariant>,
     #[serde(skip)]
     pub metadata: Option<StructuralMetadata>,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+    pub id: NodeId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

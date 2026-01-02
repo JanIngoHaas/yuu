@@ -4,8 +4,13 @@ use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
     Operand, UnaryOp, Variable,
 };
+use crate::pass_yir_lowering::yir::{
+    AllocaCmd, BinaryCmd, CallCmd, GetElementPtrCmd, HeapAllocCmd, HeapFreeCmd, IntToPtrCmd,
+    KillSetCmd, LoadCmd, MemCpyCmd, MemSetCmd, StoreCmd, StoreImmediateCmd, TakeAddressCmd,
+    UnaryCmd,
+};
 use crate::utils::{
-    EnumInfo, StructInfo, StructOrEnumInfo, TypeRegistry,
+    EnumInfo, StructInfo, ComposableTypeInfo, TypeRegistry, UnionInfo,
     type_info_table::{PrimitiveType, TypeInfo},
 };
 use miette::IntoDiagnostic;
@@ -58,6 +63,8 @@ impl CLowering {
     fn gen_type(data: &mut TransientData, ty: &'static TypeInfo) -> Result<(), std::fmt::Error> {
         match ty {
             TypeInfo::BuiltInPrimitive(primitive_type) => match primitive_type {
+                PrimitiveType::I8 => write!(data.output, "int8_t"),
+                PrimitiveType::U8 => write!(data.output, "uint8_t"),
                 PrimitiveType::Bool => write!(data.output, "bool"),
                 PrimitiveType::F64 => write!(data.output, "double"),
                 PrimitiveType::F32 => write!(data.output, "float"),
@@ -82,8 +89,10 @@ impl CLowering {
                 write!(data.output, "struct {}", struct_type.name)
             }
             TypeInfo::Enum(enum_type) => {
-                // Reference the struct definition
                 write!(data.output, "struct {}", enum_type.name)
+            }
+            TypeInfo::Union(union_type) => {
+                write!(data.output, "union {}", union_type.name)
             }
         }
     }
@@ -195,31 +204,26 @@ impl CLowering {
         data: &mut TransientData,
     ) -> Result<(), std::fmt::Error> {
         match instruction {
-            Instruction::Alloca {
-                target,
-                count,
-                align,
-                init,
-            } => {
-                if let Some(align) = align {
+            Instruction::Alloca(cmd) => {
+                if let Some(align) = cmd.align {
                     write!(data.output, "alignas({align}) ")?;
                 }
 
-                self.gen_variable_def(data, target, *count, init.as_ref())?;
+                self.gen_variable_def(data, &cmd.target, cmd.count, cmd.init.as_ref())?;
             }
-            Instruction::StoreImmediate { target, value } => {
+            Instruction::StoreImmediate(cmd) => {
                 write!(data.output, "*")?;
-                Self::write_var_name(target, &mut data.output)?;
+                Self::write_var_name(&cmd.target, &mut data.output)?;
                 write!(data.output, "=")?;
-                self.gen_operand(data, value)?;
+                self.gen_operand(data, &cmd.value)?;
                 write!(data.output, ";")?;
             }
-            Instruction::TakeAddress { target, source } => {
-                Self::gen_type(data, target.ty())?;
+            Instruction::TakeAddress(cmd) => {
+                Self::gen_type(data, cmd.target.ty())?;
                 write!(data.output, " ")?;
-                Self::write_var_name(target, &mut data.output)?;
+                Self::write_var_name(&cmd.target, &mut data.output)?;
                 write!(data.output, "=&")?;
-                Self::write_var_name(source, &mut data.output)?;
+                Self::write_var_name(&cmd.source, &mut data.output)?;
                 write!(data.output, ";")?;
             }
 
@@ -229,41 +233,24 @@ impl CLowering {
             // Imagine the memory is not reserved, then the deref, i.e. a->b will segfault!
             // This aligns with current Yuu semantics, but the semantics of YIR are different here
             // because we are just asking for a pointer, not to deref the pointer first.
-            Instruction::GetFieldPtr {
-                target,
-                base,
-                field,
-            } => {
-                self.gen_variable_decl(data, target)?;
-                write!(data.output, ";")?;
-                Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, "=&(")?;
-                self.gen_operand(data, base)?;
-                write!(data.output, "->{});", field)?;
-            }
-            Instruction::Load { target, source } => {
-                self.gen_simple_var_decl(data, target)?;
+            Instruction::Load(cmd) => {
+                self.gen_simple_var_decl(data, &cmd.target)?;
                 write!(data.output, "=*")?;
-                self.gen_operand(data, source)?;
+                self.gen_operand(data, &cmd.source)?;
                 write!(data.output, ";")?;
             }
-            Instruction::Store { dest, value } => {
+            Instruction::Store(cmd) => {
                 write!(data.output, "*")?;
-                self.gen_operand(data, dest)?;
+                self.gen_operand(data, &cmd.dest)?;
                 write!(data.output, "=")?;
-                self.gen_operand(data, value)?;
+                self.gen_operand(data, &cmd.value)?;
                 write!(data.output, ";")?;
             }
-            Instruction::Binary {
-                target,
-                op,
-                lhs,
-                rhs,
-            } => {
-                self.gen_simple_var_decl(data, target)?;
+            Instruction::Binary(cmd) => {
+                self.gen_simple_var_decl(data, &cmd.target)?;
                 write!(data.output, "=")?;
-                self.gen_operand(data, lhs)?;
-                match op {
+                self.gen_operand(data, &cmd.lhs)?;
+                match cmd.op {
                     BinOp::Add => write!(data.output, "+"),
                     BinOp::Sub => write!(data.output, "-"),
                     BinOp::Mul => write!(data.output, "*"),
@@ -276,30 +263,26 @@ impl CLowering {
                     BinOp::GreaterThan => write!(data.output, ">"),
                     BinOp::GreaterThanEq => write!(data.output, ">="),
                 }?;
-                self.gen_operand(data, rhs)?;
+                self.gen_operand(data, &cmd.rhs)?;
                 write!(data.output, ";")?;
             }
-            Instruction::Unary {
-                target,
-                op,
-                operand,
-            } => {
-                self.gen_simple_var_decl(data, target)?;
+            Instruction::Unary(cmd) => {
+                self.gen_simple_var_decl(data, &cmd.target)?;
                 write!(data.output, "=")?;
-                match op {
+                match cmd.op {
                     UnaryOp::Neg => write!(data.output, "-"),
                 }?;
-                self.gen_operand(data, operand)?;
+                self.gen_operand(data, &cmd.operand)?;
                 write!(data.output, ";")?;
             }
-            Instruction::Call { target, name, args } => {
-                if let Some(target) = target {
+            Instruction::Call(cmd) => {
+                if let Some(target) = &cmd.target {
                     self.gen_simple_var_decl(data, target)?;
                     write!(data.output, "=")?;
                 }
-                Self::write_function_name(name, &mut data.output)?;
+                Self::write_function_name(&cmd.name, &mut data.output)?;
                 write!(data.output, "(")?;
-                for (i, arg) in args.iter().enumerate() {
+                for (i, arg) in cmd.args.iter().enumerate() {
                     if i > 0 {
                         write!(data.output, ",")?;
                     }
@@ -307,78 +290,43 @@ impl CLowering {
                 }
                 write!(data.output, ");")?;
             }
-            Instruction::StoreActiveVariantIdx { dest, value } => {
-                Self::write_var_name(dest, &mut data.output)?;
-                write!(data.output, "->tag=")?;
-                self.gen_operand(data, value)?;
+            Instruction::IntToPtr(cmd) => {
+                self.gen_variable_decl(data, &cmd.target)?;
                 write!(data.output, ";")?;
-            }
-            Instruction::LoadActiveVariantIdx { target, source } => {
-                self.gen_simple_var_decl(data, target)?;
-                write!(data.output, "=")?;
-                self.gen_operand(data, source)?;
-                match source.ty() {
-                    TypeInfo::Pointer(_) => write!(data.output, "->tag;")?,
-                    _ => write!(data.output, ".tag;")?,
-                }
-            }
-            Instruction::GetVariantDataPtr {
-                target,
-                base,
-                variant,
-            } => {
-                self.gen_variable_decl(data, target)?;
-                write!(data.output, ";")?;
-                Self::write_var_name(target, &mut data.output)?;
-                write!(data.output, "=&(")?;
-                self.gen_operand(data, base)?;
-                match base.ty() {
-                    TypeInfo::Pointer(_) => write!(data.output, "->data.{}_data);", variant)?,
-                    _ => write!(data.output, ".data.{}_data);", variant)?,
-                }
-            }
-            Instruction::IntToPtr { target, source } => {
-                self.gen_variable_decl(data, target)?;
-                write!(data.output, ";")?;
-                Self::write_var_name(target, &mut data.output)?;
+                Self::write_var_name(&cmd.target, &mut data.output)?;
                 write!(data.output, "=(")?;
-                Self::gen_type(data, target.ty())?;
+                Self::gen_type(data, cmd.target.ty())?;
                 write!(data.output, ")")?;
-                self.gen_operand(data, source)?;
+                self.gen_operand(data, &cmd.source)?;
                 write!(data.output, ";")?;
             }
-            Instruction::HeapAlloc {
-                target,
-                count,
-                align,
-                init,
-            } => {
+            Instruction::HeapAlloc(cmd) => {
                 // Generate heap allocation
-                let element_type = target.ty().deref_ptr();
-                Self::gen_type(data, target.ty())?;
+                let element_type = cmd.target.ty().deref_ptr();
+                Self::gen_type(data, cmd.target.ty())?;
                 write!(data.output, " ")?;
-                Self::write_var_name(target, &mut data.output)?;
+                Self::write_var_name(&cmd.target, &mut data.output)?;
                 write!(data.output, " = ")?;
 
                 // Choose allocation strategy based on initialization
-                match init {
+                match &cmd.init {
                     Some(crate::pass_yir_lowering::yir::ArrayInit::Zero) => {
                         // Use calloc for zero initialization
-                        if let Some(align_val) = align {
+                        if let Some(align_val) = cmd.align {
                             write!(data.output, "aligned_alloc({}, (", align_val)?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ") * sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, ")); memset(")?;
-                            Self::write_var_name(target, &mut data.output)?;
+                            Self::write_var_name(&cmd.target, &mut data.output)?;
                             write!(data.output, ", 0, (")?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ") * sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, "));")?;
                         } else {
                             write!(data.output, "calloc(")?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ", sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, "));")?;
@@ -386,15 +334,15 @@ impl CLowering {
                     }
                     _ => {
                         // Regular malloc for non-zero or no initialization
-                        if let Some(align_val) = align {
+                        if let Some(align_val) = cmd.align {
                             write!(data.output, "aligned_alloc({}, (", align_val)?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ") * sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, "));")?;
                         } else {
                             write!(data.output, "malloc((")?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ") * sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, "));")?;
@@ -403,7 +351,7 @@ impl CLowering {
                 }
 
                 // Handle non-zero array initialization after allocation
-                if let Some(array_init) = init {
+                if let Some(array_init) = &cmd.init {
                     match array_init {
                         crate::pass_yir_lowering::yir::ArrayInit::Zero => {
                             // Already handled above
@@ -415,18 +363,18 @@ impl CLowering {
                             write!(data.output, " __template = ")?;
                             self.gen_operand(data, operand)?;
                             write!(data.output, "; __yuu_template_fill(")?;
-                            Self::write_var_name(target, &mut data.output)?;
+                            Self::write_var_name(&cmd.target, &mut data.output)?;
                             write!(data.output, ", &__template, sizeof(")?;
                             Self::gen_type(data, element_type)?;
                             write!(data.output, "), ")?;
-                            self.gen_operand(data, count)?;
+                            self.gen_operand(data, &cmd.count)?;
                             write!(data.output, ");")?;
                         }
                         crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
                             // Generate individual stores
                             for (i, element) in elements.iter().enumerate() {
                                 write!(data.output, " ")?;
-                                Self::write_var_name(target, &mut data.output)?;
+                                Self::write_var_name(&cmd.target, &mut data.output)?;
                                 write!(data.output, "[{}] = ", i)?;
                                 self.gen_operand(data, element)?;
                                 write!(data.output, ";")?;
@@ -435,44 +383,50 @@ impl CLowering {
                     }
                 }
             }
-            Instruction::HeapFree { ptr } => {
+            Instruction::HeapFree(cmd) => {
                 write!(data.output, "free(")?;
-                self.gen_operand(data, ptr)?;
+                self.gen_operand(data, &cmd.ptr)?;
                 write!(data.output, ");")?;
             }
-            Instruction::GetElementPtr {
-                target,
-                base,
-                index,
-            } => {
-                self.gen_variable_decl(data, target)?;
+            Instruction::GetElementPtr(cmd) => {
+                self.gen_variable_decl(data, &cmd.target)?;
                 write!(data.output, ";")?;
-                Self::write_var_name(target, &mut data.output)?;
+                Self::write_var_name(&cmd.target, &mut data.output)?;
                 write!(data.output, "=(")?;
-                self.gen_operand(data, base)?;
-                write!(data.output, "+")?;
-                self.gen_operand(data, index)?;
+                Self::gen_type(data, cmd.target.ty())?;
+                write!(data.output, ")((uint8_t *)")?;
+                self.gen_operand(data, &cmd.base)?;
+                write!(data.output, " + ")?;
+                self.gen_operand(data, &cmd.offset)?;
                 write!(data.output, ");")?;
             }
-            Instruction::MemCpy { dest, src, count } => {
+            Instruction::MemCpy(cmd) => {
                 write!(data.output, "memcpy(")?;
-                self.gen_operand(data, dest)?;
+                self.gen_operand(data, &cmd.dest)?;
                 write!(data.output, ", ")?;
-                self.gen_operand(data, src)?;
+                self.gen_operand(data, &cmd.src)?;
                 write!(data.output, ", ")?;
-                self.gen_operand(data, count)?;
+                self.gen_operand(data, &cmd.count)?;
                 write!(data.output, ");")?;
             }
-            Instruction::MemSet { dest, value, count } => {
+            Instruction::MemSet(cmd) => {
                 write!(data.output, "memset(")?;
-                self.gen_operand(data, dest)?;
+                self.gen_operand(data, &cmd.dest)?;
                 write!(data.output, ", ")?;
-                self.gen_operand(data, value)?;
+                self.gen_operand(data, &cmd.value)?;
                 write!(data.output, ", ")?;
-                self.gen_operand(data, count)?;
+                self.gen_operand(data, &cmd.count)?;
                 write!(data.output, ");")?;
             }
-            Instruction::KillSet { vars: _ } => {
+            Instruction::Reinterp(cmd) => {
+                self.gen_simple_var_decl(data, &cmd.target)?;
+                write!(data.output, " = (")?;
+                Self::gen_type(data, cmd.target_type)?;
+                write!(data.output, ")")?;
+                self.gen_operand(data, &cmd.source)?;
+                write!(data.output, ";")?;
+            }
+            Instruction::KillSet(_) => {
                 // No code generation needed for stack variable kills in C
             }
         }
@@ -594,31 +548,14 @@ impl CLowering {
         Ok(())
     }
 
-    fn def_enum(&self, data: &mut TransientData, einfo: &EnumInfo) -> Result<(), std::fmt::Error> {
-        write!(data.output, "struct {}{{enum{{", einfo.name)?;
-        let mut first = true;
-        for (variant_name, variant_info) in &einfo.variants {
-            if !first {
-                write!(data.output, ",")?;
-            }
-            write!(data.output, "{}={}", variant_name, variant_info.variant_idx)?;
-            first = false;
-        }
-        write!(data.output, "}}tag;")?;
 
-        let has_data_variants = einfo.variants.values().any(|v| v.variant.is_some());
-        if has_data_variants {
-            write!(data.output, "union{{")?;
-            for (variant_name, variant_info) in &einfo.variants {
-                if let Some(variant_type) = variant_info.variant {
-                    Self::gen_type(data, variant_type)?;
-                    write!(data.output, " {}_data;", variant_name)?;
-                }
-            }
-            write!(data.output, "}}data;")?;
+    fn def_union(&self, data: &mut TransientData, uinfo: &UnionInfo) -> Result<(), std::fmt::Error> {
+        write!(data.output, "union {}{{", uinfo.name)?;
+        for (fname, finfo) in &uinfo.fields {
+            Self::gen_type(data, finfo.ty)?;
+            write!(data.output, " {};", fname)?;
         }
-
-        write!(data.output, "}};")?;
+        write!(data.output, "}};");
         Ok(())
     }
 
@@ -643,11 +580,11 @@ impl CLowering {
         for name in data.type_dependency_order.create_topological_order() {
             let soe = data
                 .tr
-                .resolve_struct_or_enum(name)
+                .resolve_composable_type(name)
                 .expect("Compiler Bug: Type not found, but should be present at this point");
             match soe {
-                StructOrEnumInfo::Enum(ei) => self.def_enum(data, ei)?,
-                StructOrEnumInfo::Struct(si) => self.def_struct(data, si)?,
+                ComposableTypeInfo::Struct(si) => self.def_struct(data, si)?,
+                ComposableTypeInfo::Union(ui) => self.def_union(data, ui)?,
             }
         }
 

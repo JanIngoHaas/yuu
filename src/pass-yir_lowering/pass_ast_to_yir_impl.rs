@@ -13,9 +13,9 @@ use crate::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
     utils::{
-        TypeRegistry, calculate_type_layout,
+        TypeRegistry, calculate_struct_layout, calculate_type_layout,
         collections::{FastHashMap, IndexMap},
-        type_info_table::{PrimitiveType, TypeInfo, primitive_u64},
+        type_info_table::{PrimitiveType, TypeInfo, primitive_u64, ptr_to},
     },
 };
 
@@ -145,10 +145,28 @@ impl<'a> TransientData<'a> {
         let result_operand = match (bin_expr.op, lhs_type, rhs_type) {
             // pointer + integer = pointer
             (BinOp::Add, Pointer(_), BuiltInPrimitive(I64 | U64)) => {
+                let element_ty = lhs_type.deref_ptr();
+                let element_layout = calculate_type_layout(element_ty, self.tr);
+                let byte_offset = match rhs_operand {
+                    Operand::U64Const(n) => Operand::U64Const(n * element_layout.size as u64),
+                    Operand::I64Const(n) => Operand::I64Const(n * element_layout.size as i64),
+                    _ => {
+                        let mul_var = self.function.make_binary(
+                            "byte_offset".intern(),
+                            YirBinOp::Mul,
+                            rhs_operand,
+                            Operand::U64Const(element_layout.size as u64),
+                            primitive_u64(),
+                        );
+                        self.add_temporary(mul_var);
+                        Operand::Variable(mul_var)
+                    }
+                };
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    rhs_operand,
+                    byte_offset,
+                    element_ty,
                 );
                 self.add_temporary(result_var);
                 Operand::Variable(result_var)
@@ -165,10 +183,36 @@ impl<'a> TransientData<'a> {
                 );
                 self.add_temporary(negated_var);
 
+                let element_ty = lhs_type.deref_ptr();
+                let element_layout = calculate_type_layout(element_ty, self.tr);
+                let byte_offset = {
+                    let idx_operand = Operand::Variable(negated_var);
+                    match idx_operand {
+                        Operand::I64Const(n) => {
+                            Operand::I64Const(n * element_layout.size as i64)
+                        }
+                        Operand::U64Const(n) => {
+                            Operand::U64Const(n * element_layout.size as u64)
+                        }
+                        _ => {
+                            let mul_var = self.function.make_binary(
+                                "byte_offset".intern(),
+                                YirBinOp::Mul,
+                                idx_operand,
+                                Operand::U64Const(element_layout.size as u64),
+                                primitive_u64(),
+                            );
+                            self.add_temporary(mul_var);
+                            Operand::Variable(mul_var)
+                        }
+                    }
+                };
+
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    Operand::Variable(negated_var),
+                    byte_offset,
+                    element_ty,
                 );
                 self.add_temporary(result_var);
                 Operand::Variable(result_var)
@@ -545,6 +589,8 @@ impl<'a> TransientData<'a> {
                     .resolve_struct(struct_instantiation_expr.struct_name)
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
+                let struct_layout = calculate_struct_layout(sinfo, self.tr);
+
                 let struct_var = self.function.make_alloca_single(sinfo.name, sinfo.ty, None);
                 self.add_temporary(struct_var);
 
@@ -552,14 +598,21 @@ impl<'a> TransientData<'a> {
                     let field_name = field.name;
                     let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
 
-                    let field = sinfo
+                    let (offset, field_ty) = sinfo
                         .fields
-                        .get(&field_name)
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (n, _))| **n == field_name)
+                        .map(|(idx, (_, info))| {
+                            (struct_layout.fields[idx].offset as u64, info.ty)
+                        })
                         .expect("Compiler bug: field not found in lowering to YIR");
-                    let field_var = self.function.make_get_field_ptr(
+
+                    let field_var = self.function.make_get_element_ptr(
                         field_name,
                         Operand::Variable(struct_var),
-                        field,
+                        Operand::U64Const(offset),
+                        field_ty,
                     );
                     self.add_temporary(field_var);
 
@@ -612,10 +665,23 @@ impl<'a> TransientData<'a> {
                     .resolve_struct(struct_type.name)
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
-                let field_ptr = self.function.make_get_field_ptr(
+                let struct_layout = calculate_struct_layout(field_info, self.tr);
+
+                let (offset, field_ty) = field_info
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (n, _))| **n == field_name)
+                    .map(|(idx, (_, info))| {
+                        (struct_layout.fields[idx].offset as u64, info.ty)
+                    })
+                    .expect("Compiler bug: field not found in lowering to YIR");
+
+                let field_ptr = self.function.make_get_element_ptr(
                     "field_ptr".intern(),
                     lhs,
-                    &field_info.fields[&field_name],
+                    Operand::U64Const(offset),
+                    field_ty,
                 );
                 self.add_temporary(field_ptr);
 
@@ -636,8 +702,11 @@ impl<'a> TransientData<'a> {
                     .resolve_enum(ei.enum_name)
                     .expect("Compiler bug: enum not found in lowering to YIR");
 
+                // Use the wrapper struct layout instead of calculate_enum_layout
+                let struct_layout = calculate_struct_layout(enum_info.wrapper_info, self.tr);
+
                 let variant_info = enum_info
-                    .variants
+                    .variants_info.fields
                     .get(&ei.variant_name)
                     .expect("Compiler bug: enum variant not found in lowering to YIR");
 
@@ -648,20 +717,30 @@ impl<'a> TransientData<'a> {
 
                 let enum_var =
                     self.function
-                        .make_alloca_single("enum_result".intern(), enum_info.ty, None);
+                        .make_alloca_single("enum_result".intern(), enum_info.wrapper_info.ty, None);
                 self.add_temporary(enum_var);
 
+                // Write tag field (field 0 in wrapper struct)
+                let tag_ptr = self.function.make_get_element_ptr(
+                    "enum_tag_ptr".intern(),
+                    Operand::Variable(enum_var),
+                    Operand::U64Const(0), // tag is field 0
+                    primitive_u64(),
+                );
+                self.add_temporary(tag_ptr);
                 self.function
-                    .make_store_active_variant_idx(enum_var, variant_info);
+                    .make_store(tag_ptr, Operand::U64Const(variant_info.field_idx));
 
                 if let Some(data_operand) = data_operand {
-                    let variant_ptr = self.function.make_get_variant_data_ptr(
-                        "variant_ptr".intern(),
+                    // Write payload field (field 1 in wrapper struct) - union overlays at same address
+                    let payload_ptr = self.function.make_get_element_ptr(
+                        "enum_payload_ptr".intern(),
                         Operand::Variable(enum_var),
-                        variant_info,
+                        Operand::U64Const(1), // payload is field 1
+                        variant_info.ty,
                     );
-                    self.add_temporary(variant_ptr);
-                    self.function.make_store(variant_ptr, data_operand);
+                    self.add_temporary(payload_ptr);
+                    self.function.make_store(payload_ptr, data_operand);
                 }
 
                 match context {
@@ -778,18 +857,26 @@ impl<'a> TransientData<'a> {
                             .resolve_struct(struct_instantiation_expr.struct_name)
                             .expect("Compiler bug: struct not found in lowering to YIR");
 
+                        let struct_layout = calculate_struct_layout(sinfo, self.tr);
+
                         for (field, field_expr) in &struct_instantiation_expr.fields {
                             let field_name = field.name;
                             let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
 
-                            let field_info = sinfo
+                            let (offset, field_ty) = sinfo
                                 .fields
-                                .get(&field_name)
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (n, _))| **n == field_name)
+                                .map(|(idx, (_, info))| {
+                                    (struct_layout.fields[idx].offset as u64, info.ty)
+                                })
                                 .expect("Compiler bug: field not found in lowering to YIR");
-                            let field_var = self.function.make_get_field_ptr(
+                            let field_var = self.function.make_get_element_ptr(
                                 field_name,
                                 Operand::Variable(ptr_var),
-                                field_info,
+                                Operand::U64Const(offset),
+                                field_ty,
                             );
                             self.add_temporary(field_var);
 
@@ -994,25 +1081,68 @@ impl<'a> TransientData<'a> {
 
                 match ty {
                     TypeInfo::Enum(enum_ty) => {
-                        let mut jump_targets = IndexMap::default();
                         let enum_info = self.tr.resolve_enum(enum_ty.name).unwrap();
+                        let struct_layout = calculate_struct_layout(enum_info.wrapper_info, self.tr);
+
+                        // Ensure we have a pointer to the scrutinee value
+                        let scrutinee_ptr = match lowered_match_expr {
+                            Operand::Variable(v) if v.ty().is_ptr() => Operand::Variable(v),
+                            Operand::Variable(v) => {
+                                let tmp = self.function.make_alloca_single(
+                                    "match_scrutinee".intern(),
+                                    v.ty(),
+                                    None,
+                                );
+                                self.add_temporary(tmp);
+                                self.function.make_store(tmp, Operand::Variable(v));
+                                Operand::Variable(tmp)
+                            }
+                            _ => {
+                                let tmp = self.function.make_alloca_single(
+                                    "match_scrutinee".intern(),
+                                    ty,
+                                    None,
+                                );
+                                self.add_temporary(tmp);
+                                self.function.make_store(tmp, lowered_match_expr);
+                                Operand::Variable(tmp)
+                            }
+                        };
+
+                        // Load the tag (discriminant) once for jump table dispatch
+                        let tag_ptr = self.function.make_get_element_ptr(
+                            "match_tag_ptr".intern(),
+                            scrutinee_ptr,
+                            Operand::U64Const(0),
+                            primitive_u64(),
+                        );
+                        self.add_temporary(tag_ptr);
+                        let tag_val = self.function.make_load(
+                            "match_tag".intern(),
+                            Operand::Variable(tag_ptr),
+                        );
+                        self.add_temporary(tag_val);
+                        let tag_operand = Operand::Variable(tag_val);
+
+                        let mut jump_targets = IndexMap::default();
                         for arm in match_stmt.arms.iter() {
                             let RefutablePatternNode::Enum(enum_pattern) = arm.pattern.as_ref();
                             let variant_info =
-                                enum_info.variants.get(&enum_pattern.variant_name).unwrap();
+                                enum_info.variants_info.fields.get(&enum_pattern.variant_name).unwrap();
                             let match_arm_block = self.function.add_block("match_arm".intern());
                             self.function.set_current_block(&match_arm_block);
 
                             if let Some(variant_data_binding) = enum_pattern.binding.as_ref() {
-                                let variant_ptr = self.function.make_get_variant_data_ptr(
-                                    "variant_data".intern(),
-                                    lowered_match_expr,
-                                    variant_info,
+                                let payload_ptr = self.function.make_get_element_ptr(
+                                    "variant_payload".intern(),
+                                    scrutinee_ptr,
+                                    Operand::U64Const(1), // payload is field 1
+                                    variant_info.ty,
                                 );
-                                self.add_temporary(variant_ptr);
+                                self.add_temporary(payload_ptr);
                                 let variant_value = self.function.make_load(
                                     "variant_value".intern(),
-                                    Operand::Variable(variant_ptr),
+                                    Operand::Variable(payload_ptr),
                                 );
                                 self.add_temporary(variant_value);
                                 self.lower_binding(
@@ -1023,7 +1153,7 @@ impl<'a> TransientData<'a> {
 
                             self.lower_block_body(&arm.body);
                             self.function.make_jump_if_no_terminator(match_merge_block);
-                            jump_targets.insert(variant_info.variant_idx, match_arm_block);
+                            jump_targets.insert(variant_info.field_idx, match_arm_block);
                         }
 
                         self.function.set_current_block(&match_header);
@@ -1040,7 +1170,7 @@ impl<'a> TransientData<'a> {
 
                         self.function.set_current_block(&match_header);
                         self.function.make_jump_table(
-                            lowered_match_expr,
+                            tag_operand,
                             jump_targets,
                             default_block,
                         );

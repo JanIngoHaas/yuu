@@ -1,5 +1,5 @@
 use crate::pass_yir_lowering::Label;
-use crate::pass_yir_lowering::yir::{BinOp, ControlFlow, Instruction, Operand, UnaryOp, Variable};
+use crate::pass_yir_lowering::yir::{ArrayInit, BinOp, ControlFlow, Function, Instruction, Operand, UnaryOp, Variable};
 use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::TypeInfo;
 use std::fmt;
@@ -336,37 +336,32 @@ pub fn format_instruction(
     f: &mut impl fmt::Write,
 ) -> fmt::Result {
     match inst {
-        Instruction::Alloca {
-            target,
-            count,
-            align,
-            init,
-        } => {
-            let align_str = align
+        Instruction::Alloca(cmd) => {
+            let align_str = cmd.align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
 
             write!(
                 f,
                 "{} := {}[{}; {}], {} {}",
-                format_variable(target, do_color),
+                format_variable(&cmd.target, do_color),
                 colorize("ALLOCA", "keyword", do_color),
-                format_type(target.ty().deref_ptr(), do_color),
-                colorize(&count.to_string(), "constant", do_color),
+                format_type(cmd.target.ty().deref_ptr(), do_color),
+                colorize(&cmd.count.to_string(), "constant", do_color),
                 colorize("ALIGN", "keyword", do_color),
                 colorize(&align_str, "constant", do_color)
             )?;
 
-            if let Some(init) = init {
+            if let Some(init) = &cmd.init {
                 write!(f, ", {} ", colorize("INIT", "keyword", do_color))?;
                 match init {
-                    crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                    ArrayInit::Zero => {
                         write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
                     }
-                    crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                    ArrayInit::Splat(operand) => {
                         write!(f, "{}", format_operand(operand, do_color))?;
                     }
-                    crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                    ArrayInit::Elements(elements) => {
                         write!(f, "{{")?;
                         for (i, element) in elements.iter().enumerate() {
                             if i > 0 {
@@ -381,88 +376,65 @@ pub fn format_instruction(
 
             writeln!(f)
         }
-        Instruction::StoreImmediate { target, value } => {
+        Instruction::StoreImmediate(cmd) => {
             writeln!(
                 f,
                 "{} <- {}",
-                format_variable(target, do_color),
-                format_operand(value, do_color)
+                format_variable(&cmd.target, do_color),
+                format_operand(&cmd.value, do_color)
             )
         }
-        Instruction::TakeAddress { target, source } => {
+        Instruction::TakeAddress(cmd) => {
             writeln!(
                 f,
                 "{} := {} {}",
-                format_variable(target, do_color),
+                format_variable(&cmd.target, do_color),
                 format_keyword("ADDR", do_color),
-                format_variable(source, do_color)
+                format_variable(&cmd.source, do_color)
             )
         }
-        Instruction::GetFieldPtr {
-            target,
-            base,
-            field,
-        } => {
-            writeln!(
-                f,
-                "{} := {} {} {}",
-                format_variable(target, do_color),
-                format_keyword("FIELD_PTR", do_color),
-                format_operand(base, do_color),
-                colorize(&format!(".{}", field), "operator", do_color)
-            )
-        }
-        Instruction::Load { target, source } => {
+        Instruction::Load(cmd) => {
             writeln!(
                 f,
                 "{} := {} {}",
-                format_variable(target, do_color),
+                format_variable(&cmd.target, do_color),
                 format_keyword("LOAD", do_color),
-                format_operand(source, do_color)
+                format_operand(&cmd.source, do_color)
             )
         }
-        Instruction::Store { dest, value } => {
+        Instruction::Store(cmd) => {
             writeln!(
                 f,
                 "{} <- {}",
-                format_operand(dest, do_color),
-                format_operand(value, do_color)
+                format_operand(&cmd.dest, do_color),
+                format_operand(&cmd.value, do_color)
             )
         }
-        Instruction::Binary {
-            target,
-            op,
-            lhs,
-            rhs,
-        } => {
+        Instruction::Binary(cmd) => {
             writeln!(
                 f,
                 "{} := {} {} {}",
-                format_variable(target, do_color),
-                format_operand(lhs, do_color),
-                format_binop(op, do_color),
-                format_operand(rhs, do_color)
+                format_variable(&cmd.target, do_color),
+                format_operand(&cmd.lhs, do_color),
+                format_binop(&cmd.op, do_color),
+                format_operand(&cmd.rhs, do_color)
             )
         }
-        Instruction::Unary {
-            target,
-            op,
-            operand,
-        } => {
+        Instruction::Unary(cmd) => {
             writeln!(
                 f,
                 "{} := {}{}",
-                format_variable(target, do_color),
-                format_unop(op, do_color),
-                format_operand(operand, do_color)
+                format_variable(&cmd.target, do_color),
+                format_unop(&cmd.op, do_color),
+                format_operand(&cmd.operand, do_color)
             )
         }
-        Instruction::Call { target, name, args } => {
-            if let Some(target) = target {
+        Instruction::Call(cmd) => {
+            if let Some(target) = &cmd.target {
                 write!(f, "{} := ", format_variable(target, do_color))?;
             }
-            write!(f, "{} {}(", format_keyword("CALL", do_color), name)?;
-            for (i, arg) in args.iter().enumerate() {
+            write!(f, "{} {}(", format_keyword("CALL", do_color), cmd.name)?;
+            for (i, arg) in cmd.args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
@@ -470,76 +442,39 @@ pub fn format_instruction(
             }
             writeln!(f, ")")
         }
-        Instruction::StoreActiveVariantIdx { dest, value } => {
+        Instruction::IntToPtr(cmd) => {
             writeln!(
                 f,
                 "{} := {} {}",
-                format_variable(dest, do_color),
-                format_keyword("STORE_VARIANT_IDX", do_color),
-                format_operand(value, do_color)
-            )
-        }
-        Instruction::LoadActiveVariantIdx { target, source } => {
-            writeln!(
-                f,
-                "{} := {} {}",
-                format_variable(target, do_color),
-                format_keyword("LOAD_VARIANT_IDX", do_color),
-                format_operand(source, do_color)
-            )
-        }
-        Instruction::GetVariantDataPtr {
-            target,
-            base,
-            variant,
-        } => {
-            writeln!(
-                f,
-                "{} := {} {} {}",
-                format_variable(target, do_color),
-                format_keyword("GET_VARIANT_PTR", do_color),
-                format_operand(base, do_color),
-                colorize(variant, "literal", do_color)
-            )
-        }
-        Instruction::IntToPtr { target, source } => {
-            writeln!(
-                f,
-                "{} := {} {}",
-                format_variable(target, do_color),
+                format_variable(&cmd.target, do_color),
                 format_keyword("INT_TO_PTR", do_color),
-                format_operand(source, do_color)
+                format_operand(&cmd.source, do_color)
             )
         }
-        Instruction::HeapAlloc {
-            target,
-            count,
-            align,
-            init,
-        } => {
-            let align_str = align
+        Instruction::HeapAlloc(cmd) => {
+            let align_str = cmd.align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
             write!(
                 f,
                 "{} := {}[{}; {}], {} {}",
-                format_variable(target, do_color),
+                format_variable(&cmd.target, do_color),
                 colorize("HEAP_ALLOC", "keyword", do_color),
-                format_type(target.ty().deref_ptr(), do_color),
-                format_operand(count, do_color),
+                format_type(cmd.target.ty().deref_ptr(), do_color),
+                format_operand(&cmd.count, do_color),
                 colorize("ALIGN", "keyword", do_color),
                 colorize(&align_str, "constant", do_color)
             )?;
-            if let Some(init) = init {
+            if let Some(init) = &cmd.init {
                 write!(f, ", {} ", colorize("INIT", "keyword", do_color))?;
                 match init {
-                    crate::pass_yir_lowering::yir::ArrayInit::Zero => {
+                    ArrayInit::Zero => {
                         write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
                     }
-                    crate::pass_yir_lowering::yir::ArrayInit::Splat(operand) => {
+                    ArrayInit::Splat(operand) => {
                         write!(f, "{}", format_operand(operand, do_color))?;
                     }
-                    crate::pass_yir_lowering::yir::ArrayInit::Elements(elements) => {
+                    ArrayInit::Elements(elements) => {
                         write!(f, "[")?;
                         for (i, element) in elements.iter().enumerate() {
                             if i > 0 {
@@ -553,51 +488,47 @@ pub fn format_instruction(
             }
             writeln!(f)
         }
-        Instruction::HeapFree { ptr } => {
+        Instruction::HeapFree(cmd) => {
             writeln!(
                 f,
                 "{} {}",
                 format_keyword("HEAP_FREE", do_color),
-                format_operand(ptr, do_color)
+                format_operand(&cmd.ptr, do_color)
             )
         }
-        Instruction::GetElementPtr {
-            target,
-            base,
-            index,
-        } => {
+        Instruction::GetElementPtr(cmd) => {
             writeln!(
                 f,
-                "{} := {} {}[{}]",
-                format_variable(target, do_color),
+                "{} := {} {} + {}",
+                format_variable(&cmd.target, do_color),
                 format_keyword("ELEM_PTR", do_color),
-                format_operand(base, do_color),
-                format_operand(index, do_color)
+                format_operand(&cmd.base, do_color),
+                format_operand(&cmd.offset, do_color)
             )
         }
-        Instruction::MemCpy { dest, src, count } => {
+        Instruction::MemCpy(cmd) => {
             writeln!(
                 f,
                 "{} {}, {}, {}",
                 format_keyword("MEMCPY", do_color),
-                format_operand(dest, do_color),
-                format_operand(src, do_color),
-                format_operand(count, do_color)
+                format_operand(&cmd.dest, do_color),
+                format_operand(&cmd.src, do_color),
+                format_operand(&cmd.count, do_color)
             )
         }
-        Instruction::MemSet { dest, value, count } => {
+        Instruction::MemSet(cmd) => {
             writeln!(
                 f,
                 "{} {}, {}, {}",
                 format_keyword("MEMSET", do_color),
-                format_operand(dest, do_color),
-                format_operand(value, do_color),
-                format_operand(count, do_color)
+                format_operand(&cmd.dest, do_color),
+                format_operand(&cmd.value, do_color),
+                format_operand(&cmd.count, do_color)
             )
         }
-        Instruction::KillSet { vars } => {
+        Instruction::KillSet(cmd) => {
             write!(f, "{} {{", colorize("KILLSET", "keyword", do_color))?;
-            for (i, var) in vars.iter().enumerate() {
+            for (i, var) in cmd.vars.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
@@ -623,6 +554,16 @@ pub fn format_instruction(
           //     }
           //     writeln!(f, " }}")
           // }
+        Instruction::Reinterp(cmd) => {
+            write!(
+                f,
+                "{} := {} {} as {}",
+                format_variable(&cmd.target, do_color),
+                format_keyword("REINTERP", do_color),
+                format_operand(&cmd.source, do_color),
+                format_type(cmd.target_type, do_color)
+            )
+        }
     }
 }
 
@@ -701,7 +642,7 @@ pub fn format_control_flow(
 // Functions for formatting complete YIR structures
 
 pub fn format_yir(
-    function: &crate::pass_yir_lowering::yir::Function,
+    function: &Function,
     do_color: bool,
     f: &mut impl fmt::Write,
 ) -> fmt::Result {

@@ -69,9 +69,9 @@ fn infer_enum_pattern(
             let enum_info = opt_enum.unwrap();
 
             // Get variant info from the type registry
-            if let Some(variant_info) = enum_info.variants.get(&enum_pattern.variant_name) {
+            if let Some(variant_info) = enum_info.variants_info.fields.get(&enum_pattern.variant_name) {
                 // Check pattern matching validity
-                match (&enum_pattern.binding, &variant_info.variant) {
+                match (&enum_pattern.binding, &variant_info.ty.as_option_if_nil()) {
                     (Some(binding), Some(associated_type)) => {
                         // Data variant with binding - valid
                         infer_binding(binding, block_id, associated_type, data);
