@@ -5,14 +5,14 @@ use crate::{
         RefutablePatternNode, ReturnStmt, Spanned, StmtNode, WhileStmt,
     },
     utils::{
-        BindingInfo, collections::UstrIndexSet,
+        BindingInfo,
+        collections::UstrIndexSet,
         type_info_table::{TypeInfo, primitive_bool, primitive_nil, unknown_type},
     },
 };
 
 use super::{
-    infer_binding, infer_expr, pass_type_inference_impl::TransientData,
-    pattern::infer_pattern,
+    infer_binding, infer_expr, pass_type_inference_impl::TransientData, pattern::infer_pattern,
 };
 
 fn infer_let_stmt(let_stmt: &LetStmt, block_id: usize, data: &mut TransientData) {
@@ -75,11 +75,7 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientData)
     }
 }
 
-fn infer_return_stmt(
-    return_stmt: &ReturnStmt,
-    block_id: usize,
-    data: &mut TransientData,
-) {
+fn infer_return_stmt(return_stmt: &ReturnStmt, block_id: usize, data: &mut TransientData) {
     if let Some(expr) = return_stmt.expr.as_ref() {
         let return_ty = infer_expr(expr, block_id, data, None);
         let unification = return_ty.unify(data.current_function_return_type);
@@ -255,11 +251,7 @@ fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut Transien
     infer_block_stmt(&while_stmt.condition_block.body, block_id, data);
 }
 
-pub fn infer_block_stmt(
-    block_stmt: &BlockStmt,
-    block_id: usize,
-    data: &mut TransientData,
-) {
+pub fn infer_block_stmt(block_stmt: &BlockStmt, block_id: usize, data: &mut TransientData) {
     // Create a new child scope for the block
     let child_block_id = data.block_tree.make_child(
         block_id,
@@ -307,8 +299,8 @@ fn infer_match_stmt(match_stmt: &MatchStmt, block_id: usize, data: &mut Transien
 
     // Check exhaustiveness if no default case
     if match_stmt.default_case.is_none()
-        && let TypeInfo::Enum(enum_type) = scrutinee_ty
-        && let Some(enum_info) = data.type_registry.resolve_enum(enum_type.name)
+        && let TypeInfo::Struct(struct_type) = scrutinee_ty
+        && let Some(enum_info) = data.type_registry.resolve_enum(struct_type.name)
     {
         let all_variants: UstrIndexSet = enum_info.variants_info.fields.keys().copied().collect();
         let missing_variants: Vec<_> = all_variants

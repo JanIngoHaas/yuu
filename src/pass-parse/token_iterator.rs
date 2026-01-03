@@ -1,5 +1,7 @@
 use crate::{
-    pass_diagnostics::{ErrorKind, YuuError}, pass_lexing::{Token, TokenKind}, pass_parse::ast::SourceInfo
+    pass_diagnostics::{ErrorKind, YuuError},
+    pass_lexing::{Token, TokenKind},
+    pass_parse::ast::SourceInfo,
 };
 use logos::Span;
 

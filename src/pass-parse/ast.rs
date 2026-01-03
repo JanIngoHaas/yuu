@@ -2,7 +2,10 @@ use logos::Span;
 use serde::{Deserialize, Serialize};
 use ustr::Ustr;
 
-use crate::{pass_lexing::Token, utils::{BindingTable, type_info_table::TypeInfoTable}};
+use crate::{
+    pass_lexing::Token,
+    utils::{BindingTable, type_info_table::TypeInfoTable},
+};
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
@@ -275,7 +278,7 @@ pub struct HeapAllocExpr {
 pub struct ArrayExpr {
     pub init_expr: Option<Box<ExprNode>>, // None for uninitialized (_)
     pub element_type: Option<Box<TypeNode>>, // None for inferred type
-    pub size: Box<ExprNode>,               // Array size expression
+    pub size: Box<ExprNode>,              // Array size expression
     pub span: Span,
     pub id: NodeId,
 }
@@ -400,7 +403,6 @@ pub enum ExprNode {
 
     AddressOf(AddressOfExpr),
 
-
     HeapAlloc(HeapAllocExpr),
 
     Array(ArrayExpr),
@@ -430,18 +432,18 @@ impl ExprNode {
             ExprNode::Deref(_) => true,
 
             // All other expressions are rvalues (temporaries)
-            ExprNode::Literal(_) |
-            ExprNode::Binary(_) |
-            ExprNode::Unary(_) |
-            ExprNode::FuncCall(_) |
-            ExprNode::Assignment(_) |
-            ExprNode::StructInstantiation(_) |
-            ExprNode::EnumInstantiation(_) |
-            ExprNode::AddressOf(_) |
-            ExprNode::HeapAlloc(_) |
-            ExprNode::ArrayLiteral(_) |
-            ExprNode::Cast(_) |
-            ExprNode::LuaMeta(_) => false,
+            ExprNode::Literal(_)
+            | ExprNode::Binary(_)
+            | ExprNode::Unary(_)
+            | ExprNode::FuncCall(_)
+            | ExprNode::Assignment(_)
+            | ExprNode::StructInstantiation(_)
+            | ExprNode::EnumInstantiation(_)
+            | ExprNode::AddressOf(_)
+            | ExprNode::HeapAlloc(_)
+            | ExprNode::ArrayLiteral(_)
+            | ExprNode::Cast(_)
+            | ExprNode::LuaMeta(_) => false,
         }
     }
 
@@ -693,7 +695,7 @@ pub enum StmtNode {
     Error(NodeId),
     Decl(DeclStmt),
     Def(DefStmt),
-    LuaMeta(LuaMetaStmt)
+    LuaMeta(LuaMetaStmt),
 }
 
 /// Represents a node in the AST

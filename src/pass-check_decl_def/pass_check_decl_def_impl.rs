@@ -4,7 +4,7 @@ use crate::{
         BlockStmt, ExprNode, StmtNode, StructuralNode,
         ast::{AST, SourceInfo},
     },
-    utils::{collections::UstrIndexSet},
+    utils::collections::UstrIndexSet,
 };
 use miette::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -21,12 +21,9 @@ impl CheckDeclDef {
     }
 
     /// Run the pass on the AST
-    pub fn run(
-        &self,
-        ast: &AST,
-        src_info: &SourceInfo,
-    ) -> Result<CheckDeclDefErrors> {
-        let errors: Vec<YuuError> = ast.structurals
+    pub fn run(&self, ast: &AST, src_info: &SourceInfo) -> Result<CheckDeclDefErrors> {
+        let errors: Vec<YuuError> = ast
+            .structurals
             .par_iter()
             .flat_map(|structural| {
                 let mut analyzer = CheckDeclDefAnalyzer {
@@ -183,9 +180,9 @@ impl CheckDeclDefAnalyzer<'_> {
                 self.check_expr(&heap_alloc_expr.expr, decls, defs);
             }
             ExprNode::Array(array_expr) => {
-                if let Some(expr) = array_expr
-                    .init_expr
-                    .as_ref() { self.check_expr(expr, decls, defs) }
+                if let Some(expr) = array_expr.init_expr.as_ref() {
+                    self.check_expr(expr, decls, defs)
+                }
                 self.check_expr(&array_expr.size, decls, defs);
             }
             ExprNode::ArrayLiteral(array_literal_expr) => {

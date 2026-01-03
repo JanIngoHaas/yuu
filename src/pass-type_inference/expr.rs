@@ -2,28 +2,26 @@ use crate::pass_diagnostics::{ErrorKind, YuuError, create_no_overload_error};
 use crate::pass_lexing::{Integer, TokenKind};
 use crate::pass_parse::add_ids::GetId;
 use crate::pass_parse::ast::{
-    NodeId, AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
-    LValueKind, LiteralExpr, MemberAccessExpr, Spanned, StructInstantiationExpr, UnaryExpr,
+    AssignmentExpr, BinaryExpr, EnumInstantiationExpr, ExprNode, FuncCallExpr, IdentExpr,
+    LValueKind, LiteralExpr, MemberAccessExpr, NodeId, Spanned, StructInstantiationExpr, UnaryExpr,
     UnaryOp,
 };
 use crate::pass_parse::{AddressOfExpr, ArrayLiteralExpr, BinOp, DerefExpr, HeapAllocExpr};
 use crate::pass_type_inference::pass_type_inference_impl::TransientData;
+use crate::utils::UnionFieldInfo;
 use crate::utils::type_info_table::{PrimitiveType, primitive_bool};
 use crate::utils::type_info_table::{
-    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, unknown_type,
+    TypeInfo, error_type, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+    primitive_u64, unknown_type,
 };
-use crate::utils::{UnionFieldInfo};
 // const MAX_SIMILAR_NAMES: u64 = 3;
 // const MIN_DST_SIMILAR_NAMES: u64 = 3;
-
 
 /// Helper function to extract i64 literal value from an expression, if it's a constant
 pub fn try_extract_i64_literal(expr: &crate::pass_parse::ast::ExprNode) -> Option<i64> {
     match expr {
         crate::pass_parse::ast::ExprNode::Literal(lit_expr) => match &lit_expr.lit.kind {
-            TokenKind::Integer(
-                Integer::I64(val),
-            ) => Some(*val),
+            TokenKind::Integer(Integer::I64(val)) => Some(*val),
             _ => None,
         },
         _ => None, // Not a constant literal
@@ -44,7 +42,6 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
     data.type_info_table.insert(lit.id, out);
     out
 }
-
 
 fn infer_cast_expr(
     cast_expr: &crate::pass_parse::ast::CastExpr,
@@ -72,15 +69,15 @@ fn infer_free_op(
     } else {
         let err = YuuError::builder()
             .kind(ErrorKind::FreeNonPointer)
-            .message(format!(
-                "Cannot free a non-pointer type '{}'",
-                operand_type
-            ))
+            .message(format!("Cannot free a non-pointer type '{}'", operand_type))
             .source(
                 data.src_code.source.clone(),
                 data.src_code.file_name.clone(),
             )
-            .span(unary_expr.expr.span().clone(), format!("has type '{}', expected pointer", operand_type))
+            .span(
+                unary_expr.expr.span().clone(),
+                format!("has type '{}', expected pointer", operand_type),
+            )
             .help("The `~` operator (free) can only be applied to pointer types")
             .build();
         data.errors.push(err);
@@ -101,7 +98,10 @@ fn try_builtin_primitive_arithmetic(
     rhs_type: &'static TypeInfo,
 ) -> Option<&'static TypeInfo> {
     // Only handle operations between identical primitive types
-    if let (TypeInfo::BuiltInPrimitive(prim_a), TypeInfo::BuiltInPrimitive(prim_b)) = (lhs_type, rhs_type) && prim_a == prim_b {
+    if let (TypeInfo::BuiltInPrimitive(prim_a), TypeInfo::BuiltInPrimitive(prim_b)) =
+        (lhs_type, rhs_type)
+        && prim_a == prim_b
+    {
         match op {
             // Arithmetic operations return the same type
             BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide | BinOp::Modulo => {
@@ -133,8 +133,8 @@ fn try_pointer_arithmetic(
     lhs_type: &'static TypeInfo,
     rhs_type: &'static TypeInfo,
 ) -> Option<&'static TypeInfo> {
-    use TypeInfo::*;
     use PrimitiveType::*;
+    use TypeInfo::*;
 
     match (op, lhs_type, rhs_type) {
         // pointer + integer = pointer
@@ -164,14 +164,18 @@ fn infer_binary_expr(
 
     // Fast-path 1: Built-in primitive arithmetic (i64 + i64, f32 * f32, etc.)
     // This prevents users from overloading core arithmetic operations
-    if let Some(result_type) = try_builtin_primitive_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual) {
+    if let Some(result_type) =
+        try_builtin_primitive_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual)
+    {
         data.type_info_table.insert(expr_id, result_type);
         return result_type;
     }
 
     // Fast-path 2: Pointer arithmetic (ptr + int, ptr - ptr, etc.)
     // These are fundamental language operations, not user-overloadable
-    if let Some(result_type) = try_pointer_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual) {
+    if let Some(result_type) =
+        try_pointer_arithmetic(binary_expr.op, lhs_type_actual, rhs_type_actual)
+    {
         data.type_info_table.insert(expr_id, result_type);
         return result_type;
     }
@@ -201,9 +205,7 @@ fn resolve_binary_overload(
 ) -> &'static TypeInfo {
     match data.type_registry.resolve_function(op_name, &[lhs, rhs]) {
         Ok(res) => {
-            data
-                .bindings
-                .insert(expr_id, res.binding_info.id);
+            data.bindings.insert(expr_id, res.binding_info.id);
             res.ty.ret
         }
         Err(candidates) => {
@@ -232,23 +234,21 @@ fn infer_unary_expr(
 
     let resolved_type = match unary_expr.op {
         UnaryOp::Free => infer_free_op(unary_expr, ty, data),
-        _ => {
-            match data.type_registry.resolve_function(op_name, &[ty]) {
-                Ok(res) => res.ty.ret,
-                Err(err) => {
-                    let err = create_no_overload_error(
-                        &op_name,
-                        err,
-                        &[ty],
-                        data.type_registry,
-                        data.src_code,
-                        unary_expr.span.clone(),
-                    );
-                    data.errors.push(err);
-                    error_type()
-                }
+        _ => match data.type_registry.resolve_function(op_name, &[ty]) {
+            Ok(res) => res.ty.ret,
+            Err(err) => {
+                let err = create_no_overload_error(
+                    &op_name,
+                    err,
+                    &[ty],
+                    data.type_registry,
+                    data.src_code,
+                    unary_expr.span.clone(),
+                );
+                data.errors.push(err);
+                error_type()
             }
-        }
+        },
     };
 
     data.type_info_table.insert(unary_expr.id, resolved_type);
@@ -289,9 +289,10 @@ fn resolve_variable_ident(
         ident_expr.span.clone(),
     ) {
         Ok(fr) => {
-            let ty = data.type_info_table.get(fr.binding_info.id).expect(
-                "Compiler bug: binding not found in type table - but it should be there",
-            );
+            let ty = data
+                .type_info_table
+                .get(fr.binding_info.id)
+                .expect("Compiler bug: binding not found in type table - but it should be there");
 
             if matches!(ty, TypeInfo::Unknown) {
                 let err = YuuError::builder()
@@ -300,7 +301,10 @@ fn resolve_variable_ident(
                         "Cannot infer type of '{}' - variable has unknown type",
                         ident_expr.ident
                     ))
-                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
                     .span(ident_expr.span.clone(), "unknown type")
                     .help("Define the variable with 'def' before using it to establish its type")
                     .build();
@@ -363,7 +367,10 @@ fn infer_func_call_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), format!("has type '{}', not callable", prim))
+                .span(
+                    func_call_expr.lhs.span().clone(),
+                    format!("has type '{}', not callable", prim),
+                )
                 .help("Only function types can be called with parentheses")
                 .build();
             data.errors.push(err);
@@ -377,7 +384,10 @@ fn infer_func_call_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "pointer type, not callable")
+                .span(
+                    func_call_expr.lhs.span().clone(),
+                    "pointer type, not callable",
+                )
                 .help("Function pointers are not supported yet")
                 .build();
             data.errors.push(err);
@@ -387,12 +397,18 @@ fn infer_func_call_expr(
         TypeInfo::Struct(struct_type) => {
             let err = YuuError::builder()
                 .kind(ErrorKind::NotCallable)
-                .message(format!("Cannot call struct type '{}' as a function", struct_type.name))
+                .message(format!(
+                    "Cannot call struct type '{}' as a function",
+                    struct_type.name
+                ))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), format!("struct type '{}', not callable", struct_type.name))
+                .span(
+                    func_call_expr.lhs.span().clone(),
+                    format!("struct type '{}', not callable", struct_type.name),
+                )
                 .help("Structs are instantiated with braces, like: StructName { field: value }")
                 .build();
             data.errors.push(err);
@@ -407,25 +423,11 @@ fn infer_func_call_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), "unknown type, not callable")
-                .help("Ensure the identifier is defined and has a known type")
-                .build();
-            data.errors.push(err);
-            error_type()
-        }
-        TypeInfo::Enum(e) => {
-            let err = YuuError::builder()
-                .kind(ErrorKind::NotCallable)
-                .message(format!(
-                    "Cannot call enum type '{}' as a function",
-                    e.name
-                ))
-                .source(
-                    data.src_code.source.clone(),
-                    data.src_code.file_name.clone(),
+                .span(
+                    func_call_expr.lhs.span().clone(),
+                    "unknown type, not callable",
                 )
-                .span(func_call_expr.lhs.span().clone(), format!("enum type '{}', not callable", e.name))
-                .help("Enums cannot be called as functions. Use enum variant syntax like 'EnumName::Variant' instead")
+                .help("Ensure the identifier is defined and has a known type")
                 .build();
             data.errors.push(err);
             error_type()
@@ -433,15 +435,15 @@ fn infer_func_call_expr(
         TypeInfo::Union(u) => {
             let err = YuuError::builder()
                 .kind(ErrorKind::NotCallable)
-                .message(format!(
-                    "Cannot call union type '{}' as a function",
-                    u.name
-                ))
+                .message(format!("Cannot call union type '{}' as a function", u.name))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(func_call_expr.lhs.span().clone(), format!("union type '{}', not callable", u.name))
+                .span(
+                    func_call_expr.lhs.span().clone(),
+                    format!("union type '{}', not callable", u.name),
+                )
                 .help("Unions cannot be called as functions")
                 .build();
             data.errors.push(err);
@@ -752,7 +754,10 @@ fn validate_enum_variant_binding(
                 )
                 .span(dexpr.span().clone(), "unexpected data provided here")
                 .label(ei.span.clone(), "for this unit variant")
-                .help(format!("Use '{}::{}' without parentheses for unit variants", ei.enum_name, ei.variant_name))
+                .help(format!(
+                    "Use '{}::{}' without parentheses for unit variants",
+                    ei.enum_name, ei.variant_name
+                ))
                 .build();
             data.errors.push(err);
         }
@@ -770,7 +775,10 @@ fn validate_enum_variant_binding(
                     data.src_code.file_name.clone(),
                 )
                 .span(ei.span.clone(), "missing required data")
-                .help(format!("Use '{}::{}(value)' with a value of type '{}'", ei.enum_name, ei.variant_name, expected_ty))
+                .help(format!(
+                    "Use '{}::{}(value)' with a value of type '{}'",
+                    ei.enum_name, ei.variant_name, expected_ty
+                ))
                 .build();
             data.errors.push(err);
         }
@@ -803,7 +811,10 @@ fn infer_enum_instantiation(
                             data.src_code.source.clone(),
                             data.src_code.file_name.clone(),
                         )
-                        .span(ei.span.clone(), format!("variant '{}' not defined", ei.variant_name))
+                        .span(
+                            ei.span.clone(),
+                            format!("variant '{}' not defined", ei.variant_name),
+                        )
                         .help(format!(
                             "Available variants for enum '{}': {}",
                             ei.enum_name,
@@ -836,7 +847,10 @@ fn infer_enum_instantiation(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(ei.span.clone(), format!("enum '{}' not defined", ei.enum_name))
+                .span(
+                    ei.span.clone(),
+                    format!("enum '{}' not defined", ei.enum_name),
+                )
                 .help("Define this enum before using it")
                 .build();
             data.errors.push(err);
@@ -927,7 +941,10 @@ fn infer_deref_expr(
         _ => {
             let error = YuuError::builder()
                 .kind(ErrorKind::NotAPointer)
-                .message(format!("Cannot dereference non-pointer type '{}'", operand_type))
+                .message(format!(
+                    "Cannot dereference non-pointer type '{}'",
+                    operand_type
+                ))
                 .source(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
@@ -1015,7 +1032,10 @@ fn infer_array_expr(
                     data.src_code.source.clone(),
                     data.src_code.file_name.clone(),
                 )
-                .span(array_expr.size.span(), format!("has type '{}', expected 'i64'", size_type))
+                .span(
+                    array_expr.size.span(),
+                    format!("has type '{}', expected 'i64'", size_type),
+                )
                 .help("Array sizes must be of type i64")
                 .build(),
         );
@@ -1072,7 +1092,13 @@ fn infer_array_literal_expr(
                         data.src_code.source.clone(),
                         data.src_code.file_name.clone(),
                     )
-                    .span(element.span(), format!("has type '{}', expected '{}'", element_type_inferred, element_type))
+                    .span(
+                        element.span(),
+                        format!(
+                            "has type '{}', expected '{}'",
+                            element_type_inferred, element_type
+                        ),
+                    )
                     .help("All array elements must have the same type")
                     .build(),
             );

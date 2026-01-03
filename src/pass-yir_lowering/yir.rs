@@ -2,7 +2,7 @@ use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
 use crate::utils::collections::IndexMap;
 use crate::utils::type_info_table::{
-    PrimitiveType, TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
+    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
     primitive_nil, primitive_u64,
 };
 use std::fmt;
@@ -135,9 +135,12 @@ pub enum UnaryOp {
 
 #[derive(Clone, Debug)]
 pub enum ArrayInit {
-    Zero,                   // Zero-initialize all elements
-    Splat(Operand),         // Fill all elements with same value
-    Elements(Vec<Operand>), // Explicit element values
+    /// Zero-initialize all elements
+    Zero,                   
+    /// Fill all elements with same value
+    Splat(Operand),        
+    /// Explicit element valuess
+    Elements(Vec<Operand>), 
 }
 
 // Command structs for instructions
@@ -164,7 +167,6 @@ pub struct TakeAddressCmd {
     pub target: Variable, // Pointer variable to store the address
     pub source: Variable, // Variable whose address we're taking
 }
-
 
 /// Load value through a pointer
 #[derive(Clone, Debug)]
@@ -205,7 +207,6 @@ pub struct CallCmd {
     pub args: Vec<Operand>,       // Arguments
 }
 
-
 /// Convert integer to pointer
 #[derive(Clone, Debug)]
 pub struct IntToPtrCmd {
@@ -216,8 +217,8 @@ pub struct IntToPtrCmd {
 /// Heap allocation - returns a pointer to allocated memory
 #[derive(Clone, Debug)]
 pub struct HeapAllocCmd {
-    pub target: Variable,        // Pointer variable to store the heap address
-    pub count: Operand,          // Number of elements to allocate (can be dynamic)
+    pub target: Variable, // Pointer variable to store the heap address
+    pub count: Operand,   // Number of elements to allocate (can be dynamic)
     pub align: Option<u64>,
     pub init: Option<ArrayInit>, // Array initialization (None for uninitialized)
 }
@@ -244,12 +245,16 @@ pub struct MemSetCmd {
     pub count: Operand, // Number of bytes to set
 }
 
-/// Get pointer to array element at index
+/// Get pointer to nested element (LLVM-style GEP with multiple indices)
+/// Supports typed indexing through structures and arrays.
+/// The first index is applied to the pointer-to-aggregate type,
+/// and subsequent indices navigate through nested aggregates.
+/// The result type is determined by target.ty().deref_ptr().
 #[derive(Clone, Debug)]
 pub struct GetElementPtrCmd {
-    pub target: Variable, // Result pointer to element
-    pub base: Operand,    // Base pointer
-    pub offset: Operand,  // Byte offset from base (must be u64)
+    pub target: Variable,        // Result pointer to element
+    pub base: Operand,           // Base pointer operand
+    pub indices: Vec<Operand>,   // Multiple indices for nested access
 }
 
 /// Marks that multiple stack variables are being killed (e.g., leaving scope)
@@ -261,8 +266,8 @@ pub struct KillSetCmd {
 /// Reinterpret bytes of one type as another type (bitcast/type punning)
 #[derive(Clone, Debug)]
 pub struct ReinterpCmd {
-    pub target: Variable,             // Result variable
-    pub source: Operand,              // Source operand to reinterpret
+    pub target: Variable,               // Result variable
+    pub source: Operand,                // Source operand to reinterpret
     pub target_type: &'static TypeInfo, // Type to reinterpret as
 }
 
@@ -364,7 +369,6 @@ pub struct Function {
 }
 
 impl Function {
-
     pub fn split_ast_id(&self) -> (u32, u32) {
         // TODO: Forbid usize == u32 ---> should be u64
         // Assume usize == u64
@@ -834,7 +838,7 @@ impl Function {
         &mut self,
         name_hint: Ustr,
         base: Operand,
-        offset_bytes: Operand,
+        indices: Vec<Operand>,
         result_pointee_ty: &'static TypeInfo,
     ) -> Variable {
         let base_ty = base.ty();
@@ -845,17 +849,15 @@ impl Function {
         );
 
         debug_assert!(
-            matches!(
-                offset_bytes.ty(),
-                TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
-                    | TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
-            ),
-            "GEP offset must be integer bytes (i64/u64), got {}",
-            offset_bytes.ty()
+            !indices.is_empty(),
+            "GEP must have at least one index"
         );
 
         debug_assert!(
-            !matches!(result_pointee_ty, TypeInfo::Error | TypeInfo::Pointer(TypeInfo::Error)),
+            !matches!(
+                result_pointee_ty,
+                TypeInfo::Error | TypeInfo::Pointer(TypeInfo::Error)
+            ),
             "GEP target pointee type cannot be error"
         );
 
@@ -865,10 +867,26 @@ impl Function {
         let instr = Instruction::GetElementPtr(GetElementPtrCmd {
             target,
             base,
-            offset: offset_bytes,
+            indices,
         });
         self.get_current_block_mut().instructions.push(instr);
         target
+    }
+
+    // Convenience method for single-index GEP
+    pub fn make_get_element_ptr_single(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        index: Operand,
+        result_pointee_ty: &'static TypeInfo,
+    ) -> Variable {
+        self.make_get_element_ptr(
+            name_hint,
+            base,
+            vec![index],
+            result_pointee_ty,
+        )
     }
 
     // pub fn make_enum(

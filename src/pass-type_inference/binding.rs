@@ -1,7 +1,4 @@
-use crate::{
-    pass_parse::BindingNode,
-    utils::type_info_table::TypeInfo,
-};
+use crate::{pass_parse::BindingNode, utils::type_info_table::TypeInfo};
 
 use super::pass_type_inference_impl::TransientData;
 

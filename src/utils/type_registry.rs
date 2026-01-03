@@ -1,14 +1,11 @@
-use std::str::FromStr;
-
 use ustr::Ustr;
 
-use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap, UstrIndexSet};
-use crate::utils::type_info_table::{
-    FunctionType, GiveMePtrHashes, TypeInfo, function_type, primitive_bool,
-    primitive_f32, primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type,
-    union_type,
-};
 use crate::utils::BindingInfo;
+use crate::utils::collections::{FastHashMap, UstrHashMap, UstrIndexMap};
+use crate::utils::type_info_table::{
+    FunctionType, GiveMePtrHashes, TypeInfo, function_type, primitive_bool, primitive_f32,
+    primitive_f64, primitive_i64, primitive_nil, primitive_u64, struct_type, union_type,
+};
 use crate::{
     pass_diagnostics::levenshtein_distance,
     pass_parse::ast::{InternUstr, NodeId},
@@ -523,9 +520,7 @@ impl TypeRegistry {
     }
 
     pub fn all_enums<'a>(&'a self) -> impl Iterator<Item = EnumInfo<'a>> + 'a {
-        self.enums.keys().flat_map(
-            |n| self.resolve_enum(*n)
-        )
+        self.enums.keys().flat_map(|n| self.resolve_enum(*n))
     }
 
     pub fn add_struct(
@@ -541,10 +536,10 @@ impl TypeRegistry {
             ty,
             binding_info: binding_info.clone(),
         };
-        
+
         // Cache the struct type by its definition NodeId
         self.structural_types_by_node.insert(binding_info.id, ty);
-        
+
         self.structs.insert(info.name, info).is_none()
     }
 
@@ -554,9 +549,9 @@ impl TypeRegistry {
         variants: UstrIndexMap<UnionFieldInfo>,
         definition_location: BindingInfo,
     ) -> bool {
-        let uty = union_type(name);
         let union_name: Ustr = format!("_U_{}", name).intern();
-        
+        let uty = union_type(union_name);
+
         let union_info = UnionInfo {
             ty: uty,
             name: union_name,
@@ -567,9 +562,9 @@ impl TypeRegistry {
         if self.unions.insert(union_name, union_info).is_some() {
             return false;
         }
-        
-        let struct_name: Ustr = format!("_S_{}", name).intern();
-        let sty = struct_type(struct_name);
+
+        // Use the user-provided enum name for the wrapper struct
+        let sty = struct_type(name);
         let fields = vec![
             StructFieldInfo {
                 name: "tag".intern(),
@@ -585,18 +580,23 @@ impl TypeRegistry {
 
         let wrapper_struct_info = StructInfo {
             fields: fields.into_iter().map(|f| (f.name, f)).collect(),
-            name: struct_name,
+            name: name, // Use the enum name directly
             ty: sty,
             binding_info: definition_location.clone(),
         };
 
-        if self.structs.insert(wrapper_struct_info.name, wrapper_struct_info).is_some() {
+        if self
+            .structs
+            .insert(wrapper_struct_info.name, wrapper_struct_info)
+            .is_some()
+        {
             return false;
         }
 
-        // Cache the enum type by its definition NodeId
-        self.structural_types_by_node.insert(definition_location.id, sty);
-        self.enums.insert(name, (struct_name, union_name)).is_none()
+        // Cache the struct type by its definition NodeId since enums are now represented as structs
+        self.structural_types_by_node
+            .insert(definition_location.id, sty);
+        self.enums.insert(name, (name, union_name)).is_none()
     }
 
     pub fn add_union(
@@ -606,7 +606,12 @@ impl TypeRegistry {
         ty: &'static TypeInfo,
         binding_info: BindingInfo,
     ) -> bool {
-        let union_info = UnionInfo { name, fields, ty, binding_info: binding_info.clone() };
+        let union_info = UnionInfo {
+            name,
+            fields,
+            ty,
+            binding_info: binding_info.clone(),
+        };
         self.unions.insert(name, union_info).is_none()
     }
 
@@ -626,7 +631,8 @@ impl TypeRegistry {
         };
 
         // Cache the function type by its definition NodeId
-        self.structural_types_by_node.insert(binding_info.id, general_type);
+        self.structural_types_by_node
+            .insert(binding_info.id, general_type);
 
         let funcs = self.functions.entry(info.name).or_default();
 
@@ -651,16 +657,28 @@ impl TypeRegistry {
     pub fn resolve_enum(&self, name: Ustr) -> Option<EnumInfo<'_>> {
         let (struct_name, union_name) = self.enums.get(&name)?;
         Some(EnumInfo {
-            wrapper_info: self.structs.get(struct_name).expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
-            variants_info: self.unions.get(union_name).expect("Compiler Bug: Enum name registered, but variants union not found"),
+            wrapper_info: self
+                .structs
+                .get(struct_name)
+                .expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
+            variants_info: self
+                .unions
+                .get(union_name)
+                .expect("Compiler Bug: Enum name registered, but variants union not found"),
         })
     }
 
     pub fn resolve_enum_mut(&mut self, name: Ustr) -> Option<EnumInfoMut<'_>> {
         let (struct_name, union_name) = self.enums.get(&name)?;
         Some(EnumInfoMut {
-            wrapper_info: self.structs.get_mut(struct_name).expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
-            variants_info: self.unions.get_mut(union_name).expect("Compiler Bug: Enum name registered, but variants union not found"),
+            wrapper_info: self
+                .structs
+                .get_mut(struct_name)
+                .expect("Compiler Bug: Enum name registered, but wrapper struct not found"),
+            variants_info: self
+                .unions
+                .get_mut(union_name)
+                .expect("Compiler Bug: Enum name registered, but variants union not found"),
         })
     }
 
@@ -691,9 +709,7 @@ impl TypeRegistry {
             "f64" => Some(primitive_f64()),
             "bool" => Some(primitive_bool()),
             "nil" => Some(primitive_nil()),
-            _ => {
-                self.resolve_composable_type(name).map(|info| info.ty())
-            }
+            _ => self.resolve_composable_type(name).map(|info| info.ty()),
         }
     }
 
@@ -720,7 +736,10 @@ impl TypeRegistry {
 
     /// Get a cached structural type by its NodeId, returns unknown_type() if not found
     pub fn get_structural_type(&self, node_id: NodeId) -> &'static TypeInfo {
-        self.structural_types_by_node.get(&node_id).copied().unwrap_or_else(|| crate::utils::type_info_table::unknown_type())
+        self.structural_types_by_node
+            .get(&node_id)
+            .copied()
+            .unwrap_or_else(|| crate::utils::type_info_table::unknown_type())
     }
 
     pub fn resolve_function(

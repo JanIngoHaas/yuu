@@ -1,16 +1,13 @@
 use crate::{
-    pass_parse::ast::{StructuralNode, FuncDefStructural},
+    pass_parse::ast::{FuncDefStructural, StructuralNode},
     pass_type_inference::infer_stmt,
     utils::{
         BindingInfo,
-        type_info_table::{primitive_nil, error_type},
+        type_info_table::{error_type, primitive_nil},
     },
 };
 
-use super::{
-    infer_type,
-    pass_type_inference_impl::{TransientData},
-};
+use super::{infer_type, pass_type_inference_impl::TransientData};
 
 fn infer_func_def(def: &FuncDefStructural, current_block_id: usize, data: &mut TransientData) {
     let func_block_id = data.block_tree.make_child(
@@ -25,19 +22,9 @@ fn infer_func_def(def: &FuncDefStructural, current_block_id: usize, data: &mut T
         let func_block = data.block_tree.get_block_mut(func_block_id);
 
         for arg in &def.decl.args {
-            func_block.insert_variable(
-                arg.name,
-                arg.id,
-                Some(arg.span.clone()),
-                arg.is_mut,
-            );
+            func_block.insert_variable(arg.name, arg.id, Some(arg.span.clone()), arg.is_mut);
 
-            let arg_type = infer_type(
-                &arg.ty,
-                data.type_registry,
-                data.errors,
-                data.src_code,
-            );
+            let arg_type = infer_type(&arg.ty, data.type_registry, data.errors, data.src_code);
             data.type_info_table.insert(arg.id, arg_type);
         }
     }

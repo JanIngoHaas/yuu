@@ -224,8 +224,6 @@ pub enum TokenKind {
     #[token("&")]
     Ampersand,
 
-
-
     #[token("~")]
     Tilde,
 

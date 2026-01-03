@@ -28,7 +28,6 @@ pub struct StructLayout {
     pub total_alignment: usize,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct UnionLayout {
     pub total_size: usize,
@@ -60,18 +59,12 @@ pub fn calculate_type_layout(ty: &TypeInfo, type_registry: &TypeRegistry) -> Lay
             let layout = calculate_struct_layout(struct_info, type_registry);
             LayoutInfo::new(layout.total_size, layout.total_alignment)
         }
-        TypeInfo::Enum(enum_type) => {
-            let enum_info = type_registry
-                .resolve_enum(enum_type.name)
-                .unwrap_or_else(|| panic!("Compiler Error: Unknown enum type: {}", enum_type.name));
-            // Enum layout is just the wrapper struct layout
-            let struct_layout = calculate_struct_layout(enum_info.wrapper_info, type_registry);
-            LayoutInfo::new(struct_layout.total_size, struct_layout.total_alignment)
-        }
         TypeInfo::Union(union_type) => {
             let union_info = type_registry
                 .resolve_union(union_type.name)
-                .unwrap_or_else(|| panic!("Compiler Error: Unknown union type: {}", union_type.name));
+                .unwrap_or_else(|| {
+                    panic!("Compiler Error: Unknown union type: {}", union_type.name)
+                });
             let layout = calculate_union_layout(union_info, type_registry);
             LayoutInfo::new(layout.total_size, layout.total_alignment)
         }
@@ -124,7 +117,6 @@ pub fn calculate_array_layout(
     let total_size = element_layout.size * count as usize;
     LayoutInfo::new(total_size, element_layout.alignment)
 }
-
 
 pub fn calculate_union_layout(union_info: &UnionInfo, type_registry: &TypeRegistry) -> UnionLayout {
     let mut max_size = 0;

@@ -4,13 +4,8 @@ use crate::pass_yir_lowering::{
     BasicBlock, BinOp, ControlFlow, Function, FunctionDeclarationState, Instruction, Label, Module,
     Operand, UnaryOp, Variable,
 };
-use crate::pass_yir_lowering::yir::{
-    AllocaCmd, BinaryCmd, CallCmd, GetElementPtrCmd, HeapAllocCmd, HeapFreeCmd, IntToPtrCmd,
-    KillSetCmd, LoadCmd, MemCpyCmd, MemSetCmd, StoreCmd, StoreImmediateCmd, TakeAddressCmd,
-    UnaryCmd,
-};
 use crate::utils::{
-    EnumInfo, StructInfo, ComposableTypeInfo, TypeRegistry, UnionInfo,
+    ComposableTypeInfo, StructInfo, TypeRegistry, UnionInfo, calculate_struct_layout, calculate_type_layout,
     type_info_table::{PrimitiveType, TypeInfo},
 };
 use miette::IntoDiagnostic;
@@ -26,15 +21,15 @@ struct TransientData<'a> {
     type_dependency_order: &'a TypeDependencyGraph,
 }
 
-pub struct CLowering;
+pub struct CLowerer;
 
-impl Default for CLowering {
+impl Default for CLowerer {
     fn default() -> Self {
         Self
     }
 }
 
-impl CLowering {
+impl CLowerer {
     pub fn new() -> Self {
         Self
     }
@@ -42,7 +37,7 @@ impl CLowering {
 
 pub struct CSourceCode(pub String);
 
-impl CLowering {
+impl CLowerer {
     fn write_var_name(var: &Variable, f: &mut impl std::fmt::Write) -> Result<(), std::fmt::Error> {
         write!(f, "{}_{}", var.name(), var.id())
     }
@@ -87,9 +82,6 @@ impl CLowering {
             ),
             TypeInfo::Struct(struct_type) => {
                 write!(data.output, "struct {}", struct_type.name)
-            }
-            TypeInfo::Enum(enum_type) => {
-                write!(data.output, "struct {}", enum_type.name)
             }
             TypeInfo::Union(union_type) => {
                 write!(data.output, "union {}", union_type.name)
@@ -396,8 +388,16 @@ impl CLowering {
                 Self::gen_type(data, cmd.target.ty())?;
                 write!(data.output, ")((uint8_t *)")?;
                 self.gen_operand(data, &cmd.base)?;
-                write!(data.output, " + ")?;
-                self.gen_operand(data, &cmd.offset)?;
+
+                // Convert LLVM-style multi-index GEP to byte offsets for C
+                // Walk through indices and current type to calculate byte offsets
+                if !cmd.indices.is_empty() {
+                    let total_offset = self.calculate_gep_byte_offset(data, &cmd.base, &cmd.indices)?;
+                    if total_offset != 0 {
+                        write!(data.output, " + {}", total_offset)?;
+                    }
+                }
+
                 write!(data.output, ");")?;
             }
             Instruction::MemCpy(cmd) => {
@@ -548,10 +548,73 @@ impl CLowering {
         Ok(())
     }
 
+    /// Calculate the total byte offset for LLVM-style multi-index GEP
+    /// Converts [0, field_idx] style indices to byte offsets for C pointer arithmetic
+    fn calculate_gep_byte_offset(
+        &self,
+        data: &TransientData,
+        base: &Operand,
+        indices: &[Operand],
+    ) -> Result<u64, std::fmt::Error> {
+        let mut current_type = base.ty().deref_ptr(); // Start with what the base pointer points to
+        let mut total_offset = 0u64;
 
-    fn def_union(&self, data: &mut TransientData, uinfo: &UnionInfo) -> Result<(), std::fmt::Error> {
+        for (index_pos, index_operand) in indices.iter().enumerate() {
+            // Get the index value (must be constant for C backend)
+            let index_val = match index_operand {
+                Operand::U64Const(n) => *n,
+                Operand::I64Const(n) if *n >= 0 => *n as u64,
+                _ => {
+                    // For now, only support constant indices in C backend
+                    // Dynamic indices would require runtime calculation
+                    panic!("C backend currently only supports constant GEP indices, got non-constant index at position {}", index_pos);
+                }
+            };
+
+            // Apply the index based on the current type
+            match current_type {
+                TypeInfo::Struct(struct_info) => {
+                    // Struct field access: index selects field
+                    let resolved_struct = data.tr.resolve_struct(struct_info.name)
+                        .expect("Struct not found during C GEP lowering");
+                    let layout = calculate_struct_layout(resolved_struct, data.tr);
+
+                    if (index_val as usize) >= layout.fields.len() {
+                        panic!("Struct field index {} out of bounds for struct with {} fields",
+                               index_val, layout.fields.len());
+                    }
+
+                    total_offset += layout.fields[index_val as usize].offset as u64;
+                    // Update current type to the field's type for next iteration
+                    current_type = resolved_struct.fields[index_val as usize].1.ty;
+                }
+                TypeInfo::BuiltInPrimitive(_) | TypeInfo::Pointer(_) => {
+                    // Element access: index * sizeof(element)
+                    let element_layout = calculate_type_layout(current_type, data.tr);
+                    total_offset += index_val * element_layout.size as u64;
+                    // Type stays the same for array-like access
+                }
+                _ => {
+                    panic!("Unsupported type for GEP indexing in C backend: {:?}", current_type);
+                }
+            }
+        }
+
+        Ok(total_offset)
+    }
+
+    fn def_union(
+        &self,
+        data: &mut TransientData,
+        uinfo: &UnionInfo,
+    ) -> Result<(), std::fmt::Error> {
         write!(data.output, "union {}{{", uinfo.name)?;
         for (fname, finfo) in &uinfo.fields {
+            // Skip Nil-typed fields: Nil has no representation in C and corresponds
+            // to an enum variant with no payload, so no union member should be emitted.
+            if let TypeInfo::BuiltInPrimitive(PrimitiveType::Nil) = finfo.ty {
+                continue;
+            }
             Self::gen_type(data, finfo.ty)?;
             write!(data.output, " {};", fname)?;
         }
@@ -627,7 +690,7 @@ impl CLowering {
     }
 }
 
-impl CLowering {
+impl CLowerer {
     pub fn run(
         &self,
         module: &Module,

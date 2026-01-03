@@ -1,5 +1,7 @@
 use crate::pass_yir_lowering::Label;
-use crate::pass_yir_lowering::yir::{ArrayInit, BinOp, ControlFlow, Function, Instruction, Operand, UnaryOp, Variable};
+use crate::pass_yir_lowering::yir::{
+    ArrayInit, BinOp, ControlFlow, Function, Instruction, Operand, UnaryOp, Variable,
+};
 use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::TypeInfo;
 use std::fmt;
@@ -337,7 +339,8 @@ pub fn format_instruction(
 ) -> fmt::Result {
     match inst {
         Instruction::Alloca(cmd) => {
-            let align_str = cmd.align
+            let align_str = cmd
+                .align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
 
@@ -452,7 +455,8 @@ pub fn format_instruction(
             )
         }
         Instruction::HeapAlloc(cmd) => {
-            let align_str = cmd.align
+            let align_str = cmd
+                .align
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "natural".to_string());
             write!(
@@ -497,14 +501,20 @@ pub fn format_instruction(
             )
         }
         Instruction::GetElementPtr(cmd) => {
-            writeln!(
+            write!(
                 f,
-                "{} := {} {} + {}",
+                "{} := {} {} [",
                 format_variable(&cmd.target, do_color),
-                format_keyword("ELEM_PTR", do_color),
-                format_operand(&cmd.base, do_color),
-                format_operand(&cmd.offset, do_color)
-            )
+                format_keyword("GEP", do_color),
+                format_operand(&cmd.base, do_color)
+            )?;
+            for (i, idx) in cmd.indices.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", format_operand(idx, do_color))?;
+            }
+            writeln!(f, "]")
         }
         Instruction::MemCpy(cmd) => {
             writeln!(
@@ -536,24 +546,24 @@ pub fn format_instruction(
             }
             writeln!(f, "}}")
         } // Instruction::MakeStruct {
-          //     target,
-          //     type_ident,
-          //     fields,
-          // } => {
-          //     write!(
-          //         f,
-          //         "{} := {} {{ ",
-          //         format_variable(target, do_color),
-          //         format_keyword("make_struct", do_color)
-          //     )?;
-          //     for (i, (field, val)) in fields.iter().enumerate() {
-          //         if i > 0 {
-          //             write!(f, ", ")?;
-          //         }
-          //         write!(f, "{}: {}", field, format_operand(val, do_color))?;
-          //     }
-          //     writeln!(f, " }}")
-          // }
+        //     target,
+        //     type_ident,
+        //     fields,
+        // } => {
+        //     write!(
+        //         f,
+        //         "{} := {} {{ ",
+        //         format_variable(target, do_color),
+        //         format_keyword("make_struct", do_color)
+        //     )?;
+        //     for (i, (field, val)) in fields.iter().enumerate() {
+        //         if i > 0 {
+        //             write!(f, ", ")?;
+        //         }
+        //         write!(f, "{}: {}", field, format_operand(val, do_color))?;
+        //     }
+        //     writeln!(f, " }}")
+        // }
         Instruction::Reinterp(cmd) => {
             write!(
                 f,
@@ -641,11 +651,7 @@ pub fn format_control_flow(
 
 // Functions for formatting complete YIR structures
 
-pub fn format_yir(
-    function: &Function,
-    do_color: bool,
-    f: &mut impl fmt::Write,
-) -> fmt::Result {
+pub fn format_yir(function: &Function, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
     // Function signature
     writeln!(
         f,

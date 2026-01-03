@@ -26,7 +26,11 @@ impl IdGenerator {
     }
 
     pub fn max_expr_id(&self) -> NodeId {
-        if self.next_expr_id == 0 { 0 } else { self.next_expr_id - 1 }
+        if self.next_expr_id == 0 {
+            0
+        } else {
+            self.next_expr_id - 1
+        }
     }
 
     pub fn expr_count(&self) -> usize {

@@ -1,8 +1,6 @@
 use crate::pass_diagnostics::error::YuuError;
 use crate::pass_lexing::{Token, TokenKind};
-use crate::pass_parse::{
-    ast::SourceInfo,
-};
+use crate::pass_parse::ast::SourceInfo;
 use logos::Logos;
 
 pub struct LexingErrors(pub Vec<YuuError>);

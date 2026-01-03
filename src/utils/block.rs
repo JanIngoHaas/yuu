@@ -45,7 +45,10 @@ pub struct BindingTable(FastHashMap<NodeId, NodeId>);
 
 impl BindingTable {
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(FastHashMap::with_capacity_and_hasher(capacity, Default::default()))
+        Self(FastHashMap::with_capacity_and_hasher(
+            capacity,
+            Default::default(),
+        ))
     }
 }
 
@@ -62,7 +65,6 @@ impl DerefMut for BindingTable {
         &mut self.0
     }
 }
-
 
 impl<'a> BlockTree<'a> {
     pub fn new(root_block: &'a Block) -> Self {

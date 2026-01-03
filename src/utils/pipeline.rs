@@ -1,13 +1,13 @@
 use crate::pass_c_compilation::pass_c_compilation_impl::{CCompilation, CExecutable};
-use crate::pass_c_lowering::pass_yir_to_c::{CLowering, CSourceCode};
+use crate::pass_c_lowering::pass_yir_to_c::{CLowerer, CSourceCode};
 use crate::pass_check_decl_def::{CheckDeclDef, CheckDeclDefErrors};
 use crate::pass_control_flow_analysis::pass_control_flow_analysis_impl::{
     ControlFlowAnalysis, ControlFlowAnalysisErrors,
 };
 use crate::pass_diagnostics::pass_diagnostics_impl::Diagnostics;
+use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
 use crate::pass_parse::{AST, SourceInfo};
-use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_print_yir::pass_print_yir_impl::{
     YirTextualRepresentation, YirToColoredString, YirToString,
 };
@@ -109,18 +109,18 @@ pub struct Pipeline {
 
     source_info: Option<SourceInfo>,
     pub id_generator: Option<crate::pass_parse::add_ids::IdGenerator>,
-    
+
     pub ast: Option<AST>,
     syntax_errors: Option<SyntaxErrors>,
-    
+
     type_registry: Option<TypeRegistry>,
     type_errors: Option<TypeInferenceErrors>,
-    
+
     control_flow_errors: Option<ControlFlowAnalysisErrors>,
     decl_def_errors: Option<CheckDeclDefErrors>,
     type_dependency_errors: Option<TypeDependencyAnalysisErrors>,
     type_dependency_order: Option<TypeDependencyGraph>,
-    
+
     module: Option<Module>,
     c_code: Option<CSourceCode>,
 
@@ -255,7 +255,7 @@ impl Pipeline {
         let start = Instant::now();
         let (type_registry, _type_registration_errors) = TypeRegistration.run(ast, source_info);
         let duration = start.elapsed();
-        
+
         self.type_registry = Some(type_registry);
         self.type_registration_done = true;
         self.record_pass_timing("type_registration", duration);
@@ -275,9 +275,13 @@ impl Pipeline {
         let source_info = self.source_info.as_ref().unwrap();
 
         let start = Instant::now();
-        let type_errors = TypeInference.run(ast, self.type_registry.as_ref().unwrap(), source_info.clone())?;
+        let type_errors = TypeInference.run(
+            ast,
+            self.type_registry.as_ref().unwrap(),
+            source_info.clone(),
+        )?;
         let duration = start.elapsed();
-        
+
         self.record_pass_timing("type_inference", duration);
         self.type_errors = Some(type_errors);
         self.type_inference_done = true;
@@ -330,11 +334,7 @@ impl Pipeline {
         let type_registry = self.type_registry.as_ref().unwrap();
 
         let start = Instant::now();
-        let module = YirLowering::new().run(
-            ast,
-            type_registry,
-            false
-        )?;
+        let module = YirLowering::new().run(ast, type_registry, false)?;
         let duration = start.elapsed();
 
         self.record_pass_timing("yir_lowering", duration);
@@ -358,7 +358,7 @@ impl Pipeline {
         let type_dependency_order = self.type_dependency_order.as_ref().unwrap();
 
         let start = Instant::now();
-        let c_code = CLowering::new().run(module, type_registry, type_dependency_order)?;
+        let c_code = CLowerer::new().run(module, type_registry, type_dependency_order)?;
         let duration = start.elapsed();
 
         self.record_pass_timing("c_lowering", duration);

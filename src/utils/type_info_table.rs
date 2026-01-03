@@ -239,9 +239,6 @@ impl TypeInterner {
             TypeInfo::Struct(struct_type) => {
                 panic!("Cannot dereference non-pointer type: {}", struct_type.name)
             }
-            TypeInfo::Enum(enum_type) => {
-                panic!("Cannot dereference non-pointer type: {}", enum_type.name)
-            }
             TypeInfo::Union(union_type) => {
                 panic!("Cannot dereference non-pointer type: {}", union_type.name)
             }
@@ -415,21 +412,12 @@ pub enum TypeInfo {
     Error,
     Unknown, // When we haven't yet determined the type
     Struct(StructType),
-    Enum(EnumType),
     Union(UnionType),
 }
 
 impl TypeInfo {
-    pub fn is_enum(&self) -> bool {
-        matches!(self, TypeInfo::Enum(_))
-    }
-
     pub fn is_union(&self) -> bool {
         matches!(self, TypeInfo::Union(_))
-    }
-
-    pub fn is_refutable_pattern(&self) -> bool {
-        self.is_enum()
     }
 
     pub fn is_ptr(&self) -> bool {
@@ -445,11 +433,7 @@ impl TypeInfo {
     }
 
     pub fn as_option_if_nil(&'static self) -> Option<&'static TypeInfo> {
-        if self.is_nil() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_nil() { None } else { Some(self) }
     }
 
     pub fn is_struct_or_ptr_to_struct(&self) -> bool {
@@ -467,12 +451,10 @@ impl TypeInfo {
             TypeInfo::Function(_) => false,
             TypeInfo::Error => false,
             TypeInfo::Struct(_) => false,
-            TypeInfo::Enum(_) => false,
             TypeInfo::Union(_) => false,
             TypeInfo::Unknown => false,
         }
     }
-
 
     pub fn ptr_to(&'static self) -> &'static Self {
         TYPE_CACHE.ptr_to(self)
@@ -515,7 +497,6 @@ impl Display for TypeInfo {
             TypeInfo::Error => write!(f, "<error>"),
             TypeInfo::Unknown => write!(f, "<unknown>"),
             TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
-            TypeInfo::Enum(enum_type) => write!(f, "{}", enum_type.name),
             TypeInfo::Union(union_type) => write!(f, "{}", union_type.name),
         }
     }
