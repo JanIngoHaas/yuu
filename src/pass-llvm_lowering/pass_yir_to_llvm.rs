@@ -21,7 +21,7 @@ pub struct TransientData<'ctx> {
     /// Current function being lowered
     pub function: Option<FunctionValue<'ctx>>,
     /// Map YIR Variables -> LLVM pointer values (allocated stack slots / locals)
-    pub var_map: FastHashMap<yir::Variable, PointerValue<'ctx>>,
+    pub var_map: FastHashMap<yir::Variable, BasicValueEnum<'ctx>>,
     /// Optional mapping from labels to LLVM basic blocks created during lowering
     pub block_map: FastHashMap<i64, inkwell::basic_block::BasicBlock<'ctx>>,
 }
@@ -285,7 +285,7 @@ impl LLVMLowerer {
         for ((yir_param, param_ty), param_value) in func.params.iter().zip(llvm_param_types.iter()).zip(llvm_params) {
             let alloca = td.builder.build_alloca(*param_ty, yir_param.name()).unwrap();
             let _ = td.builder.build_store(alloca, param_value).unwrap();
-            td.var_map.insert(*yir_param, alloca);
+            td.var_map.insert(*yir_param, alloca.into());
         }
         
         // Iterate blocks in order and lower each
@@ -387,7 +387,7 @@ impl LLVMLowerer {
             alloced
         };
 
-        td.var_map.insert(cmd.target, allocd_stack_ptr);
+        td.var_map.insert(cmd.target, allocd_stack_ptr.into());
 
         if let Some(init) = &cmd.init {
             match init {
@@ -601,9 +601,7 @@ impl LLVMLowerer {
             }
         };
 
-        // Store the result into the target variable's stack slot
-        let target_ptr = td.var_map.get(&cmd.target).expect("Compiler Bug: target variable missing in var_map for BinaryCmd");
-        td.builder.build_store(*target_ptr, result).unwrap();
+        td.var_map.insert(cmd.target, result);
     }
 
     fn lower_unary<'ctx>(&self, cmd: &yir::UnaryCmd, td: &mut TransientData<'ctx>) {
@@ -615,22 +613,34 @@ impl LLVMLowerer {
     }
 
     fn lower_int_to_ptr<'ctx>(&self, cmd: &yir::IntToPtrCmd, td: &mut TransientData<'ctx>) {
-        let int_val = self.lower_operand(&cmd.source, td);
-        let int_as_ptr = match int_val {
-            BasicValueEnum::IntValue(iv) => td.builder.build_int_to_ptr(iv, td.context.ptr_type(inkwell::AddressSpace::default()), "int_to_ptr").unwrap(),
-            _ => panic!("IntToPtr source must be an integer value"),
+        let int_val = self.lower_operand(&cmd.source, td).into_int_value();
+        let int_as_ptr = td.builder.build_int_to_ptr(int_val, td.context.ptr_type(inkwell::AddressSpace::default()), "int_to_ptr").unwrap();
+        td.var_map.insert(cmd.target, int_as_ptr.into());
+    }
+
+    fn lower_heap_alloc<'ctx>(&self, cmd: &yir::HeapAllocCmd, td: &mut TransientData<'ctx>) {
+
+        let ty = self.lower_type_basic(td.type_registry, cmd.target.ty(), td.context);
+        let malloced_ptr = match cmd.count {
+            yir::MallocCount::Scalar => {
+                let malloced_ptr = td.builder.build_malloc(ty, "heap_alloc").unwrap();
+                malloced_ptr
+            },
+            yir::MallocCount::Multiple(operand) => {
+                let count_val = self.lower_operand(&operand, td);
+                let malloced_ptr = td.builder.build_array_malloc(ty, count_val.into_int_value(), "heap_alloc").unwrap();
+                malloced_ptr
+            }
         };
-        let target_ptr = td.var_map.get(&cmd.target).expect("Compiler Bug: target variable missing in var_map for IntToPtrCmd");
-        td.builder.build_store(*target_ptr, int_as_ptr).unwrap();
-        td.var_map.insert(cmd.target, *target_ptr);
+
+        td.var_map.insert(cmd.target, malloced_ptr.into());     
+
     }
 
-    fn lower_heap_alloc<'ctx>(&self, _cmd: &yir::HeapAllocCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: emit call to allocator and return pointer
-    }
-
-    fn lower_heap_free<'ctx>(&self, _cmd: &yir::HeapFreeCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: emit call to deallocator
+    fn lower_heap_free<'ctx>(&self, cmd: &yir::HeapFreeCmd, td: &mut TransientData<'ctx>) {
+        let ptr_val = self.lower_operand(&cmd.ptr, td);
+        let ptr = ptr_val.into_pointer_value();
+        td.builder.build_free(ptr).unwrap();
     }
 
     fn lower_memcpy<'ctx>(&self, cmd: &yir::MemCpyCmd, td: &mut TransientData<'ctx>) {
@@ -687,16 +697,19 @@ impl LLVMLowerer {
             td.builder.build_gep(base_llvm_type, base_ptr, &llvm_indices, "gep_tmp").unwrap()
         };
 
-        let target_ptr = td.var_map.get(&cmd.target).expect("Compiler Bug: target variable missing in var_map for GetElementPtrCmd");
-        td.builder.build_store(*target_ptr, gep_ptr).unwrap();
+        td.var_map.insert(cmd.target, gep_ptr.into());
     }
 
     fn lower_kill_set<'ctx>(&self, _cmd: &yir::KillSetCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: handle variable lifetime end (debug/stack unwind hints)
+        unimplemented!("KillSet lowering is not yet implemented");
     }
 
-    fn lower_reinterp<'ctx>(&self, _cmd: &yir::ReinterpCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: implement bitcast/bitcast-like operation for reinterpreting between types
+    fn lower_reinterp<'ctx>(&self, cmd: &yir::ReinterpCmd, td: &mut TransientData<'ctx>) {
+        let source_val = self.lower_operand(&cmd.source, td);
+        let target_ty = self.lower_type_basic(td.type_registry, cmd.target.ty(), td.context);
+
+        let reinterpreted_ptr = td.builder.build_bit_cast(source_val, target_ty, "reinterp_ptr").unwrap();
+        td.var_map.insert(cmd.target, reinterpreted_ptr);
     }
 
     /// Convert a YIR Operand to an LLVM BasicValueEnum
@@ -708,11 +721,10 @@ impl LLVMLowerer {
             yir::Operand::F64Const(v) => BasicValueEnum::FloatValue(td.context.f64_type().const_float(*v)),
             yir::Operand::BoolConst(v) => BasicValueEnum::IntValue(td.context.bool_type().const_int(if *v { 1 } else { 0 }, false)),
             yir::Operand::Variable(var) => {
-                // Variable is a pointer to a stack slot - we need to load from it
+                // Variable is a pointer to a stack slot OR it is already a value by LLVM
                 let ptr = td.var_map.get(var)
                     .expect("ICE: Variable not found in var_map during operand lowering");
-                let lty = self.lower_type_basic(td.type_registry, var.ty(), td.context);
-                td.builder.build_load(lty, *ptr, "load").unwrap()
+                *ptr
             }
             yir::Operand::NoOp => panic!("ICE: Cannot lower NoOp operand to LLVM value"),
         }

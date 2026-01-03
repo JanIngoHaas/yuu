@@ -1,4 +1,4 @@
-use crate::pass_yir_lowering::Label;
+use crate::pass_yir_lowering::{Label, MallocCount};
 use crate::pass_yir_lowering::yir::{
     ArrayInit, BinOp, ControlFlow, Function, Instruction, Operand, UnaryOp, Variable,
 };
@@ -465,7 +465,10 @@ pub fn format_instruction(
                 format_variable(&cmd.target, do_color),
                 colorize("HEAP_ALLOC", "keyword", do_color),
                 format_type(cmd.target.ty().deref_ptr(), do_color),
-                format_operand(&cmd.count, do_color),
+                match cmd.count {
+                    MallocCount::Scalar => colorize("SCALAR", "constant", do_color),
+                    MallocCount::Multiple(op) => format_operand(&op, do_color),
+                },
                 colorize("ALIGN", "keyword", do_color),
                 colorize(&align_str, "constant", do_color)
             )?;

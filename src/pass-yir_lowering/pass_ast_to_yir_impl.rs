@@ -128,7 +128,6 @@ impl<'a> TransientData<'a> {
     }
 
     /// Lower pointer arithmetic operations (ptr + int, ptr - int, ptr - ptr)
-    /// Returns Some(operand) if this is a valid pointer arithmetic operation, None otherwise
     fn try_lower_pointer_arithmetic(
         &mut self,
         bin_expr: &crate::pass_parse::ast::BinaryExpr,
@@ -800,7 +799,7 @@ impl<'a> TransientData<'a> {
                         let value_type = self.get_type(struct_instantiation_expr.id);
 
                         // Allocate memory on heap first
-                        let ptr_var = self.function.make_heap_alloc_single(
+                        let ptr_var = self.function.make_heap_alloc_sclar(
                             "heap_ptr".intern(),
                             value_type,
                             None,
@@ -841,7 +840,7 @@ impl<'a> TransientData<'a> {
                         let value_type = self.get_type(heap_alloc_expr.expr.node_id());
 
                         // For non-struct/array literals, fall back to stack-then-copy
-                        let ptr_var = self.function.make_heap_alloc_single(
+                        let ptr_var = self.function.make_heap_alloc_sclar(
                             "heap_ptr".intern(),
                             value_type,
                             None,

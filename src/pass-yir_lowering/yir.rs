@@ -136,12 +136,13 @@ pub enum UnaryOp {
 #[derive(Clone, Debug)]
 pub enum ArrayInit {
     /// Zero-initialize all elements
-    Zero,                   
+    Zero,
     /// Fill all elements with same value
-    Splat(Operand),        
+    Splat(Operand),
     /// Explicit element valuess
-    Elements(Vec<Operand>), 
+    Elements(Vec<Operand>),
 }
+
 
 // Command structs for instructions
 
@@ -214,11 +215,17 @@ pub struct IntToPtrCmd {
     pub source: Operand,  // Source integer operand (must be u64)
 }
 
+#[derive(Clone, Debug)]
+pub enum MallocCount {
+    Scalar,
+    Multiple(Operand),
+}
+
 /// Heap allocation - returns a pointer to allocated memory
 #[derive(Clone, Debug)]
 pub struct HeapAllocCmd {
     pub target: Variable, // Pointer variable to store the heap address
-    pub count: Operand,   // Number of elements to allocate (can be dynamic)
+    pub count: MallocCount,   // Number of elements to allocate (can be dynamic)
     pub align: Option<u64>,
     pub init: Option<ArrayInit>, // Array initialization (None for uninitialized)
 }
@@ -727,6 +734,17 @@ impl Function {
         count: Operand,
         init: Option<ArrayInit>,
     ) -> Variable {
+        self.make_heap_alloc_helper(name_hint, element_ty, MallocCount::Multiple(count), init)
+    }
+
+    // Private helper that centralizes HeapAlloc construction
+    fn make_heap_alloc_helper(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: MallocCount,
+        init: Option<ArrayInit>,
+    ) -> Variable {
         let dest_ty = element_ty.ptr_to();
         let target = self.fresh_variable(name_hint, dest_ty);
         let instr = Instruction::HeapAlloc(HeapAllocCmd {
@@ -740,14 +758,14 @@ impl Function {
     }
 
     // Convenience method for single element heap allocation
-    pub fn make_heap_alloc_single(
+    pub fn make_heap_alloc_sclar(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Variable {
         let init = init_value.map(ArrayInit::Splat);
-        self.make_heap_alloc(name_hint, ty, Operand::U64Const(1), init)
+        self.make_heap_alloc_helper(name_hint, ty, MallocCount::Scalar, init)
     }
 
     // Convenience method for zero-initialized heap array
@@ -888,6 +906,7 @@ impl Function {
             result_pointee_ty,
         )
     }
+
 
     // pub fn make_enum(
     //     &mut self,
