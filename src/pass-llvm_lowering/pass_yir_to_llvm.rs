@@ -1,10 +1,14 @@
 use inkwell::context::Context;
 use inkwell::builder::Builder;
 use inkwell::module::Module as LlvmModule;
-use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, BasicMetadataValueEnum, AnyValue};
 use inkwell::types::{AnyTypeEnum, BasicTypeEnum, BasicMetadataTypeEnum, BasicType};
 use inkwell::targets::TargetData;
 use inkwell::IntPredicate;
+use inkwell::execution_engine::JitFunction;
+use inkwell::OptimizationLevel;
+use inkwell::targets::{Target, TargetMachine, RelocMode, CodeModel, FileType, InitializationConfig};
+use std::path::Path;
 
 use crate::pass_yir_lowering::yir as yir;
 use crate::utils::TypeRegistry;
@@ -51,6 +55,9 @@ impl<'ctx> TransientData<'ctx> {
 pub struct LLVMLowerer;
 
 impl LLVMLowerer {
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn lower_type_basic<'ctx>(&self, type_registry: &TypeRegistry, ty: &'static TypeInfo, context: &'ctx Context) -> BasicTypeEnum<'ctx>
     {
@@ -112,9 +119,8 @@ impl LLVMLowerer {
         }
     }
 
-    /// Top-level lowering entry point for a YIR module.
-    /// This will iterate all defined functions and lower them.
-    pub fn lower_module(&self, module: &yir::Module, type_registry: &TypeRegistry) {
+    /// Generate LLVM IR from YIR module and return as string
+    pub fn lower_module_to_ir(&self, module: &yir::Module, type_registry: &TypeRegistry) -> Result<String, String> {
         let context = Context::create();
         let mut td = TransientData::new(&context, "yuu_module", type_registry);
 
@@ -123,20 +129,120 @@ impl LLVMLowerer {
 
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => todo!(),
+                yir::FunctionDeclarationState::Declared(_function) => {
+                    // For now, we don't need to handle forward declarations
+                    // They should be resolved when we encounter the definition
+                },
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function(function, &mut td);
                 },
             }
         }
-        
-        
-        
+
+        // Verify the module
+        if let Err(msg) = td.module.verify() {
+            return Err(format!("LLVM module verification failed: {}", msg));
+        }
+
+        Ok(td.module.print_to_string().to_string())
+    }
+
+    /// JIT compile and execute a function
+    pub fn jit_execute_main(&self, module: &yir::Module, type_registry: &TypeRegistry) -> Result<i32, String> {
+        let context = Context::create();
+        let mut td = TransientData::new(&context, "yuu_module", type_registry);
+
+        // Generate helper functions once at module level
+        self.generate_template_fill_helper(&mut td);
+
+        for (_name, fds) in &module.functions {
+            match fds {
+                yir::FunctionDeclarationState::Declared(_function) => {
+                    // For now, we don't need to handle forward declarations
+                },
+                yir::FunctionDeclarationState::Defined(function) => {
+                    self.lower_function(function, &mut td);
+                },
+            }
+        }
+
+        // Verify the module
+        if let Err(msg) = td.module.verify() {
+            return Err(format!("LLVM module verification failed: {}", msg));
+        }
+
+        // Create JIT execution engine
+        let execution_engine = td.module.create_jit_execution_engine(OptimizationLevel::None)
+            .map_err(|e| format!("Failed to create JIT execution engine: {}", e))?;
+
+        // Check that main function exists
+        let _main_fn = td.module.get_function("main")
+            .ok_or_else(|| "No main function found for JIT execution".to_string())?;
+
+        // Get the JIT compiled function
+        unsafe {
+            let main_jit: JitFunction<unsafe extern "C" fn() -> i32> = execution_engine.get_function("main")
+                .map_err(|e| format!("Failed to get JIT function: {}", e))?;
+
+            // Execute the function
+            let result = main_jit.call();
+            Ok(result)
+        }
+    }
+
+    /// AOT compile to object file
+    pub fn aot_compile(&self, module: &yir::Module, type_registry: &TypeRegistry, output_path: &Path) -> Result<(), String> {
+        let context = Context::create();
+        let mut td = TransientData::new(&context, "yuu_module", type_registry);
+
+        // Generate helper functions once at module level
+        self.generate_template_fill_helper(&mut td);
+
+        for (_name, fds) in &module.functions {
+            match fds {
+                yir::FunctionDeclarationState::Declared(_function) => {
+                    // For now, we don't need to handle forward declarations
+                },
+                yir::FunctionDeclarationState::Defined(function) => {
+                    self.lower_function(function, &mut td);
+                },
+            }
+        }
+
+        // Verify the module
+        if let Err(msg) = td.module.verify() {
+            return Err(format!("LLVM module verification failed: {}", msg));
+        }
+
+        // Initialize LLVM targets
+        Target::initialize_native(&InitializationConfig::default())
+            .map_err(|e| format!("Failed to initialize native target: {}", e))?;
+
+        // Get the target triple for the current host
+        let target_triple = TargetMachine::get_default_triple();
+        let target = Target::from_triple(&target_triple)
+            .map_err(|e| format!("Failed to get target from triple: {}", e))?;
+
+        // Create target machine
+        let target_machine = target.create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            OptimizationLevel::Default,
+            RelocMode::PIC,
+            CodeModel::Default,
+        ).ok_or_else(|| "Failed to create target machine".to_string())?;
+
+        // Compile to object file
+        target_machine.write_to_file(&td.module, FileType::Object, output_path)
+            .map_err(|e| format!("Failed to write object file: {}", e))?;
+
+        println!("Successfully compiled to object file: {}", output_path.display());
+        Ok(())
     }
 
     /// Generate (or retrieve) a helper function for filling arrays with a template value using memcpy
     /// Equivalent to C's __yuu_template_fill: void __yuu_template_fill(void* dest, const void* template_val, size_t element_size, size_t count, u32 dest_align, u32 src_align)
-    #[allow(dead_code)]
     fn generate_template_fill_helper<'ctx>(&'ctx self, td: &'ctx mut TransientData) -> FunctionValue<'ctx> {
         let name = "__yuu_template_fill";
         if let Some(existing) = td.module.get_function(name) {
@@ -247,7 +353,6 @@ impl LLVMLowerer {
         
         let llvm_ret_type = self.lower_type(td.type_registry, func.return_type, td.context);
         
-        // For now, just pass all parameters directly (we'll refine this to pass structs by pointer later)
         let llvm_param_types: Vec<_> = func.params.iter().map(|param| {
             self.lower_type_basic(td.type_registry, param.ty(), td.context)
         }).collect();
@@ -301,7 +406,7 @@ impl LLVMLowerer {
             }
 
             // Lower terminator
-            self.lower_terminator(&yir_block.terminator, llvm_bb, td);
+            self.lower_terminator(&yir_block.terminator, td);
         }
     }
 
@@ -328,7 +433,7 @@ impl LLVMLowerer {
         }
     }
 
-    fn lower_terminator<'ctx>(&self, terminator: &yir::ControlFlow, _llvm_bb: inkwell::basic_block::BasicBlock<'ctx>, td: &mut TransientData<'ctx>) {
+    fn lower_terminator<'ctx>(&self, terminator: &yir::ControlFlow, td: &mut TransientData<'ctx>) {
         match terminator {
             yir::ControlFlow::Jump { target } => {
                 // Emit unconditional branch to the target block
@@ -336,35 +441,72 @@ impl LLVMLowerer {
                     let _ = td.builder.build_unconditional_branch(*target_bb);
                 }
             }
-            yir::ControlFlow::Branch { condition: _, if_true, if_false } => {
-                // Evaluate branch condition (stub: currently not translated)
-                // TODO: Lower `condition` to an LLVM i1 value
-                // For now, use a constant true which goes to `if_true`.
+            yir::ControlFlow::Branch { condition, if_true, if_false } => {
+                // Evaluate the branch condition
+                let condition_value = self.lower_operand(condition, td);
+                let condition_i1 = match condition_value {
+                    BasicValueEnum::IntValue(int_val) => {
+                        // Convert to i1 if it's not already
+                        if int_val.get_type().get_bit_width() == 1 {
+                            int_val
+                        } else {
+                            // Compare with zero to get i1
+                            let zero = int_val.get_type().const_zero();
+                            td.builder.build_int_compare(IntPredicate::NE, int_val, zero, "tobool").unwrap()
+                        }
+                    }
+                    _ => panic!("Branch condition must be an integer value"),
+                };
+
                 if let Some(true_bb) = td.block_map.get(&if_true.id()) {
                     if let Some(false_bb) = td.block_map.get(&if_false.id()) {
-                        let i1_true = td.context.bool_type().const_int(1, false);
-                        let _ = td.builder.build_conditional_branch(i1_true, *true_bb, *false_bb);
+                        let _ = td.builder.build_conditional_branch(condition_i1, *true_bb, *false_bb);
                     }
                 }
             }
-            yir::ControlFlow::JumpTable { scrutinee: _scrutinee, jump_targets: _, default } => {
-                // TODO: implement jump table lowering using switch instruction
-                // For now, lower to unconditional branch to default if present
-                if let Some(default_label) = default {
-                    if let Some(default_bb) = td.block_map.get(&default_label.id()) {
-                        let _ = td.builder.build_unconditional_branch(*default_bb);
-                    }
+            yir::ControlFlow::JumpTable { scrutinee, jump_targets, default } => {
+                // Lower the scrutinee (switch value)
+                let scrutinee_value = self.lower_operand(scrutinee, td).into_int_value();
+
+                // Get the default block
+                let default_bb = if let Some(default_label) = default {
+                    *td.block_map.get(&default_label.id())
+                        .expect("ICE: Default block not found in block_map")
+                } else {
+                    // If no default provided, create an unreachable block
+                    let unreachable_bb = td.context.append_basic_block(td.function.unwrap(), "unreachable");
+                    unreachable_bb
+                };
+
+                // Build the switch instruction cases
+                let mut switch_cases = Vec::new();
+                for (variant_index, target_label) in jump_targets {
+                    let case_value = td.context.i64_type().const_int(*variant_index, false);
+                    let target_bb = *td.block_map.get(&target_label.id())
+                        .expect("ICE: Jump target block not found in block_map");
+                    switch_cases.push((case_value, target_bb));
+                }
+
+                let _switch_instr = td.builder.build_switch(scrutinee_value, default_bb, &switch_cases).unwrap();
+
+                // If we created an unreachable block, fill it
+                if default.is_none() {
+                    let current_bb = td.builder.get_insert_block().unwrap();
+                    td.builder.position_at_end(default_bb);
+                    td.builder.build_unreachable().unwrap();
+                    td.builder.position_at_end(current_bb);
                 }
             }
             yir::ControlFlow::Return(opt) => {
                 // TODO: Lower return value properly according to function return type
                 match opt {
-                    Some(_op) => {
-                        // Placeholder: return a zero i64
-                        let zero = td.context.i64_type().const_int(0, false);
-                        let _ = td.builder.build_return(Some(&zero));
+                    Some(return_operand) => {
+                        // Lower the return value and return it
+                        let return_value = self.lower_operand(return_operand, td);
+                        let _ = td.builder.build_return(Some(&return_value));
                     }
                     None => {
+                        // Void return
                         let _ = td.builder.build_return(None);
                     }
                 }
@@ -483,20 +625,47 @@ impl LLVMLowerer {
 
     }
 
-    fn lower_store_immediate<'ctx>(&self, _cmd: &yir::StoreImmediateCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: store immediate constant into the given stack slot
+    fn lower_store_immediate<'ctx>(&self, cmd: &yir::StoreImmediateCmd, td: &mut TransientData<'ctx>) {
+        let immediate_value = self.lower_operand(&cmd.value, td);
+        td.var_map.insert(cmd.target, immediate_value);
     }
 
-    fn lower_take_address<'ctx>(&self, _cmd: &yir::TakeAddressCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: take address of variable (pointer to stack slot)
+    fn lower_take_address<'ctx>(&self, cmd: &yir::TakeAddressCmd, td: &mut TransientData<'ctx>) {
+        let source_value = td.var_map.get(&cmd.source)
+            .expect("ICE: Source variable not found in var_map during take_address");
+
+        match source_value {
+            BasicValueEnum::PointerValue(ptr) => {
+                // If the source is already a pointer (e.g., from alloca), use it directly
+                td.var_map.insert(cmd.target, ptr.as_basic_value_enum());
+            }
+            _ => {
+                // Need to create a stack slot and store the value there
+                let source_ty = self.lower_type_basic(td.type_registry, cmd.source.ty(), td.context);
+                let stack_slot = td.builder.build_alloca(source_ty, &format!("{}_addr", cmd.source.name())).unwrap();
+                td.builder.build_store(stack_slot, *source_value).unwrap();
+                td.var_map.insert(cmd.target, stack_slot.as_basic_value_enum());
+            }
+        }
     }
 
-    fn lower_load<'ctx>(&self, _cmd: &yir::LoadCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: load through pointer
+    fn lower_load<'ctx>(&self, cmd: &yir::LoadCmd, td: &mut TransientData<'ctx>) {
+        let ptr_value = self.lower_operand(&cmd.source, td);
+        let ptr = ptr_value.into_pointer_value();
+
+        // Get the pointee type for the load
+        let pointee_ty = self.lower_type_basic(td.type_registry, cmd.target.ty(), td.context);
+
+        let loaded_value = td.builder.build_load(pointee_ty, ptr, &format!("{}_loaded", cmd.target.name())).unwrap();
+        td.var_map.insert(cmd.target, loaded_value);
     }
 
-    fn lower_store<'ctx>(&self, _cmd: &yir::StoreCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: store through pointer
+    fn lower_store<'ctx>(&self, cmd: &yir::StoreCmd, td: &mut TransientData<'ctx>) {
+        let dest_ptr = self.lower_operand(&cmd.dest, td).into_pointer_value();
+        let value = self.lower_operand(&cmd.value, td);
+
+        td.builder.build_store(dest_ptr, value).unwrap();
+        // Note: No var_map update - this is a side-effect only instruction
     }
 
     fn lower_binary<'ctx>(&self, cmd: &yir::BinaryCmd, td: &mut TransientData<'ctx>) {
@@ -605,11 +774,42 @@ impl LLVMLowerer {
     }
 
     fn lower_unary<'ctx>(&self, cmd: &yir::UnaryCmd, td: &mut TransientData<'ctx>) {
-        // TODO: lower unary ops
+        let operand_value = self.lower_operand(&cmd.operand, td);
+
+        let result = match cmd.op {
+            yir::UnaryOp::Neg => match operand_value {
+                BasicValueEnum::IntValue(int_val) => {
+                    td.builder.build_int_neg(int_val, "neg_tmp").unwrap().as_basic_value_enum()
+                }
+                BasicValueEnum::FloatValue(float_val) => {
+                    td.builder.build_float_neg(float_val, "neg_tmp").unwrap().as_basic_value_enum()
+                }
+                _ => panic!("Unsupported type for negation: {:?}", operand_value.get_type()),
+            }
+        };
+
+        td.var_map.insert(cmd.target, result);
     }
 
-    fn lower_call<'ctx>(&self, _cmd: &yir::CallCmd, _td: &mut TransientData<'ctx>) {
-        // TODO: lower function call, handle arguments and return value
+    fn lower_call<'ctx>(&self, cmd: &yir::CallCmd, td: &mut TransientData<'ctx>) {
+        // Get the function from the module
+        let callee_fn = td.module.get_function(&cmd.name)
+            .unwrap_or_else(|| panic!("ICE: Function '{}' not found in module during call lowering", cmd.name));
+
+        // Lower all arguments
+        let args: Vec<BasicMetadataValueEnum> = cmd.args.iter()
+            .map(|arg| self.lower_operand(arg, td).into())
+            .collect();
+
+        // Build the call instruction
+        let call_result = td.builder.build_call(callee_fn, &args, &format!("{}_call", cmd.name)).unwrap();
+
+        // If there's a target variable, store the return value
+        if let Some(target) = cmd.target {
+            let return_value = call_result.try_as_basic_value().expect_basic("ehm wud?");
+            td.var_map.insert(target, return_value);
+        }
+        // If target is None, this is a void function call (no return value to store)
     }
 
     fn lower_int_to_ptr<'ctx>(&self, cmd: &yir::IntToPtrCmd, td: &mut TransientData<'ctx>) {

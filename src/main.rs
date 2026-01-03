@@ -20,15 +20,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Compile source to C code")]
-    C {
-        #[arg(help = "Input source file")]
-        input: PathBuf,
-        #[arg(short, long, help = "Output file (default: stdout)")]
-        output: Option<PathBuf>,
-        #[arg(long, help = "Show compiler pass timing breakdown")]
-        compiler_timings: bool,
-    },
     #[command(about = "Compile source to YIR")]
     Yir {
         #[arg(help = "Input source file")]
@@ -47,8 +38,24 @@ enum Commands {
         #[arg(long, help = "Show compiler pass timing breakdown")]
         compiler_timings: bool,
     },
-    #[command(about = "Compile source to an executable")]
-    Exe {
+    #[command(about = "Compile source to LLVM IR")]
+    Llir {
+        #[arg(help = "Input source file")]
+        input: PathBuf,
+        #[arg(short, long, help = "Output file (default: stdout)")]
+        output: Option<PathBuf>,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
+    },
+    #[command(about = "JIT compile and execute source")]
+    Jit {
+        #[arg(help = "Input source file")]
+        input: PathBuf,
+        #[arg(long, help = "Show compiler pass timing breakdown")]
+        compiler_timings: bool,
+    },
+    #[command(about = "AOT compile source to native executable")]
+    Aot {
         #[arg(help = "Input source file")]
         input: PathBuf,
         #[arg(short, long, help = "Output file; default: <input>.exe")]
@@ -85,26 +92,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::C {
-            input,
-            output,
-            compiler_timings,
-        } => {
-            let (source, filename) = read_source_file(&input)?;
-            let mut pipeline = Pipeline::new(source, filename);
-
-            if compiler_timings {
-                pipeline = pipeline.with_timing();
-            }
-            let c_code = pipeline
-                .calc_c()
-                .map_err(|e| miette::miette!("C code generation error: {}", e))?;
-            write_output(output, &c_code.0)?;
-
-            if compiler_timings {
-                pipeline.timings.print_summary();
-            }
-        }
         Commands::Yir {
             input,
             output,
@@ -152,43 +139,72 @@ fn main() -> Result<()> {
                 pipeline.timings.print_summary();
             }
         }
-        Commands::Exe {
+        Commands::Llir {
             input,
             output,
             compiler_timings,
         } => {
-            let (source, _) = read_source_file(&input)?;
-            // Use only the filename part to avoid issues with directory creation in compile_c_code
-            let filename = input
-                .file_name()
-                .ok_or_else(|| miette::miette!("Invalid input filename"))?
-                .to_string_lossy()
-                .to_string();
-
+            let (source, filename) = read_source_file(&input)?;
             let mut pipeline = Pipeline::new(source, filename);
 
             if compiler_timings {
                 pipeline = pipeline.with_timing();
             }
 
-            let executable = pipeline
-                .calc_executable()
-                .map_err(|e| miette::miette!("Executable generation error: {}", e))?;
+            let llvm_ir = pipeline
+                .calc_llvm_ir()
+                .map_err(|e| miette::miette!("LLVM IR generation error: {}", e))?;
+            write_output(output, &llvm_ir)?;
 
-            if let Some(output_path) = output {
-                fs::copy(&executable.path, output_path)
-                    .map_err(|e| miette::miette!("Failed to copy executable: {}", e))?;
-            } else {
-                // Default: Copy to current directory
-                let name = input.file_stem().unwrap_or(input.as_os_str());
-                let mut dest = PathBuf::from(name);
-                if cfg!(windows) {
-                    dest.set_extension("exe");
-                }
-                fs::copy(&executable.path, dest).map_err(|e| {
-                    miette::miette!("Failed to copy executable to current directory: {}", e)
-                })?;
+            if compiler_timings {
+                pipeline.timings.print_summary();
             }
+        }
+        Commands::Jit {
+            input,
+            compiler_timings,
+        } => {
+            let (source, filename) = read_source_file(&input)?;
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
+
+            let exit_code = pipeline
+                .jit_execute()
+                .map_err(|e| miette::miette!("JIT execution error: {}", e))?;
+
+            println!("Program exited with code: {}", exit_code);
+
+            if compiler_timings {
+                pipeline.timings.print_summary();
+            }
+        }
+        Commands::Aot {
+            input,
+            output,
+            compiler_timings,
+        } => {
+            let (source, filename) = read_source_file(&input)?;
+            let mut pipeline = Pipeline::new(source, filename);
+
+            if compiler_timings {
+                pipeline = pipeline.with_timing();
+            }
+
+            // Create output path
+            let output_path = if let Some(output_file) = output {
+                output_file
+            } else {
+                let mut dest = input.clone();
+                dest.set_extension("o"); // Object file extension
+                dest
+            };
+
+            pipeline
+                .aot_compile(&output_path)
+                .map_err(|e| miette::miette!("AOT compilation error: {}", e))?;
 
             if compiler_timings {
                 pipeline.timings.print_summary();
