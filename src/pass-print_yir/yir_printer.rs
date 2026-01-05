@@ -1,7 +1,7 @@
-use crate::pass_yir_lowering::{Label, MallocCount};
 use crate::pass_yir_lowering::yir::{
     ArrayInit, BinOp, ControlFlow, Function, Instruction, Operand, UnaryOp, Variable,
 };
+use crate::pass_yir_lowering::{Label, MallocCount};
 use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::TypeInfo;
 use std::fmt;
@@ -379,23 +379,7 @@ pub fn format_instruction(
 
             writeln!(f)
         }
-        Instruction::StoreImmediate(cmd) => {
-            writeln!(
-                f,
-                "{} <- {}",
-                format_variable(&cmd.target, do_color),
-                format_operand(&cmd.value, do_color)
-            )
-        }
-        Instruction::TakeAddress(cmd) => {
-            writeln!(
-                f,
-                "{} := {} {}",
-                format_variable(&cmd.target, do_color),
-                format_keyword("ADDR", do_color),
-                format_variable(&cmd.source, do_color)
-            )
-        }
+
         Instruction::Load(cmd) => {
             writeln!(
                 f,
@@ -515,7 +499,14 @@ pub fn format_instruction(
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", format_operand(idx, do_color))?;
+                match idx {
+                    crate::pass_yir_lowering::yir::GEPIndex::StructIndex(idx) => {
+                        write!(f, "{}", colorize(&idx.to_string(), "constant", do_color))?;
+                    }
+                    crate::pass_yir_lowering::yir::GEPIndex::ArrayIndex(op) => {
+                        write!(f, "{}", format_operand(op, do_color))?;
+                    }
+                }
             }
             writeln!(f, "]")
         }

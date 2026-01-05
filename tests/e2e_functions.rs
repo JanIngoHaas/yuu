@@ -16,7 +16,7 @@ fn test_simple_function_call() {
         .expect("Failed to compile function call test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run function call test");
+        run_executable_with_output(executable, &[]).expect("Failed to run function call test");
 
     assert_eq!(output, 8);
 }
@@ -32,8 +32,7 @@ fn test_function_with_no_params() {
     let executable = run_to_executable(source, "test_function_with_no_params.yuu")
         .expect("Failed to compile no params test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run no params test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run no params test");
 
     assert_eq!(output, 42);
 }
@@ -50,7 +49,7 @@ fn test_function_with_multiple_params() {
         .expect("Failed to compile multi params test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run multi params test");
+        run_executable_with_output(executable, &[]).expect("Failed to run multi params test");
 
     // 1 + 2 * 3 = 7
     assert_eq!(output, 7);
@@ -70,7 +69,7 @@ fn test_nested_function_calls() {
         .expect("Failed to compile nested calls test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested calls test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested calls test");
 
     // (2*3) + (4*5) = 6 + 20 = 26
     assert_eq!(output, 26);
@@ -90,7 +89,7 @@ fn test_function_with_float_params() {
         .expect("Failed to compile float params test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run float params test");
+        run_executable_with_output(executable, &[]).expect("Failed to run float params test");
 
     assert_eq!(output, 0);
 }
@@ -109,7 +108,7 @@ fn test_function_with_mutable_params() {
         .expect("Failed to compile mut params test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mut params test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mut params test");
 
     // 5 + 10 = 15
     assert_eq!(output, 15);

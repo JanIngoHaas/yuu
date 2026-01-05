@@ -24,7 +24,7 @@ fn test_method_style_call() {
         .expect("Failed to compile method call test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run method call test");
+        run_executable_with_output(executable, &[]).expect("Failed to run method call test");
 
     // 3*3 + 4*4 = 25
     assert_eq!(output, 25);
@@ -50,8 +50,8 @@ fn test_method_with_additional_params() {
     let executable = run_to_executable(source, "test_method_with_additional_params.yuu")
         .expect("Failed to compile method with params test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run method with params test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run method with params test");
 
     // (5+2) + (10+3) = 7 + 13 = 20
     assert_eq!(output, 20);
@@ -80,7 +80,7 @@ fn test_chained_method_calls() {
         .expect("Failed to compile chained calls test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run chained calls test");
+        run_executable_with_output(executable, &[]).expect("Failed to run chained calls test");
 
     // 5 * 2 = 10, 10 + 10 = 20
     assert_eq!(output, 20);
@@ -110,7 +110,7 @@ fn test_mixed_call_styles() {
         .expect("Failed to compile mixed calls test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed calls test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed calls test");
 
     // v1 scaled: (4, 6), dot product: 4*4 + 6*5 = 16 + 30 = 46
     assert_eq!(output, 46);
@@ -142,7 +142,7 @@ fn test_long_method_chain() {
         .expect("Failed to compile long chain test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run long chain test");
+        run_executable_with_output(executable, &[]).expect("Failed to run long chain test");
 
     // 10 + 5 = 15, 15 * 2 = 30, 30 - 3 = 27
     assert_eq!(output, 27);
@@ -171,7 +171,7 @@ fn test_method_call_with_complex_expression() {
         .expect("Failed to compile complex method test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run complex method test");
+        run_executable_with_output(executable, &[]).expect("Failed to run complex method test");
 
     // dx=3, dy=4, distance = 3*3 + 4*4 = 25
     assert_eq!(output, 25);
@@ -199,7 +199,7 @@ fn test_nested_method_calls() {
         .expect("Failed to compile nested methods test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested methods test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested methods test");
 
     // (4 + 5) * 3 = 27
     assert_eq!(output, 27);
@@ -225,7 +225,7 @@ fn test_method_call_in_expression() {
     let executable = run_to_executable(source, "test_method_call_in_expression.yuu")
         .expect("Failed to compile method in expression test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run method in expression test");
 
     // 10 + 20 = 30

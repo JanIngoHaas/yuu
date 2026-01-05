@@ -35,7 +35,7 @@ fn test_vector_operations() {
         .expect("Failed to compile vector operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run vector operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run vector operations test");
 
     assert_eq!(output, 0);
 }
@@ -71,7 +71,7 @@ fn test_matrix_operations() {
         .expect("Failed to compile matrix operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run matrix operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run matrix operations test");
 
     assert_eq!(output, 0);
 }
@@ -107,7 +107,7 @@ fn test_point_distance_calculations() {
         .expect("Failed to compile point operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run point operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run point operations test");
 
     assert_eq!(output, 0);
 }
@@ -147,7 +147,7 @@ fn test_point_distance_calculations() {
 //     let executable = run_to_executable(source, "test_rectangle_ops.yuu")
 //         .expect("Failed to compile rectangle operations test");
 
-//     let output = run_executable_with_output(&executable, &[])
+//     let output = run_executable_with_output(executable, &[])
 //         .expect("Failed to run rectangle operations test");
 
 //     // Point (25, 35) is inside rectangle at (10, 20) with size 30x40
@@ -190,7 +190,7 @@ fn test_circle_operations() {
         .expect("Failed to compile circle operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run circle operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run circle operations test");
 
     // Point (3, 4) is inside circle at (0, 0) with radius 5 (distance = 5)
     assert_eq!(output, 1);
@@ -231,8 +231,8 @@ fn test_complex_number_operations() {
     let executable = run_to_executable(source, "test_complex_number_operations.yuu")
         .expect("Failed to compile complex operations test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run complex operations test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run complex operations test");
 
     assert_eq!(output, 0);
 }
@@ -271,7 +271,7 @@ fn test_color_operations() {
         .expect("Failed to compile color operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run color operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run color operations test");
 
     assert_eq!(output, 0);
 }
@@ -323,7 +323,7 @@ fn test_color_operations() {
 //     let executable = run_to_executable(source, "test_stats_ops.yuu")
 //         .expect("Failed to compile statistics operations test");
 
-//     let output = run_executable_with_output(&executable, &[])
+//     let output = run_executable_with_output(executable, &[])
 //         .expect("Failed to run statistics operations test");
 
 //     // Should return count = 3

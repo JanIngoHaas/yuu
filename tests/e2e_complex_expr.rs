@@ -14,8 +14,8 @@ fn test_complex_arithmetic_expression() {
     let executable = run_to_executable(source, "test_complex_arithmetic_expression.yuu")
         .expect("Failed to compile complex arithmetic test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run complex arithmetic test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run complex arithmetic test");
 
     // 2 + (3 * 4) - (5 / 2) + 1 = 2 + 12 - 2 + 1 = 13
     assert_eq!(output, 13);
@@ -31,8 +31,8 @@ fn test_nested_parentheses() {
     let executable = run_to_executable(source, "test_nested_parentheses.yuu")
         .expect("Failed to compile nested parentheses test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run nested parentheses test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run nested parentheses test");
 
     // ((2+3) * (4-1)) / ((5+1) / 2) = (5 * 3) / (6 / 2) = 15 / 3 = 5
     assert_eq!(output, 5);
@@ -52,7 +52,7 @@ fn test_nested_parentheses() {
 //         .expect("Failed to compile comparison chain test");
 
 //     let output =
-//         run_executable_with_output(&executable, &[]).expect("Failed to run comparison chain test");
+//         run_executable_with_output(executable, &[]).expect("Failed to run comparison chain test");
 
 //     assert_eq!(output, 1);
 // }
@@ -69,7 +69,7 @@ fn test_mixed_unary_binary_operators() {
         .expect("Failed to compile mixed operators test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed operators test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed operators test");
 
     // -5 + 3 * (-2 + 4) = -5 + 3 * 2 = -5 + 6 = 1
     assert_eq!(output, 1);
@@ -89,7 +89,7 @@ fn test_function_call_in_expression() {
     let executable = run_to_executable(source, "test_function_call_in_expression.yuu")
         .expect("Failed to compile function in expression test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run function in expression test");
 
     // double(5) + add(3,4) * 2 = 10 + 7 * 2 = 10 + 14 = 24
@@ -110,7 +110,7 @@ fn test_deep_expression_nesting() {
         .expect("Failed to compile deep nesting test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run deep nesting test");
+        run_executable_with_output(executable, &[]).expect("Failed to run deep nesting test");
 
     // a=2, b=3, c=4
     // 2 + (3 * (4 + (2 - 3))) - (4 / (2 + 3))
@@ -133,7 +133,7 @@ fn test_deep_expression_nesting() {
 //         .expect("Failed to compile complex boolean test");
 
 //     let output =
-//         run_executable_with_output(&executable, &[]).expect("Failed to run complex boolean test");
+//         run_executable_with_output(executable, &[]).expect("Failed to run complex boolean test");
 
 //     // (5 < 10) && (10 < 15) && (5 + 10 > 15 - 5)
 //     // true && true && (15 > 10) = true && true && true = true = 1
@@ -151,7 +151,7 @@ fn test_deep_expression_nesting() {
 //         .expect("Failed to compile all operators test");
 
 //     let output =
-//         run_executable_with_output(&executable, &[]).expect("Failed to run all operators test");
+//         run_executable_with_output(executable, &[]).expect("Failed to run all operators test");
 
 //     // 1 + 2 * 3 == 7 && 4 > 2
 //     // 1 + 6 == 7 && true
@@ -175,12 +175,15 @@ fn test_expression_with_struct_access() {
             return result .
     "#;
 
+    let executable = run_to_yir(source, "test_expression_with_struct_access.yuu")
+        .expect("Failed to compile struct access expression test");
+
+    println!("{}", executable);
+
     let executable = run_to_executable(source, "test_expression_with_struct_access.yuu")
         .expect("Failed to compile struct access expression test");
 
-    //println!("{}", executable);
-
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run struct access expression test");
 
     // (3 + 1) * (4 - 2) = 4 * 2 = 8

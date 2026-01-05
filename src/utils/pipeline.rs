@@ -3,6 +3,7 @@ use crate::pass_control_flow_analysis::pass_control_flow_analysis_impl::{
     ControlFlowAnalysis, ControlFlowAnalysisErrors,
 };
 use crate::pass_diagnostics::pass_diagnostics_impl::Diagnostics;
+use crate::pass_llvm_lowering::pass_yir_to_llvm::LLVMLowerer;
 use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
 use crate::pass_parse::{AST, SourceInfo};
@@ -17,7 +18,6 @@ use crate::pass_type_inference::pass_type_inference_impl::TypeInference;
 use crate::pass_type_registration::TypeRegistration;
 use crate::pass_yir_lowering::Module;
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
-use crate::pass_llvm_lowering::pass_yir_to_llvm::LLVMLowerer;
 use crate::utils::TypeRegistry;
 use miette::Result;
 use std::time::{Duration, Instant};
@@ -337,7 +337,6 @@ impl Pipeline {
         Ok(())
     }
 
-
     fn diagnostics(&mut self) -> Result<()> {
         if self.diagnostics_done {
             return Ok(());
@@ -401,7 +400,6 @@ impl Pipeline {
         self.ast.as_ref().unwrap()
     }
 
-
     pub fn get_module(&mut self) -> Result<&Module> {
         if !self.yir_lowering_done {
             self.yir_lowering()?;
@@ -419,7 +417,6 @@ impl Pipeline {
             .as_mut()
             .ok_or_else(|| miette::miette!("Module not available"))
     }
-
 
     pub fn get_source_info(&self) -> Option<&SourceInfo> {
         self.source_info.as_ref()
@@ -439,7 +436,8 @@ impl Pipeline {
 
         let start = Instant::now();
         let llvm_lowerer = LLVMLowerer::new();
-        let llvm_ir = llvm_lowerer.lower_module_to_ir(module, type_registry)
+        let llvm_ir = llvm_lowerer
+            .lower_module_to_ir(module, type_registry)
             .map_err(|e| miette::miette!("LLVM lowering error: {}", e))?;
         let duration = start.elapsed();
 
@@ -457,7 +455,8 @@ impl Pipeline {
 
         let start = Instant::now();
         let llvm_lowerer = LLVMLowerer::new();
-        let result = llvm_lowerer.jit_execute_main(module, type_registry)
+        let result = llvm_lowerer
+            .jit_execute_main(module, type_registry)
             .map_err(|e| miette::miette!("JIT execution error: {}", e))?;
         let duration = start.elapsed();
 
@@ -475,7 +474,8 @@ impl Pipeline {
 
         let start = Instant::now();
         let llvm_lowerer = LLVMLowerer::new();
-        llvm_lowerer.aot_compile(module, type_registry, output_path)
+        llvm_lowerer
+            .aot_compile(module, type_registry, output_path)
             .map_err(|e| miette::miette!("AOT compilation error: {}", e))?;
         let duration = start.elapsed();
 

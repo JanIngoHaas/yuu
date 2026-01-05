@@ -149,7 +149,10 @@ impl<'a> TransientData<'a> {
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    vec![Operand::U64Const(0), rhs_operand],  // [0, n] for ptr[n]
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::ArrayIndex(rhs_operand),
+                    ], // [0, n] for ptr[n]
                     element_ty,
                 );
                 self.add_temporary(result_var);
@@ -172,7 +175,10 @@ impl<'a> TransientData<'a> {
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    vec![Operand::U64Const(0), Operand::Variable(negated_var)],  // [0, -n] for ptr[-n]
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::ArrayIndex(Operand::Variable(negated_var)),
+                    ], // [0, -n] for ptr[-n]
                     element_ty,
                 );
                 self.add_temporary(result_var);
@@ -569,7 +575,10 @@ impl<'a> TransientData<'a> {
                     let field_var = self.function.make_get_element_ptr(
                         field_name,
                         Operand::Variable(struct_var),
-                        vec![Operand::U64Const(0), Operand::U64Const(field_idx as u64)],
+                        vec![
+                            yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                            yir::GEPIndex::StructIndex(field_idx as u32),
+                        ],
                         field_ty,
                     );
                     self.add_temporary(field_var);
@@ -635,7 +644,10 @@ impl<'a> TransientData<'a> {
                 let field_ptr = self.function.make_get_element_ptr(
                     "field_ptr".intern(),
                     lhs,
-                    vec![Operand::U64Const(0), Operand::U64Const(field_idx as u64)],
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(field_idx as u32),
+                    ],
                     field_ty,
                 );
                 self.add_temporary(field_ptr);
@@ -679,7 +691,10 @@ impl<'a> TransientData<'a> {
                 let tag_ptr = self.function.make_get_element_ptr(
                     "enum_tag_ptr".intern(),
                     Operand::Variable(enum_var),
-                    vec![Operand::U64Const(0), Operand::U64Const(0)], // [0, 0] for struct.tag_field
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(0),
+                    ], // [0, 0] for struct.tag_field
                     primitive_u64(),
                 );
                 self.add_temporary(tag_ptr);
@@ -691,7 +706,10 @@ impl<'a> TransientData<'a> {
                     let payload_ptr = self.function.make_get_element_ptr(
                         "enum_payload_ptr".intern(),
                         Operand::Variable(enum_var),
-                        vec![Operand::U64Const(0), Operand::U64Const(1)], // [0, 1] for struct.payload_field
+                        vec![
+                            yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                            yir::GEPIndex::StructIndex(1),
+                        ], // [0, 1] for struct.payload_field
                         variant_info.ty,
                     );
                     self.add_temporary(payload_ptr);
@@ -827,7 +845,10 @@ impl<'a> TransientData<'a> {
                             let field_var = self.function.make_get_element_ptr(
                                 field_name,
                                 Operand::Variable(ptr_var),
-                                vec![Operand::U64Const(0), Operand::U64Const(field_idx as u64)],
+                                vec![
+                                    yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                                    yir::GEPIndex::StructIndex(field_idx as u32),
+                                ],
                                 field_ty,
                             );
                             self.add_temporary(field_var);
@@ -1068,7 +1089,10 @@ impl<'a> TransientData<'a> {
                 let tag_ptr = self.function.make_get_element_ptr(
                     "match_tag_ptr".intern(),
                     scrutinee_ptr,
-                    vec![Operand::U64Const(0), Operand::U64Const(0)], // [0, 0] for struct.tag_field
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(0),
+                    ], // [0, 0] for struct.tag_field
                     primitive_u64(),
                 );
                 self.add_temporary(tag_ptr);
@@ -1093,7 +1117,12 @@ impl<'a> TransientData<'a> {
                         let payload_ptr = self.function.make_get_element_ptr(
                             "variant_payload".intern(),
                             scrutinee_ptr,
-                            vec![Operand::U64Const(0), Operand::U64Const(1)], // [0, 1] for struct.payload_field
+                            vec![
+                                crate::pass_yir_lowering::yir::GEPIndex::ArrayIndex(
+                                    Operand::U64Const(0),
+                                ),
+                                crate::pass_yir_lowering::yir::GEPIndex::StructIndex(1), // field 1 is payload
+                            ], // [0, 1] for struct.payload_field
                             variant_info.ty,
                         );
                         self.add_temporary(payload_ptr);
@@ -1322,12 +1351,12 @@ impl YirLowering {
 
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name);
-                        let param = data.function.add_param("stack_param_mem".intern(), ty);
-                        let param_ptr = data.function.make_take_address(name, param);
-                        data.var_map.insert(arg.id, param_ptr);
+                        // add_param automatically converts to pointer type for stack storage
+                        let param = data.function.add_param(name, ty);
+                        data.var_map.insert(arg.id, param);
 
                         // Add parameter to function scope
-                        data.add_variable_to_current_scope(param_ptr);
+                        data.add_variable_to_current_scope(param);
                     }
 
                     data.lower_block_body(&func.body);

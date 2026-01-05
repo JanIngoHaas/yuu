@@ -1,6 +1,5 @@
 // Common utilities for integration tests
 
-use yuu::pass_c_compilation::pass_c_compilation_impl::CExecutable;
 use yuu::pass_parse::AST;
 use yuu::utils::pipeline::*;
 
@@ -10,19 +9,11 @@ pub fn run_to_yir(source: &str, filename: &str) -> Result<String, Box<dyn std::e
     Ok(yir_output.0)
 }
 
-/// Helper function to run the full C compilation pipeline
-pub fn run_to_c(source: &str, filename: &str) -> Result<String, Box<dyn std::error::Error>> {
+/// Helper function to run the full compilation pipeline using JIT execution
+/// Returns the exit code from the main function
+pub fn run_to_executable(source: &str, filename: &str) -> Result<i32, Box<dyn std::error::Error>> {
     let mut pipeline = Pipeline::new(source.to_string(), filename.to_string());
-    Ok(pipeline.calc_c()?.0.clone())
-}
-
-/// Helper function to run the full compilation pipeline to executable
-pub fn run_to_executable(
-    source: &str,
-    filename: &str,
-) -> Result<CExecutable, Box<dyn std::error::Error>> {
-    let mut pipeline = Pipeline::new(source.to_string(), filename.to_string());
-    Ok(pipeline.calc_executable()?)
+    Ok(pipeline.jit_execute()?)
 }
 
 /// Helper function to run just parsing (without diagnostics)
@@ -33,10 +24,8 @@ pub fn run_parse_only(source: &str, filename: &str) -> Result<AST, Box<dyn std::
     Ok(pipeline.ast.unwrap())
 }
 
-/// Helper function to run executable and capture output
-pub fn run_executable_with_output(executable: &CExecutable, args: &[&str]) -> miette::Result<i32> {
-    let output = executable.execute(args)?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let value: i32 = stdout.trim().parse().unwrap_or(0);
-    Ok(value)
+/// Helper function for compatibility - JIT execution returns the exit code directly
+/// This function now simply returns the exit code that was passed in
+pub fn run_executable_with_output(exit_code: i32, _args: &[&str]) -> miette::Result<i32> {
+    Ok(exit_code)
 }

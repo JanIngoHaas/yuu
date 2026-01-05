@@ -2,8 +2,8 @@ use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
 use crate::utils::collections::IndexMap;
 use crate::utils::type_info_table::{
-    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
-    primitive_nil, primitive_u64,
+    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+    primitive_u64,
 };
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -143,7 +143,6 @@ pub enum ArrayInit {
     Elements(Vec<Operand>),
 }
 
-
 // Command structs for instructions
 
 /// Declares a variable on the stack, returns a pointer to it
@@ -153,20 +152,6 @@ pub struct AllocaCmd {
     pub count: u64,
     pub align: Option<u64>,
     pub init: Option<ArrayInit>,
-}
-
-/// Simple assignment of value to variable
-#[derive(Clone, Debug)]
-pub struct StoreImmediateCmd {
-    pub target: Variable, // Target variable to assign to
-    pub value: Operand,   // Source value
-}
-
-/// Get pointer to a variable (for taking address of a variable)
-#[derive(Clone, Debug)]
-pub struct TakeAddressCmd {
-    pub target: Variable, // Pointer variable to store the address
-    pub source: Variable, // Variable whose address we're taking
 }
 
 /// Load value through a pointer
@@ -224,8 +209,8 @@ pub enum MallocCount {
 /// Heap allocation - returns a pointer to allocated memory
 #[derive(Clone, Debug)]
 pub struct HeapAllocCmd {
-    pub target: Variable, // Pointer variable to store the heap address
-    pub count: MallocCount,   // Number of elements to allocate (can be dynamic)
+    pub target: Variable,   // Pointer variable to store the heap address
+    pub count: MallocCount, // Number of elements to allocate (can be dynamic)
     pub align: Option<u64>,
     pub init: Option<ArrayInit>, // Array initialization (None for uninitialized)
 }
@@ -252,6 +237,17 @@ pub struct MemSetCmd {
     pub count: Operand, // Number of bytes to set
 }
 
+/// Typed index for GetElementPtr instructions
+#[derive(Clone, Debug)]
+pub enum GEPIndex {
+    /// Index into a struct field (must be a compile-time constant).
+    /// Used for selecting fields of a struct. corresponds to i32 in LLVM.
+    StructIndex(u32),
+    /// Index into an array or pointer offset.
+    /// Can be dynamic or constant. corresponds to i64 in LLVM.
+    ArrayIndex(Operand),
+}
+
 /// Get pointer to nested element (LLVM-style GEP with multiple indices)
 /// Supports typed indexing through structures and arrays.
 /// The first index is applied to the pointer-to-aggregate type,
@@ -259,9 +255,9 @@ pub struct MemSetCmd {
 /// The result type is determined by target.ty().deref_ptr().
 #[derive(Clone, Debug)]
 pub struct GetElementPtrCmd {
-    pub target: Variable,        // Result pointer to element
-    pub base: Operand,           // Base pointer operand
-    pub indices: Vec<Operand>,   // Multiple indices for nested access
+    pub target: Variable,       // Result pointer to element
+    pub base: Operand,          // Base pointer operand
+    pub indices: Vec<GEPIndex>, // Multiple indices for nested access
 }
 
 /// Marks that multiple stack variables are being killed (e.g., leaving scope)
@@ -281,8 +277,7 @@ pub struct ReinterpCmd {
 #[derive(Clone, Debug)]
 pub enum Instruction {
     Alloca(AllocaCmd),
-    StoreImmediate(StoreImmediateCmd),
-    TakeAddress(TakeAddressCmd),
+
     Load(LoadCmd),
     Store(StoreCmd),
     Binary(BinaryCmd),
@@ -329,38 +324,6 @@ pub struct BasicBlock {
     pub terminator: ControlFlow,
 }
 
-impl BasicBlock {
-    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
-        self.instructions.iter().filter_map(|instr| {
-            match instr {
-                Instruction::Alloca(cmd) => {
-                    return Some(&cmd.target);
-                }
-                Instruction::HeapAlloc(cmd) => {
-                    return Some(&cmd.target);
-                }
-                Instruction::Reinterp(cmd) => {
-                    return Some(&cmd.target);
-                }
-                Instruction::StoreImmediate(_) => {}
-                Instruction::TakeAddress(_) => {}
-                Instruction::Load(_) => {}
-                Instruction::Store(_) => {}
-                Instruction::Binary(_) => {}
-                Instruction::Unary(_) => {}
-                Instruction::Call(_) => {}
-                Instruction::IntToPtr(_) => {}
-                Instruction::HeapFree(_) => {}
-                Instruction::MemCpy(_) => {}
-                Instruction::MemSet(_) => {}
-                Instruction::GetElementPtr(_) => {}
-                Instruction::KillSet(_) => {}
-            };
-            None
-        })
-    }
-}
-
 #[derive(Clone)]
 pub struct Function {
     pub ast_id: usize,
@@ -384,12 +347,6 @@ impl Function {
         (high, low)
     }
 
-    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
-        self.blocks
-            .values()
-            .flat_map(|block| block.calculate_var_decls())
-    }
-
     pub fn new(name: Ustr, ast_id: usize, return_type: &'static TypeInfo) -> Self {
         let mut f = Function {
             ast_id,
@@ -408,7 +365,8 @@ impl Function {
     }
 
     pub fn add_param(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let param = self.fresh_variable(name, ty);
+        // Parameters are always stored on the stack, so we represent them as pointers
+        let param = self.fresh_variable(name, ty.ptr_to());
         self.params.push(param);
         param
     }
@@ -601,26 +559,23 @@ impl Function {
         current_block.instructions.push(instr);
         target
     } // Builder method for TakeAddress
-    pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
-        let target_type = source.ty().ptr_to();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::TakeAddress(TakeAddressCmd { target, source });
-        self.get_current_block_mut().instructions.push(instr);
-        target
-    } // Builder method for Load
+
+    // Builder method for Load
     pub fn make_load(&mut self, name_hint: Ustr, source: Operand) -> Variable {
-        let source_ty = source.ty();
         debug_assert!(
-            source_ty.is_ptr(),
+            source.ty().is_ptr(),
             "Load source must be a pointer, got {}",
-            source_ty
+            source.ty()
         );
-        let target_type = source_ty.deref_ptr();
-        let target = self.fresh_variable(name_hint, target_type);
+
+        let loaded_ty = source.ty().deref_ptr();
+        let target = self.fresh_variable(name_hint, loaded_ty);
         let instr = Instruction::Load(LoadCmd { target, source });
         self.get_current_block_mut().instructions.push(instr);
+
         target
-    } // Builder method for Store
+    }
+
     pub fn make_store(&mut self, dest: Variable, value: Operand) -> Variable {
         let dest_ty = dest.ty();
 
@@ -639,37 +594,9 @@ impl Function {
             dest_ty
         );
 
-        // If we have a Immediate value, we can just store it directly
-        let value_ptr = match value {
-            Operand::I64Const(_)
-            | Operand::U64Const(_)
-            | Operand::F32Const(_)
-            | Operand::F64Const(_)
-            | Operand::BoolConst(_) => {
-                let instr = Instruction::StoreImmediate(StoreImmediateCmd {
-                    target: dest,
-                    value,
-                });
-                self.get_current_block_mut().instructions.push(instr);
-                return dest;
-            }
-            Operand::NoOp => {
-                // NoOp is a special case, we can just return the destination - there is nothing to store
-                return dest;
-            }
-            Operand::Variable(_) => value,
-        };
-
-        debug_assert_eq!(
-            value_ptr.ty(),
-            dest_ty.deref_ptr(),
-            "Store type mismatch: dest expects to store {}, value is {}",
-            dest_ty.deref_ptr(),
-            value_ptr.ty()
-        );
         let instr = Instruction::Store(StoreCmd {
             dest: Operand::Variable(dest),
-            value: value_ptr,
+            value,
         });
         self.get_current_block_mut().instructions.push(instr);
 
@@ -856,7 +783,7 @@ impl Function {
         &mut self,
         name_hint: Ustr,
         base: Operand,
-        indices: Vec<Operand>,
+        indices: Vec<GEPIndex>,
         result_pointee_ty: &'static TypeInfo,
     ) -> Variable {
         let base_ty = base.ty();
@@ -866,10 +793,7 @@ impl Function {
             base_ty
         );
 
-        debug_assert!(
-            !indices.is_empty(),
-            "GEP must have at least one index"
-        );
+        debug_assert!(!indices.is_empty(), "GEP must have at least one index");
 
         debug_assert!(
             !matches!(
@@ -902,11 +826,10 @@ impl Function {
         self.make_get_element_ptr(
             name_hint,
             base,
-            vec![index],
+            vec![GEPIndex::ArrayIndex(index)],
             result_pointee_ty,
         )
     }
-
 
     // pub fn make_enum(
     //     &mut self,

@@ -12,7 +12,7 @@ fn test_integer_literals() {
         .expect("Failed to compile integer literal test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run integer literal test");
+        run_executable_with_output(executable, &[]).expect("Failed to run integer literal test");
 
     // Should exit with code 42
     assert_eq!(output, 42);
@@ -29,7 +29,7 @@ fn test_float_literals() {
         .expect("Failed to compile float literal test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run float literal test");
+        run_executable_with_output(executable, &[]).expect("Failed to run float literal test");
 
     assert_eq!(output, 0);
 }
@@ -50,7 +50,7 @@ fn test_arithmetic_operations() {
         .expect("Failed to compile arithmetic test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run arithmetic test");
+        run_executable_with_output(executable, &[]).expect("Failed to run arithmetic test");
 
     // sum=15, diff=5, prod=50, quot=2 -> total=72
     assert_eq!(output, 72);
@@ -71,7 +71,7 @@ fn test_comparison_operations() {
         .expect("Failed to compile comparison test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run comparison test");
+        run_executable_with_output(executable, &[]).expect("Failed to run comparison test");
 
     assert_eq!(output, 1);
 }
@@ -89,7 +89,7 @@ fn test_unary_operations() {
         .expect("Failed to compile unary operations test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run unary operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run unary operations test");
 
     // -5 + 5 = 0
     assert_eq!(output, 0);
@@ -107,7 +107,7 @@ fn test_mixed_type_expressions() {
         .expect("Failed to compile mixed type test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed type test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed type test");
 
     assert_eq!(output, 10);
 }
@@ -123,7 +123,7 @@ fn test_operator_precedence() {
         .expect("Failed to compile precedence test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run precedence test");
+        run_executable_with_output(executable, &[]).expect("Failed to run precedence test");
 
     // 2 + (3 * 4) = 14
     assert_eq!(output, 14);
@@ -140,7 +140,7 @@ fn test_parenthesized_expressions() {
         .expect("Failed to compile parenthesized test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run parenthesized test");
+        run_executable_with_output(executable, &[]).expect("Failed to run parenthesized test");
 
     // (2 + 3) * 4 = 20
     assert_eq!(output, 20);

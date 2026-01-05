@@ -25,7 +25,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_with_arrays.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 100);
 }
 
@@ -52,7 +52,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_negative_offsets.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 15);
 }
 
@@ -82,7 +82,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_with_struct_arrays.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 9);
 }
 
@@ -111,7 +111,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_chaining.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 1000);
 }
 
@@ -137,7 +137,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_with_casting.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 252);
 }
 
@@ -163,7 +163,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_dynamic_pointer_arithmetic.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 75);
 }
 
@@ -191,7 +191,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_heap_allocated_array_pointer_arithmetic.yuu")
         .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 1100);
 }
 
@@ -228,6 +228,6 @@ fn main() -> i64:
         "test_heap_allocated_struct_array_pointer_arithmetic.yuu",
     )
     .expect("Failed to compile");
-    let result = run_executable_with_output(&executable, &[]).expect("Failed to run");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 120);
 }

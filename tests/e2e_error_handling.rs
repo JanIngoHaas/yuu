@@ -166,7 +166,7 @@ fn test_successful_compilation_after_error_fix() {
     .expect("Expected compilation to succeed after fix");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Expected execution to succeed");
+        run_executable_with_output(executable, &[]).expect("Expected execution to succeed");
 
     assert_eq!(output, 5);
 }

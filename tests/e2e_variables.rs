@@ -15,7 +15,7 @@ fn test_let_binding_with_type_inference() {
         .expect("Failed to compile let binding test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run let binding test");
+        run_executable_with_output(executable, &[]).expect("Failed to run let binding test");
 
     assert_eq!(output, 42);
 }
@@ -31,7 +31,7 @@ fn test_let_binding_with_explicit_type() {
         .expect("Failed to compile explicit type test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run explicit type test");
+        run_executable_with_output(executable, &[]).expect("Failed to run explicit type test");
 
     assert_eq!(output, 42);
 }
@@ -48,7 +48,7 @@ fn test_mut_variable_assignment() {
         .expect("Failed to compile mut assignment test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mut assignment test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mut assignment test");
 
     assert_eq!(output, 20);
 }
@@ -66,7 +66,7 @@ fn test_multiple_variable_declarations() {
         .expect("Failed to compile multiple vars test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run multiple vars test");
+        run_executable_with_output(executable, &[]).expect("Failed to run multiple vars test");
 
     assert_eq!(output, 15);
 }
@@ -82,8 +82,7 @@ fn test_variable_shadowing() {
     let executable = run_to_executable(source, "test_variable_shadowing.yuu")
         .expect("Failed to compile shadowing test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run shadowing test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run shadowing test");
 
     assert_eq!(output, 15);
 }
@@ -101,7 +100,7 @@ fn test_mut_variable_operations() {
         .expect("Failed to compile mut ops test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mut operations test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mut operations test");
 
     // 0 + 1 = 1, 1 * 2 = 2
     assert_eq!(output, 2);
@@ -120,7 +119,7 @@ fn test_float_variables() {
         .expect("Failed to compile float vars test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run float vars test");
+        run_executable_with_output(executable, &[]).expect("Failed to run float vars test");
 
     assert_eq!(output, 0);
 }
@@ -137,7 +136,7 @@ fn test_mixed_type_variables() {
         .expect("Failed to compile mixed type vars test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed type vars test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed type vars test");
 
     assert_eq!(output, 42);
 }
