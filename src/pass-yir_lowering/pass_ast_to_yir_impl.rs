@@ -149,10 +149,7 @@ impl<'a> TransientData<'a> {
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    vec![
-                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
-                        yir::GEPIndex::ArrayIndex(rhs_operand),
-                    ], // [0, n] for ptr[n]
+                    vec![yir::GEPIndex::ArrayIndex(rhs_operand)], // [n] for ptr[n]
                     element_ty,
                 );
                 self.add_temporary(result_var);
@@ -175,10 +172,7 @@ impl<'a> TransientData<'a> {
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    vec![
-                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
-                        yir::GEPIndex::ArrayIndex(Operand::Variable(negated_var)),
-                    ], // [0, -n] for ptr[-n]
+                    vec![yir::GEPIndex::ArrayIndex(Operand::Variable(negated_var))], // [-n] for ptr[-n]
                     element_ty,
                 );
                 self.add_temporary(result_var);
@@ -189,6 +183,9 @@ impl<'a> TransientData<'a> {
             (BinOp::Subtract, Pointer(_), Pointer(_)) => {
                 // Emit a binary operation for pointer subtraction
                 // This should calculate the distance between pointers
+
+                // TODO: Do we need to turn that into ints?
+
                 let result_var = self.function.make_binary(
                     "ptr_distance".intern(),
                     YirBinOp::Sub,

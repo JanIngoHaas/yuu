@@ -107,7 +107,8 @@ impl LLVMLowerer {
                 PrimitiveType::F64 => BasicTypeEnum::FloatType(context.f64_type()),
                 PrimitiveType::Bool => BasicTypeEnum::IntType(context.bool_type()),
                 PrimitiveType::Nil => {
-                    panic!("Nil type does not have a BasicTypeEnum representation")
+                    // Nil is always a ZST -> [0 x i8]
+                    BasicTypeEnum::ArrayType(context.i8_type().array_type(0))
                 }
             },
             TypeInfo::Pointer(_) => {
@@ -117,15 +118,31 @@ impl LLVMLowerer {
                 let resolved = type_registry
                     .resolve_struct(s.name)
                     .expect("Compiler Bug: Unknown struct type during LLVM lowering");
+
                 let fields = resolved
                     .fields
                     .iter()
                     .map(|f| {
-                        let llvm_field_ty = self.lower_type_basic(type_registry, f.1.ty, context);
-                        llvm_field_ty
+                        // We map all fields 1:1. ZST fields become [0 x i8] which takes 0 space
+                        // but preserves the field index for GEP.
+                        self.lower_type_basic(type_registry, f.1.ty, context)
                     })
                     .collect::<Vec<BasicTypeEnum>>();
+
                 BasicTypeEnum::StructType(context.struct_type(&fields, false))
+            }
+            TypeInfo::Union(u) => {
+                // Unions explicitly handle their own layout packing
+                let resolved = type_registry
+                    .resolve_union(u.name)
+                    .expect("Compiler Bug: Unknown union type during LLVM lowering");
+
+                let layout =
+                    crate::utils::c_packing::calculate_union_layout(resolved, type_registry);
+
+                // Represent as an array of bytes with the correct size
+                // (If size is 0, this creates [0 x i8])
+                BasicTypeEnum::ArrayType(context.i8_type().array_type(layout.total_size as u32))
             }
             _ => panic!("Unsupported type for LLVM lowering to BasicTypeEnum"),
         }
@@ -164,6 +181,19 @@ impl LLVMLowerer {
                     })
                     .collect::<Vec<BasicTypeEnum>>();
                 AnyTypeEnum::StructType(context.struct_type(&fields, false))
+            }
+            TypeInfo::Union(u) => {
+                // Unions are represented as byte arrays sized to fit the largest variant
+                let resolved = type_registry
+                    .resolve_union(u.name)
+                    .expect("Compiler Bug: Unknown union type during LLVM lowering");
+
+                // Use the proper C ABI layout calculation
+                let layout =
+                    crate::utils::c_packing::calculate_union_layout(resolved, type_registry);
+
+                // Represent as an array of bytes with the correct size
+                AnyTypeEnum::ArrayType(context.i8_type().array_type(layout.total_size as u32))
             }
             _ => panic!("Unsupported type for LLVM lowering"),
         }
@@ -751,12 +781,7 @@ impl LLVMLowerer {
                             } else {
                                 unsafe {
                                     td.builder
-                                        .build_gep(
-                                            lty,
-                                            allocd_stack_ptr,
-                                            &[td.context.i64_type().const_zero(), index],
-                                            "elem_ptr",
-                                        )
+                                        .build_gep(lty, allocd_stack_ptr, &[index], "elem_ptr")
                                         .unwrap()
                                 }
                             };
@@ -815,12 +840,7 @@ impl LLVMLowerer {
                         // SAFETY: GEP on array allocation
                         let elem_ptr = unsafe {
                             td.builder
-                                .build_gep(
-                                    lty,
-                                    allocd_stack_ptr,
-                                    &[td.context.i64_type().const_zero(), index],
-                                    "elem_ptr",
-                                )
+                                .build_gep(lty, allocd_stack_ptr, &[index], "elem_ptr")
                                 .unwrap()
                         };
                         td.builder.build_store(elem_ptr, val).unwrap();
