@@ -1,13 +1,12 @@
-use crate::pass_c_compilation::pass_c_compilation_impl::{CCompilation, CExecutable};
-use crate::pass_c_lowering::pass_yir_to_c::{CLowering, CSourceCode};
 use crate::pass_check_decl_def::{CheckDeclDef, CheckDeclDefErrors};
 use crate::pass_control_flow_analysis::pass_control_flow_analysis_impl::{
     ControlFlowAnalysis, ControlFlowAnalysisErrors,
 };
 use crate::pass_diagnostics::pass_diagnostics_impl::Diagnostics;
+use crate::pass_llvm_lowering::pass_yir_to_llvm::LLVMLowerer;
+use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
 use crate::pass_parse::{AST, SourceInfo};
-use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_print_yir::pass_print_yir_impl::{
     YirTextualRepresentation, YirToColoredString, YirToString,
 };
@@ -20,7 +19,7 @@ use crate::pass_type_registration::TypeRegistration;
 use crate::pass_yir_lowering::Module;
 use crate::pass_yir_lowering::pass_ast_to_yir_impl::YirLowering;
 use crate::utils::TypeRegistry;
-use miette::{IntoDiagnostic, Result};
+use miette::Result;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -104,25 +103,23 @@ pub struct Pipeline {
     type_inference_done: bool,
     semantic_analysis_done: bool,
     yir_lowering_done: bool,
-    c_lowering_done: bool,
     diagnostics_done: bool,
 
     source_info: Option<SourceInfo>,
     pub id_generator: Option<crate::pass_parse::add_ids::IdGenerator>,
-    
+
     pub ast: Option<AST>,
     syntax_errors: Option<SyntaxErrors>,
-    
+
     type_registry: Option<TypeRegistry>,
     type_errors: Option<TypeInferenceErrors>,
-    
+
     control_flow_errors: Option<ControlFlowAnalysisErrors>,
     decl_def_errors: Option<CheckDeclDefErrors>,
     type_dependency_errors: Option<TypeDependencyAnalysisErrors>,
     type_dependency_order: Option<TypeDependencyGraph>,
-    
+
     module: Option<Module>,
-    c_code: Option<CSourceCode>,
 
     pub timing_enabled: bool,
     pub timings: PassTimings,
@@ -136,7 +133,6 @@ impl Default for Pipeline {
             type_inference_done: false,
             semantic_analysis_done: false,
             yir_lowering_done: false,
-            c_lowering_done: false,
             diagnostics_done: false,
             source_info: None,
             id_generator: None,
@@ -149,7 +145,6 @@ impl Default for Pipeline {
             type_dependency_errors: None,
             type_dependency_order: None,
             module: None,
-            c_code: None,
             timing_enabled: false,
             timings: PassTimings::new(0),
         }
@@ -170,7 +165,6 @@ impl Pipeline {
             type_inference_done: false,
             semantic_analysis_done: false,
             yir_lowering_done: false,
-            c_lowering_done: false,
             diagnostics_done: false,
             source_info: Some(source_info),
             id_generator: None,
@@ -183,7 +177,6 @@ impl Pipeline {
             type_dependency_errors: None,
             type_dependency_order: None,
             module: None,
-            c_code: None,
             timing_enabled: false,
             timings: PassTimings::new(loc),
         }
@@ -255,7 +248,7 @@ impl Pipeline {
         let start = Instant::now();
         let (type_registry, _type_registration_errors) = TypeRegistration.run(ast, source_info);
         let duration = start.elapsed();
-        
+
         self.type_registry = Some(type_registry);
         self.type_registration_done = true;
         self.record_pass_timing("type_registration", duration);
@@ -275,9 +268,13 @@ impl Pipeline {
         let source_info = self.source_info.as_ref().unwrap();
 
         let start = Instant::now();
-        let type_errors = TypeInference.run(ast, self.type_registry.as_ref().unwrap(), source_info.clone())?;
+        let type_errors = TypeInference.run(
+            ast,
+            self.type_registry.as_ref().unwrap(),
+            source_info.clone(),
+        )?;
         let duration = start.elapsed();
-        
+
         self.record_pass_timing("type_inference", duration);
         self.type_errors = Some(type_errors);
         self.type_inference_done = true;
@@ -330,40 +327,12 @@ impl Pipeline {
         let type_registry = self.type_registry.as_ref().unwrap();
 
         let start = Instant::now();
-        let module = YirLowering::new().run(
-            ast,
-            type_registry,
-            false
-        )?;
+        let module = YirLowering::new().run(ast, type_registry, false)?;
         let duration = start.elapsed();
 
         self.record_pass_timing("yir_lowering", duration);
         self.module = Some(module);
         self.yir_lowering_done = true;
-
-        Ok(())
-    }
-
-    fn c_lowering(&mut self) -> Result<()> {
-        if self.c_lowering_done {
-            return Ok(());
-        }
-
-        if !self.yir_lowering_done {
-            self.yir_lowering()?;
-        }
-
-        let module = self.module.as_ref().unwrap();
-        let type_registry = self.type_registry.as_ref().unwrap();
-        let type_dependency_order = self.type_dependency_order.as_ref().unwrap();
-
-        let start = Instant::now();
-        let c_code = CLowering::new().run(module, type_registry, type_dependency_order)?;
-        let duration = start.elapsed();
-
-        self.record_pass_timing("c_lowering", duration);
-        self.c_code = Some(c_code);
-        self.c_lowering_done = true;
 
         Ok(())
     }
@@ -431,14 +400,6 @@ impl Pipeline {
         self.ast.as_ref().unwrap()
     }
 
-    pub fn calc_c(&mut self) -> Result<&CSourceCode> {
-        if !self.c_lowering_done {
-            self.c_lowering()?;
-        }
-
-        Ok(self.c_code.as_ref().unwrap())
-    }
-
     pub fn get_module(&mut self) -> Result<&Module> {
         if !self.yir_lowering_done {
             self.yir_lowering()?;
@@ -457,32 +418,68 @@ impl Pipeline {
             .ok_or_else(|| miette::miette!("Module not available"))
     }
 
-    pub fn calc_executable(&mut self) -> Result<CExecutable> {
-        if !self.c_lowering_done {
-            self.c_lowering()?;
-        }
-
-        let c_code = self.c_code.as_ref().unwrap();
-        let base = std::env::current_dir().into_diagnostic()?;
-        let filename = self
-            .source_info
-            .as_ref()
-            .map(|s| s.file_name.as_ref().to_string())
-            .unwrap_or_else(|| "temp".to_string());
-
-        let start = Instant::now();
-        let out = CCompilation::new().compile_c_code(c_code, base, &filename)?;
-        let duration = start.elapsed();
-
-        self.record_pass_timing("c_compilation", duration);
-        Ok(out)
-    }
-
     pub fn get_source_info(&self) -> Option<&SourceInfo> {
         self.source_info.as_ref()
     }
 
     pub fn get_id_generator_mut(&mut self) -> Option<&mut IdGenerator> {
         self.id_generator.as_mut()
+    }
+
+    pub fn calc_llvm_ir(&mut self) -> Result<String> {
+        if !self.yir_lowering_done {
+            self.yir_lowering()?;
+        }
+
+        let module = self.module.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
+
+        let start = Instant::now();
+        let llvm_lowerer = LLVMLowerer::new();
+        let llvm_ir = llvm_lowerer
+            .lower_module_to_ir(module, type_registry)
+            .map_err(|e| miette::miette!("LLVM lowering error: {}", e))?;
+        let duration = start.elapsed();
+
+        self.record_pass_timing("llvm_lowering", duration);
+        Ok(llvm_ir)
+    }
+
+    pub fn jit_execute(&mut self) -> Result<i32> {
+        if !self.yir_lowering_done {
+            self.yir_lowering()?;
+        }
+
+        let module = self.module.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
+
+        let start = Instant::now();
+        let llvm_lowerer = LLVMLowerer::new();
+        let result = llvm_lowerer
+            .jit_execute_main(module, type_registry)
+            .map_err(|e| miette::miette!("JIT execution error: {}", e))?;
+        let duration = start.elapsed();
+
+        self.record_pass_timing("jit_execution", duration);
+        Ok(result)
+    }
+
+    pub fn aot_compile(&mut self, output_path: &std::path::Path) -> Result<()> {
+        if !self.yir_lowering_done {
+            self.yir_lowering()?;
+        }
+
+        let module = self.module.as_ref().unwrap();
+        let type_registry = self.type_registry.as_ref().unwrap();
+
+        let start = Instant::now();
+        let llvm_lowerer = LLVMLowerer::new();
+        llvm_lowerer
+            .aot_compile(module, type_registry, output_path)
+            .map_err(|e| miette::miette!("AOT compilation error: {}", e))?;
+        let duration = start.elapsed();
+
+        self.record_pass_timing("aot_compilation", duration);
+        Ok(())
     }
 }

@@ -13,7 +13,7 @@ use crate::{
         self, BinOp as YirBinOp, Function, Module, Operand, UnaryOp as YirUnaryOp, Variable,
     },
     utils::{
-        TypeRegistry, calculate_type_layout,
+        TypeRegistry, calculate_struct_layout, calculate_type_layout,
         collections::{FastHashMap, IndexMap},
         type_info_table::{PrimitiveType, TypeInfo, primitive_u64},
     },
@@ -128,7 +128,6 @@ impl<'a> TransientData<'a> {
     }
 
     /// Lower pointer arithmetic operations (ptr + int, ptr - int, ptr - ptr)
-    /// Returns Some(operand) if this is a valid pointer arithmetic operation, None otherwise
     fn try_lower_pointer_arithmetic(
         &mut self,
         bin_expr: &crate::pass_parse::ast::BinaryExpr,
@@ -145,10 +144,13 @@ impl<'a> TransientData<'a> {
         let result_operand = match (bin_expr.op, lhs_type, rhs_type) {
             // pointer + integer = pointer
             (BinOp::Add, Pointer(_), BuiltInPrimitive(I64 | U64)) => {
+                let element_ty = lhs_type.deref_ptr();
+                // LLVM-style GEP: [0, offset] where 0 = no base pointer offset, offset = element index
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    rhs_operand,
+                    vec![yir::GEPIndex::ArrayIndex(rhs_operand)], // [n] for ptr[n]
+                    element_ty,
                 );
                 self.add_temporary(result_var);
                 Operand::Variable(result_var)
@@ -165,10 +167,13 @@ impl<'a> TransientData<'a> {
                 );
                 self.add_temporary(negated_var);
 
+                let element_ty = lhs_type.deref_ptr();
+                // LLVM-style GEP: [0, -offset] where 0 = no base pointer offset, -offset = negative element index
                 let result_var = self.function.make_get_element_ptr(
                     "ptr_offset".intern(),
                     lhs_operand,
-                    Operand::Variable(negated_var),
+                    vec![yir::GEPIndex::ArrayIndex(Operand::Variable(negated_var))], // [-n] for ptr[-n]
+                    element_ty,
                 );
                 self.add_temporary(result_var);
                 Operand::Variable(result_var)
@@ -178,6 +183,9 @@ impl<'a> TransientData<'a> {
             (BinOp::Subtract, Pointer(_), Pointer(_)) => {
                 // Emit a binary operation for pointer subtraction
                 // This should calculate the distance between pointers
+
+                // TODO: Do we need to turn that into ints?
+
                 let result_var = self.function.make_binary(
                     "ptr_distance".intern(),
                     YirBinOp::Sub,
@@ -552,14 +560,23 @@ impl<'a> TransientData<'a> {
                     let field_name = field.name;
                     let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
 
-                    let field = sinfo
+                    let (field_idx, field_ty) = sinfo
                         .fields
-                        .get(&field_name)
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (n, _))| **n == field_name)
+                        .map(|(idx, (_, info))| (idx, info.ty))
                         .expect("Compiler bug: field not found in lowering to YIR");
-                    let field_var = self.function.make_get_field_ptr(
+
+                    // LLVM-style GEP: [0, field_idx] for struct.field access
+                    let field_var = self.function.make_get_element_ptr(
                         field_name,
                         Operand::Variable(struct_var),
-                        field,
+                        vec![
+                            yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                            yir::GEPIndex::StructIndex(field_idx as u32),
+                        ],
+                        field_ty,
                     );
                     self.add_temporary(field_var);
 
@@ -612,10 +629,23 @@ impl<'a> TransientData<'a> {
                     .resolve_struct(struct_type.name)
                     .expect("Compiler bug: struct not found in lowering to YIR");
 
-                let field_ptr = self.function.make_get_field_ptr(
+                let (field_idx, field_ty) = field_info
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (n, _))| **n == field_name)
+                    .map(|(idx, (_, info))| (idx, info.ty))
+                    .expect("Compiler bug: field not found in lowering to YIR");
+
+                // LLVM-style GEP: [0, field_idx] where 0 = no base pointer offset, field_idx = struct field index
+                let field_ptr = self.function.make_get_element_ptr(
                     "field_ptr".intern(),
                     lhs,
-                    &field_info.fields[&field_name],
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(field_idx as u32),
+                    ],
+                    field_ty,
                 );
                 self.add_temporary(field_ptr);
 
@@ -637,7 +667,8 @@ impl<'a> TransientData<'a> {
                     .expect("Compiler bug: enum not found in lowering to YIR");
 
                 let variant_info = enum_info
-                    .variants
+                    .variants_info
+                    .fields
                     .get(&ei.variant_name)
                     .expect("Compiler bug: enum variant not found in lowering to YIR");
 
@@ -646,22 +677,40 @@ impl<'a> TransientData<'a> {
                     .as_ref()
                     .map(|data_expr| self.lower_expr(data_expr, ContextKind::AsIs));
 
-                let enum_var =
-                    self.function
-                        .make_alloca_single("enum_result".intern(), enum_info.ty, None);
+                let enum_var = self.function.make_alloca_single(
+                    "enum_result".intern(),
+                    enum_info.wrapper_info.ty,
+                    None,
+                );
                 self.add_temporary(enum_var);
 
+                // Write tag field (field 0 in wrapper struct)
+                let tag_ptr = self.function.make_get_element_ptr(
+                    "enum_tag_ptr".intern(),
+                    Operand::Variable(enum_var),
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(0),
+                    ], // [0, 0] for struct.tag_field
+                    primitive_u64(),
+                );
+                self.add_temporary(tag_ptr);
                 self.function
-                    .make_store_active_variant_idx(enum_var, variant_info);
+                    .make_store(tag_ptr, Operand::U64Const(variant_info.field_idx));
 
                 if let Some(data_operand) = data_operand {
-                    let variant_ptr = self.function.make_get_variant_data_ptr(
-                        "variant_ptr".intern(),
+                    // Write payload field (field 1 in wrapper struct)
+                    let payload_ptr = self.function.make_get_element_ptr(
+                        "enum_payload_ptr".intern(),
                         Operand::Variable(enum_var),
-                        variant_info,
+                        vec![
+                            yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                            yir::GEPIndex::StructIndex(1),
+                        ], // [0, 1] for struct.payload_field
+                        variant_info.ty,
                     );
-                    self.add_temporary(variant_ptr);
-                    self.function.make_store(variant_ptr, data_operand);
+                    self.add_temporary(payload_ptr);
+                    self.function.make_store(payload_ptr, data_operand);
                 }
 
                 match context {
@@ -705,34 +754,27 @@ impl<'a> TransientData<'a> {
 
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays are stored as pointers
-                        let element_layout = calculate_type_layout(element_type, self.tr);
 
-                        // Calculate total size: element_size * count
-                        let total_size_var = self.function.make_binary(
-                            "array_total_size".intern(),
-                            crate::pass_yir_lowering::yir::BinOp::Mul,
-                            Operand::U64Const(element_layout.size as u64),
-                            count_operand,
-                            primitive_u64(),
-                        );
-                        self.add_temporary(total_size_var);
-
-                        // Create ArrayInit based on init_value
-                        let init = if let Some(init_value) = &array_expr.init_expr {
+                        let ptr_var = if let Some(init_value) = &array_expr.init_expr {
                             let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
-                            Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(
+                            self.function.make_heap_alloc_with_splat(
+                                "heap_array".intern(),
+                                element_type,
+                                count_operand,
                                 init_operand,
-                            ))
+                            )
                         } else {
-                            None
-                        };
+                            // Zero initialization using MemSet
+                            // Calculate total size: element_size * count
+                            let element_layout = calculate_type_layout(element_type, self.tr);
 
-                        let ptr_var = self.function.make_heap_alloc(
-                            "heap_array".intern(),
-                            element_type,
-                            count_operand,
-                            init,
-                        );
+                            self.function.make_heap_alloc_zeroed(
+                                "heap_array".intern(),
+                                element_type,
+                                count_operand,
+                                element_layout.size as u64,
+                            )
+                        };
                         self.add_temporary(ptr_var);
                         Operand::Variable(ptr_var)
                     }
@@ -751,7 +793,6 @@ impl<'a> TransientData<'a> {
 
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays decay to pointers
-                        // IMMEDIATELY
 
                         let ptr_var = self.function.make_heap_alloc_with_values(
                             "heap_array_literal".intern(),
@@ -759,13 +800,14 @@ impl<'a> TransientData<'a> {
                             element_operands,
                         );
                         self.add_temporary(ptr_var);
+
                         Operand::Variable(ptr_var)
                     }
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
                         let value_type = self.get_type(struct_instantiation_expr.id);
 
                         // Allocate memory on heap first
-                        let ptr_var = self.function.make_heap_alloc_single(
+                        let ptr_var = self.function.make_heap_alloc_scalar(
                             "heap_ptr".intern(),
                             value_type,
                             None,
@@ -782,14 +824,22 @@ impl<'a> TransientData<'a> {
                             let field_name = field.name;
                             let field_op = self.lower_expr(field_expr, ContextKind::AsIs);
 
-                            let field_info = sinfo
+                            let (field_idx, field_ty) = sinfo
                                 .fields
-                                .get(&field_name)
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (n, _))| **n == field_name)
+                                .map(|(idx, (_, info))| (idx, info.ty))
                                 .expect("Compiler bug: field not found in lowering to YIR");
-                            let field_var = self.function.make_get_field_ptr(
+                            // LLVM-style GEP: [0, field_idx] for heap_ptr->field access
+                            let field_var = self.function.make_get_element_ptr(
                                 field_name,
                                 Operand::Variable(ptr_var),
-                                field_info,
+                                vec![
+                                    yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                                    yir::GEPIndex::StructIndex(field_idx as u32),
+                                ],
+                                field_ty,
                             );
                             self.add_temporary(field_var);
 
@@ -801,7 +851,7 @@ impl<'a> TransientData<'a> {
                         let value_type = self.get_type(heap_alloc_expr.expr.node_id());
 
                         // For non-struct/array literals, fall back to stack-then-copy
-                        let ptr_var = self.function.make_heap_alloc_single(
+                        let ptr_var = self.function.make_heap_alloc_scalar(
                             "heap_ptr".intern(),
                             value_type,
                             None,
@@ -992,61 +1042,107 @@ impl<'a> TransientData<'a> {
 
                 let ty = self.get_type(match_stmt.scrutinee.node_id());
 
-                match ty {
-                    TypeInfo::Enum(enum_ty) => {
-                        let mut jump_targets = IndexMap::default();
-                        let enum_info = self.tr.resolve_enum(enum_ty.name).unwrap();
-                        for arm in match_stmt.arms.iter() {
-                            let RefutablePatternNode::Enum(enum_pattern) = arm.pattern.as_ref();
-                            let variant_info =
-                                enum_info.variants.get(&enum_pattern.variant_name).unwrap();
-                            let match_arm_block = self.function.add_block("match_arm".intern());
-                            self.function.set_current_block(&match_arm_block);
-
-                            if let Some(variant_data_binding) = enum_pattern.binding.as_ref() {
-                                let variant_ptr = self.function.make_get_variant_data_ptr(
-                                    "variant_data".intern(),
-                                    lowered_match_expr,
-                                    variant_info,
-                                );
-                                self.add_temporary(variant_ptr);
-                                let variant_value = self.function.make_load(
-                                    "variant_value".intern(),
-                                    Operand::Variable(variant_ptr),
-                                );
-                                self.add_temporary(variant_value);
-                                self.lower_binding(
-                                    variant_data_binding,
-                                    Operand::Variable(variant_value),
-                                );
-                            }
-
-                            self.lower_block_body(&arm.body);
-                            self.function.make_jump_if_no_terminator(match_merge_block);
-                            jump_targets.insert(variant_info.variant_idx, match_arm_block);
-                        }
-
-                        self.function.set_current_block(&match_header);
-
-                        let default_block = if let Some(default_case) = &match_stmt.default_case {
-                            let default_block = self.function.add_block("match_default".intern());
-                            self.function.set_current_block(&default_block);
-                            self.lower_block_body(default_case);
-                            self.function.make_jump_if_no_terminator(match_merge_block);
-                            Some(default_block)
-                        } else {
-                            None
-                        };
-
-                        self.function.set_current_block(&match_header);
-                        self.function.make_jump_table(
-                            lowered_match_expr,
-                            jump_targets,
-                            default_block,
-                        );
+                // Handle enum types (now represented as structs)
+                let enum_info = match ty {
+                    TypeInfo::Struct(struct_type) => {
+                        self.tr.resolve_enum(struct_type.name).unwrap()
                     }
-                    _ => unreachable!("Match expression must be (currently) of enum type"),
+                    _ => panic!("Match statements currently only support enum types"),
+                };
+
+                let _struct_layout = calculate_struct_layout(enum_info.wrapper_info, self.tr);
+
+                // Ensure we have a pointer to the scrutinee value
+                let scrutinee_ptr = match lowered_match_expr {
+                    Operand::Variable(v) if v.ty().is_ptr() => Operand::Variable(v),
+                    Operand::Variable(v) => {
+                        let tmp = self.function.make_alloca_single(
+                            "match_scrutinee".intern(),
+                            v.ty(),
+                            None,
+                        );
+                        self.add_temporary(tmp);
+                        self.function.make_store(tmp, Operand::Variable(v));
+                        Operand::Variable(tmp)
+                    }
+                    _ => {
+                        let tmp =
+                            self.function
+                                .make_alloca_single("match_scrutinee".intern(), ty, None);
+                        self.add_temporary(tmp);
+                        self.function.make_store(tmp, lowered_match_expr);
+                        Operand::Variable(tmp)
+                    }
+                };
+
+                // Load the tag (discriminant) once for jump table dispatch
+                let tag_ptr = self.function.make_get_element_ptr(
+                    "match_tag_ptr".intern(),
+                    scrutinee_ptr,
+                    vec![
+                        yir::GEPIndex::ArrayIndex(Operand::U64Const(0)),
+                        yir::GEPIndex::StructIndex(0),
+                    ], // [0, 0] for struct.tag_field
+                    primitive_u64(),
+                );
+                self.add_temporary(tag_ptr);
+                let tag_val = self
+                    .function
+                    .make_load("match_tag".intern(), Operand::Variable(tag_ptr));
+                self.add_temporary(tag_val);
+                let tag_operand = Operand::Variable(tag_val);
+
+                let mut jump_targets = IndexMap::default();
+                for arm in match_stmt.arms.iter() {
+                    let RefutablePatternNode::Enum(enum_pattern) = arm.pattern.as_ref();
+                    let variant_info = enum_info
+                        .variants_info
+                        .fields
+                        .get(&enum_pattern.variant_name)
+                        .unwrap();
+                    let match_arm_block = self.function.add_block("match_arm".intern());
+                    self.function.set_current_block(&match_arm_block);
+
+                    if let Some(variant_data_binding) = enum_pattern.binding.as_ref() {
+                        let payload_ptr = self.function.make_get_element_ptr(
+                            "variant_payload".intern(),
+                            scrutinee_ptr,
+                            vec![
+                                crate::pass_yir_lowering::yir::GEPIndex::ArrayIndex(
+                                    Operand::U64Const(0),
+                                ),
+                                crate::pass_yir_lowering::yir::GEPIndex::StructIndex(1), // field 1 is payload
+                            ], // [0, 1] for struct.payload_field
+                            variant_info.ty,
+                        );
+                        self.add_temporary(payload_ptr);
+                        let variant_value = self
+                            .function
+                            .make_load("variant_value".intern(), Operand::Variable(payload_ptr));
+                        self.add_temporary(variant_value);
+                        self.lower_binding(variant_data_binding, Operand::Variable(variant_value));
+                    }
+
+                    self.lower_block_body(&arm.body);
+                    self.function.make_jump_if_no_terminator(match_merge_block);
+                    jump_targets.insert(variant_info.field_idx, match_arm_block);
                 }
+
+                self.function.set_current_block(&match_header);
+
+                let default_block = if let Some(default_case) = &match_stmt.default_case {
+                    let default_block = self.function.add_block("match_default".intern());
+                    self.function.set_current_block(&default_block);
+                    self.lower_block_body(default_case);
+                    self.function.make_jump_if_no_terminator(match_merge_block);
+                    Some(default_block)
+                } else {
+                    None
+                };
+
+                self.function.set_current_block(&match_header);
+                self.function
+                    .make_jump_table(tag_operand, jump_targets, default_block);
 
                 self.function.set_current_block(&match_merge_block);
                 StmtRes::Proceed
@@ -1245,12 +1341,12 @@ impl YirLowering {
 
                     for arg in &func.decl.args {
                         let (ty, name) = (data.get_type(arg.id), arg.name);
-                        let param = data.function.add_param("stack_param_mem".intern(), ty);
-                        let param_ptr = data.function.make_take_address(name, param);
-                        data.var_map.insert(arg.id, param_ptr);
+                        // add_param automatically converts to pointer type for stack storage
+                        let param = data.function.add_param(name, ty);
+                        data.var_map.insert(arg.id, param);
 
                         // Add parameter to function scope
-                        data.add_variable_to_current_scope(param_ptr);
+                        data.add_variable_to_current_scope(param);
                     }
 
                     data.lower_block_body(&func.body);
@@ -1258,14 +1354,8 @@ impl YirLowering {
                     // Generate KillSet for function parameters at end of function
                     data.pop_scope_and_generate_killset();
 
-                    // TODO: Implement a helper make_return_if_no_terminator
-                    if data
-                        .function
-                        .get_current_block()
-                        .map(|x| &x.terminator)
-                        .is_none()
-                    {
-                        data.function.make_return(None);
+                    if data.function.return_type.is_nil() {
+                        data.function.make_return_if_no_terminator(None);
                     }
 
                     data.function.sort_blocks_by_id();

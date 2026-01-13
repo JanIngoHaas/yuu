@@ -1,8 +1,8 @@
 use crate::{
     pass_diagnostics::YuuError,
-    pass_parse::{AST, SourceInfo, StructuralNode, StructuralMetadata},
+    pass_parse::{AST, SourceInfo, StructuralMetadata, StructuralNode},
     utils::{
-        Block, BindingInfo, BindingTable, BlockTree, TypeRegistry,
+        BindingInfo, BindingTable, Block, BlockTree, TypeRegistry,
         type_info_table::{TypeInfo, TypeInfoTable, error_type},
     },
 };
@@ -74,7 +74,8 @@ impl TypeInference {
         };
 
         // Process structural elements in parallel with isolated metadata
-        let all_errors: Vec<YuuError> = ast.structurals
+        let all_errors: Vec<YuuError> = ast
+            .structurals
             .par_iter_mut()
             .flat_map(|structural_node| {
                 let expr_count = structural_node.metadata.expr_count;
@@ -82,7 +83,7 @@ impl TypeInference {
                 let mut local_block_tree = BlockTree::new(&root_block);
                 let mut local_bindings = BindingTable::with_capacity(expr_count);
                 let mut local_errors = Vec::new();
-                
+
                 let root_id = local_block_tree.root_id();
                 let mut local_data = TransientData::new(
                     type_registry,
@@ -92,10 +93,10 @@ impl TypeInference {
                     &mut local_errors,
                     &src_code,
                 );
-                
+
                 // Process this structural element
                 infer_structural(structural_node.as_ref(), root_id, &mut local_data);
-                
+
                 // Store computed metadata in the StructuralElement (only for non-Error nodes)
                 if !matches!(structural_node.as_ref(), StructuralNode::Error(_)) {
                     structural_node.metadata = StructuralMetadata {
@@ -104,11 +105,11 @@ impl TypeInference {
                         expr_count,
                     };
                 }
-                
+
                 local_errors
             })
             .collect();
-            
+
         Ok(TypeInferenceErrors(all_errors))
     }
 }

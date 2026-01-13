@@ -20,7 +20,7 @@ fn test_simple_struct_definition() {
     let executable = run_to_executable(source, "test_simple_struct_definition.yuu")
         .expect("Failed to compile struct test");
 
-    let output = run_executable_with_output(&executable, &[]).expect("Failed to run struct test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run struct test");
 
     // 10 + 20 = 30
     assert_eq!(output, 30);
@@ -43,7 +43,7 @@ fn test_struct_with_different_types() {
         .expect("Failed to compile mixed struct test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed struct test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed struct test");
 
     assert_eq!(output, 5);
 }
@@ -66,7 +66,7 @@ fn test_struct_field_access() {
         .expect("Failed to compile field access test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run field access test");
+        run_executable_with_output(executable, &[]).expect("Failed to run field access test");
 
     // 10 * 5 = 50
     assert_eq!(output, 50);
@@ -92,7 +92,7 @@ fn test_struct_as_function_parameter() {
         .expect("Failed to compile struct param test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run struct param test");
+        run_executable_with_output(executable, &[]).expect("Failed to run struct param test");
 
     // 3*3 + 4*4 = 9 + 16 = 25
     assert_eq!(output, 25);
@@ -118,7 +118,7 @@ fn test_struct_as_return_value() {
         .expect("Failed to compile struct return test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run struct return test");
+        run_executable_with_output(executable, &[]).expect("Failed to run struct return test");
 
     // 7 + 8 = 15
     assert_eq!(output, 15);
@@ -146,7 +146,7 @@ fn test_nested_struct_fields() {
         .expect("Failed to compile nested struct test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested struct test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested struct test");
 
     // 10 + 5 = 15
     assert_eq!(output, 15);
@@ -169,8 +169,8 @@ fn test_struct_with_multiple_instances() {
     let executable = run_to_executable(source, "test_multiple_instances.yuu")
         .expect("Failed to compile multiple instances test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run multiple instances test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run multiple instances test");
 
     // (1+2) + (3+4) = 3 + 7 = 10
     assert_eq!(output, 10);
@@ -193,7 +193,7 @@ fn test_struct_field_assignment() {
         .expect("Failed to compile field assignment test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run field assignment test");
+        run_executable_with_output(executable, &[]).expect("Failed to run field assignment test");
 
     assert_eq!(output, 42);
 }
@@ -217,8 +217,8 @@ fn test_struct_with_computation() {
     let executable = run_to_executable(source, "test_struct_computation.yuu")
         .expect("Failed to compile struct computation test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run struct computation test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run struct computation test");
 
     assert_eq!(output, 0);
 }

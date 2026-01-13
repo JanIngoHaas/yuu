@@ -47,7 +47,7 @@ pub enum TypeCombination {
     Function((Vec<GiveMePtrHashes<TypeInfo>>, GiveMePtrHashes<TypeInfo>)),
     Array((GiveMePtrHashes<TypeInfo>, Option<i64>)),
     Struct(Ustr),
-    Enum(Ustr),
+    Union(Ustr),
 }
 
 impl Hash for TypeCombination {
@@ -64,7 +64,7 @@ impl Hash for TypeCombination {
             TypeCombination::Struct(ustr) => {
                 (*ustr).hash(state);
             }
-            TypeCombination::Enum(ustr) => {
+            TypeCombination::Union(ustr) => {
                 (*ustr).hash(state);
             }
         }
@@ -78,6 +78,7 @@ impl PartialEq for TypeCombination {
             (TypeCombination::Function(a), TypeCombination::Function(c)) => a == c,
             (TypeCombination::Array(a), TypeCombination::Array(b)) => a == b,
             (TypeCombination::Struct(a), TypeCombination::Struct(b)) => a == b,
+            (TypeCombination::Union(a), TypeCombination::Union(b)) => a == b,
             _ => false,
         }
     }
@@ -90,12 +91,22 @@ pub struct TypeInterner {
 }
 
 // Use static references to ensure consistent memory addresses across calls
+static PRIMITIVE_I8: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I8);
+static PRIMITIVE_U8: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::U8);
 static PRIMITIVE_I64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::I64);
 static PRIMITIVE_U64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::U64);
 static PRIMITIVE_F32: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F32);
 static PRIMITIVE_F64: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::F64);
 static PRIMITIVE_NIL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Nil);
 static PRIMITIVE_BOOL: TypeInfo = TypeInfo::BuiltInPrimitive(PrimitiveType::Bool);
+
+pub fn primitive_i8() -> &'static TypeInfo {
+    &PRIMITIVE_I8
+}
+
+pub fn primitive_u8() -> &'static TypeInfo {
+    &PRIMITIVE_U8
+}
 
 pub fn primitive_i64() -> &'static TypeInfo {
     &PRIMITIVE_I64
@@ -155,13 +166,15 @@ pub fn struct_type(name: Ustr) -> &'static TypeInfo {
     TYPE_CACHE.struct_type(name)
 }
 
-pub fn enum_type(name: Ustr) -> &'static TypeInfo {
-    TYPE_CACHE.enum_type(name)
+pub fn union_type(name: Ustr) -> &'static TypeInfo {
+    TYPE_CACHE.union_type(name)
 }
 
 impl From<PrimitiveType> for &'static TypeInfo {
     fn from(value: PrimitiveType) -> Self {
         match value {
+            PrimitiveType::I8 => primitive_i8(),
+            PrimitiveType::U8 => primitive_u8(),
             PrimitiveType::I64 => primitive_i64(),
             PrimitiveType::U64 => primitive_u64(),
             PrimitiveType::F32 => primitive_f32(),
@@ -196,12 +209,12 @@ impl TypeInterner {
         unsafe { &*(out.as_ref() as *const TypeInfo) }
     }
 
-    pub fn enum_type(&'static self, enum_: Ustr) -> &'static TypeInfo {
-        let key = TypeCombination::Struct(enum_);
+    pub fn union_type(&'static self, union_: Ustr) -> &'static TypeInfo {
+        let key = TypeCombination::Union(union_);
         let out = self
             .combination_to_type
             .entry_sync(key)
-            .or_insert_with(|| Box::new(TypeInfo::Enum(EnumType { name: enum_ })));
+            .or_insert_with(|| Box::new(TypeInfo::Union(UnionType { name: union_ })));
         unsafe { &*(out.as_ref() as *const TypeInfo) }
     }
 
@@ -226,8 +239,8 @@ impl TypeInterner {
             TypeInfo::Struct(struct_type) => {
                 panic!("Cannot dereference non-pointer type: {}", struct_type.name)
             }
-            TypeInfo::Enum(enum_type) => {
-                panic!("Cannot dereference non-pointer type: {}", enum_type.name)
+            TypeInfo::Union(union_type) => {
+                panic!("Cannot dereference non-pointer type: {}", union_type.name)
             }
         }
     }
@@ -320,6 +333,8 @@ impl TypeInfoTable {
 
 #[derive(Clone, PartialEq, Eq, Copy, Debug)]
 pub enum PrimitiveType {
+    I8,
+    U8,
     I64,
     U64,
     F32,
@@ -331,6 +346,8 @@ pub enum PrimitiveType {
 impl Display for PrimitiveType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PrimitiveType::I8 => write!(f, "i8"),
+            PrimitiveType::U8 => write!(f, "u8"),
             PrimitiveType::I64 => write!(f, "i64"),
             PrimitiveType::U64 => write!(f, "u64"),
             PrimitiveType::F32 => write!(f, "f32"),
@@ -381,6 +398,11 @@ pub struct EnumType {
     pub name: Ustr,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnionType {
+    pub name: Ustr,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeInfo {
     BuiltInPrimitive(PrimitiveType),
@@ -390,16 +412,12 @@ pub enum TypeInfo {
     Error,
     Unknown, // When we haven't yet determined the type
     Struct(StructType),
-    Enum(EnumType),
+    Union(UnionType),
 }
 
 impl TypeInfo {
-    pub fn is_enum(&self) -> bool {
-        matches!(self, TypeInfo::Enum(_))
-    }
-
-    pub fn is_refutable_pattern(&self) -> bool {
-        self.is_enum()
+    pub fn is_union(&self) -> bool {
+        matches!(self, TypeInfo::Union(_))
     }
 
     pub fn is_ptr(&self) -> bool {
@@ -408,6 +426,14 @@ impl TypeInfo {
 
     pub fn is_struct(&self) -> bool {
         matches!(self, TypeInfo::Struct(_))
+    }
+
+    pub fn is_nil(&self) -> bool {
+        matches!(self, TypeInfo::BuiltInPrimitive(PrimitiveType::Nil))
+    }
+
+    pub fn as_option_if_nil(&'static self) -> Option<&'static TypeInfo> {
+        if self.is_nil() { None } else { Some(self) }
     }
 
     pub fn is_struct_or_ptr_to_struct(&self) -> bool {
@@ -425,13 +451,9 @@ impl TypeInfo {
             TypeInfo::Function(_) => false,
             TypeInfo::Error => false,
             TypeInfo::Struct(_) => false,
-            TypeInfo::Enum(_) => false,
+            TypeInfo::Union(_) => false,
             TypeInfo::Unknown => false,
         }
-    }
-
-    pub fn is_nil(&self) -> bool {
-        matches!(self, TypeInfo::BuiltInPrimitive(PrimitiveType::Nil))
     }
 
     pub fn ptr_to(&'static self) -> &'static Self {
@@ -475,7 +497,7 @@ impl Display for TypeInfo {
             TypeInfo::Error => write!(f, "<error>"),
             TypeInfo::Unknown => write!(f, "<unknown>"),
             TypeInfo::Struct(struct_type) => write!(f, "{}", struct_type.name),
-            TypeInfo::Enum(enum_type) => write!(f, "{}", enum_type.name),
+            TypeInfo::Union(union_type) => write!(f, "{}", union_type.name),
         }
     }
 }

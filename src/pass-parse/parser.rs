@@ -1,11 +1,11 @@
+use crate::pass_parse::ast::*;
 use crate::{
-    pass_diagnostics::{ErrorKind, YuuError}, pass_lexing::{Token, TokenKind}, pass_parse::{
+    pass_diagnostics::{ErrorKind, YuuError},
+    pass_lexing::{Token, TokenKind},
+    pass_parse::{
         add_ids::add_ids,
         token_iterator::{CatchIn, ParseError, ParseResult, TokenIterator},
-    }
-};
-use crate::{
-    pass_parse::ast::*,
+    },
 };
 use logos::Span;
 use ustr::{Ustr, ustr};
@@ -30,7 +30,7 @@ impl Parser {
         match op {
             TokenKind::LParen => (15, 0), // Function calls highest precedence, but no right-hand side
             TokenKind::Dot => (13, 14),   // Member access (left-associative: a.b.c = (a.b).c)
-            TokenKind::AsKw => (11, 12), // Type casting expr as Type (left-associative)
+            TokenKind::AsKw => (11, 12),  // Type casting expr as Type (left-associative)
             TokenKind::Asterix | TokenKind::Slash | TokenKind::Percent => (11, 12), // Multiplication/division/modulo (left-associative)
             TokenKind::Plus | TokenKind::Minus => (9, 10), // Addition/subtraction (left-associative)
             TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (7, 8), // Comparisons (left-associative)
@@ -44,7 +44,7 @@ impl Parser {
         match op {
             TokenKind::Plus | TokenKind::Minus | TokenKind::Tilde => 13, // Unary operators bind tighter than * and +
             TokenKind::Asterix | TokenKind::Ampersand => 12, // Dereference and address-of have lower precedence than member access (like C)
-            TokenKind::NewKw => 13, // Heap allocation operator new expr
+            TokenKind::NewKw => 13,                          // Heap allocation operator new expr
             _ => -1,
         }
     }
@@ -141,9 +141,7 @@ impl Parser {
                 Ok(self.make_literal_expr(t))
             }
 
-            TokenKind::LuaMetaRaw => {
-                self.parse_lua_expr()
-            }
+            TokenKind::LuaMetaRaw => self.parse_lua_expr(),
 
             TokenKind::Ident(_) => {
                 // Check if this identifier is followed by a double colon (enum instantiation)
@@ -167,7 +165,12 @@ impl Parser {
                 }
             }
 
-            TokenKind::Plus | TokenKind::Minus | TokenKind::NewKw | TokenKind::Tilde | TokenKind::Asterix | TokenKind::Ampersand => {
+            TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::NewKw
+            | TokenKind::Tilde
+            | TokenKind::Asterix
+            | TokenKind::Ampersand => {
                 let t = self.lexer.next_token();
                 let prefix_precedence = Self::get_prefix_precedence(&t.kind);
                 let (span, operand) = self.parse_expr_chain(prefix_precedence)?;
@@ -824,11 +827,7 @@ impl Parser {
         }
     }
 
-    pub fn make_block_expr(
-        &mut self,
-        stmts: Vec<StmtNode>,
-        span: Span,
-    ) -> (Span, BlockStmt) {
+    pub fn make_block_expr(&mut self, stmts: Vec<StmtNode>, span: Span) -> (Span, BlockStmt) {
         (
             span.clone(),
             BlockStmt {
@@ -1669,14 +1668,16 @@ impl Parser {
     fn extract_lua_code(&self, token: &Token) -> String {
         let source = &self.lexer.code_info.source;
         let full = &source[token.span.clone()];
-        let inner = &full[1..full.len()-1];
+        let inner = &full[1..full.len() - 1];
         inner.replace("##", "#")
     }
 
     pub fn parse_lua_expr(&mut self) -> ParseResult<(Span, ExprNode)> {
         use crate::pass_parse::ast::{LuaMetaExpr, LuaMetaSingleValued};
 
-        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let token = self
+            .lexer
+            .expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
         let lua_code = self.extract_lua_code(&token);
         let span = token.span.clone();
 
@@ -1694,9 +1695,11 @@ impl Parser {
     }
 
     pub fn parse_lua_type(&mut self) -> ParseResult<(Span, TypeNode)> {
-        use crate::pass_parse::ast::{LuaMetaType, LuaMetaSingleValued};
+        use crate::pass_parse::ast::{LuaMetaSingleValued, LuaMetaType};
 
-        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let token = self
+            .lexer
+            .expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
         let lua_code = self.extract_lua_code(&token);
         let span = token.span.clone();
 
@@ -1716,7 +1719,9 @@ impl Parser {
     pub fn parse_lua_binding(&mut self) -> ParseResult<(Span, BindingNode)> {
         use crate::pass_parse::ast::{LuaMetaBinding, LuaMetaSingleValued};
 
-        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let token = self
+            .lexer
+            .expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
         let lua_code = self.extract_lua_code(&token);
         let span = token.span.clone();
 
@@ -1734,9 +1739,11 @@ impl Parser {
     }
 
     pub fn parse_lua_stmt(&mut self) -> ParseResult<(Span, StmtNode)> {
-        use crate::pass_parse::ast::{LuaMetaStmt, LuaMetaNMultiValued};
+        use crate::pass_parse::ast::{LuaMetaNMultiValued, LuaMetaStmt};
 
-        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let token = self
+            .lexer
+            .expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
         let lua_code = self.extract_lua_code(&token);
         let span = token.span.clone();
 
@@ -1754,9 +1761,11 @@ impl Parser {
     }
 
     pub fn parse_lua_structural(&mut self) -> ParseResult<(Span, StructuralNode)> {
-        use crate::pass_parse::ast::{LuaMetaStructural, LuaMetaNMultiValued};
+        use crate::pass_parse::ast::{LuaMetaNMultiValued, LuaMetaStructural};
 
-        let token = self.lexer.expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
+        let token = self
+            .lexer
+            .expect(&[TokenKind::LuaMetaRaw], &mut self.errors)?;
         let lua_code = self.extract_lua_code(&token);
         let span = token.span.clone();
 
@@ -1917,9 +1926,7 @@ impl Parser {
     pub fn parse_structural(&mut self) -> ParseResult<(Span, StructuralNode)> {
         let t = self.lexer.peek();
         let x = match t.kind {
-            TokenKind::LuaMetaRaw => {
-                self.parse_lua_structural()?
-            }
+            TokenKind::LuaMetaRaw => self.parse_lua_structural()?,
             TokenKind::FnKw => {
                 let (range, res) = self.parse_func_def()?;
                 (range, StructuralNode::FuncDef(res))

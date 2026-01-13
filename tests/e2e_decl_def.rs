@@ -16,7 +16,7 @@ fn test_basic_decl_def() {
         .expect("Failed to compile basic decl/def test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run basic decl/def test");
+        run_executable_with_output(executable, &[]).expect("Failed to run basic decl/def test");
 
     assert_eq!(output, 5);
 }
@@ -34,7 +34,7 @@ fn test_decl_def_with_heap_allocation() {
     let executable = run_to_executable(source, "test_decl_def_with_heap_allocation.yuu")
         .expect("Failed to compile heap allocation decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run heap allocation decl/def test");
 
     assert_eq!(output, 42);
@@ -51,7 +51,7 @@ fn test_decl_def_with_stack_arrays() {
     let executable = run_to_executable(source, "test_decl_def_with_stack_arrays.yuu")
         .expect("Failed to compile stack array decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run stack array decl/def test");
 
     assert_eq!(output, 10);
@@ -70,7 +70,7 @@ fn test_decl_def_with_heap_arrays() {
     let executable = run_to_executable(source, "test_decl_def_with_heap_arrays.yuu")
         .expect("Failed to compile heap array decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run heap array decl/def test");
 
     assert_eq!(output, 7);
@@ -87,7 +87,7 @@ fn test_decl_def_with_array_literals() {
     let executable = run_to_executable(source, "test_decl_def_with_array_literals.yuu")
         .expect("Failed to compile array literal decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run array literal decl/def test");
 
     assert_eq!(output, 4);
@@ -106,7 +106,7 @@ fn test_decl_def_with_heap_array_literals() {
     let executable = run_to_executable(source, "test_decl_def_with_heap_array_literals.yuu")
         .expect("Failed to compile heap array literal decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run heap array literal decl/def test");
 
     assert_eq!(output, 20);
@@ -130,7 +130,7 @@ fn test_decl_def_with_structs() {
         .expect("Failed to compile struct decl/def test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run struct decl/def test");
+        run_executable_with_output(executable, &[]).expect("Failed to run struct decl/def test");
 
     assert_eq!(output, 30);
 }
@@ -153,7 +153,7 @@ fn test_decl_def_with_heap_structs() {
     let executable = run_to_executable(source, "test_decl_def_with_heap_structs.yuu")
         .expect("Failed to compile heap struct decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run heap struct decl/def test");
 
     assert_eq!(output, 99);
@@ -182,7 +182,7 @@ fn test_decl_def_with_enums() {
         .expect("Failed to compile enum decl/def test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run enum decl/def test");
+        run_executable_with_output(executable, &[]).expect("Failed to run enum decl/def test");
 
     assert_eq!(output, 42);
 }
@@ -210,7 +210,7 @@ fn test_decl_def_complex_mixed_types() {
     let executable = run_to_executable(source, "test_decl_def_complex_mixed_types.yuu")
         .expect("Failed to compile complex mixed types decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run complex mixed types decl/def test");
 
     assert_eq!(output, 77);
@@ -233,7 +233,7 @@ fn test_decl_def_with_pointer_arithmetic() {
     let executable = run_to_executable(source, "test_decl_def_with_pointer_arithmetic.yuu")
         .expect("Failed to compile pointer arithmetic decl/def test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run pointer arithmetic decl/def test");
 
     assert_eq!(output, 15);
@@ -256,7 +256,7 @@ fn test_decl_def_interdependent_variables() {
     let executable = run_to_executable(source, "test_decl_def_interdependent_variables.yuu")
         .expect("Failed to compile interdependent variables test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run interdependent variables test");
 
     assert_eq!(output, 15); // a=5, b=10, c=15
@@ -283,7 +283,7 @@ fn test_decl_def_in_loops() {
         .expect("Failed to compile loop decl/def test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run loop decl/def test");
+        run_executable_with_output(executable, &[]).expect("Failed to run loop decl/def test");
 
     assert_eq!(output, 10); // 0+1+2+3+4 = 10
 }

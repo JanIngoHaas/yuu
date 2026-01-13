@@ -10,6 +10,5 @@ pub mod type_registry;
 pub use binding_info::*;
 pub use block::*;
 pub use c_packing::*;
-pub use lua_executor::*;
 pub use pipeline::*;
 pub use type_registry::*;

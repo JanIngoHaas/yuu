@@ -88,7 +88,7 @@ impl<'a> ControlFlowAnalyzer<'a> {
                     TypeInfo::Function(ft) => ft.ret,
                     _ => {
                         unreachable!("Function definition should have function type")
-                    },
+                    }
                 };
 
                 // First, check if the function actually has a return type of something other than "nil"

@@ -17,7 +17,7 @@ fn test_simple_if_expression() {
     let executable = run_to_executable(source, "test_simple_if_expression.yuu")
         .expect("Failed to compile if test");
 
-    let output = run_executable_with_output(&executable, &[]).expect("Failed to run if test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run if test");
 
     assert_eq!(output, 1);
 }
@@ -37,7 +37,7 @@ fn test_if_else_if_chain() {
         .expect("Failed to compile if-else-if test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run if-else-if test");
+        run_executable_with_output(executable, &[]).expect("Failed to run if-else-if test");
 
     assert_eq!(output, 2);
 }
@@ -59,8 +59,7 @@ fn test_nested_if_expressions() {
     let executable = run_to_executable(source, "test_nested_if_expressions.yuu")
         .expect("Failed to compile nested if test");
 
-    let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested if test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run nested if test");
 
     assert_eq!(output, 10);
 }
@@ -80,7 +79,7 @@ fn test_while_loop() {
     let executable =
         run_to_executable(source, "test_while_loop.yuu").expect("Failed to compile while test");
 
-    let output = run_executable_with_output(&executable, &[]).expect("Failed to run while test");
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run while test");
 
     // 0 + 1 + 2 + 3 + 4 = 10
     assert_eq!(output, 10);
@@ -101,7 +100,7 @@ fn test_while_with_break() {
         .expect("Failed to compile while break test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run while break test");
+        run_executable_with_output(executable, &[]).expect("Failed to run while break test");
 
     assert_eq!(output, 5);
 }
@@ -126,7 +125,7 @@ fn test_nested_while_loops() {
         .expect("Failed to compile nested while test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested while test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested while test");
 
     // 3 * 3 = 9
     assert_eq!(output, 9);
@@ -148,7 +147,7 @@ fn test_nested_while_loops() {
 //         .expect("Failed to compile complex condition test");
 
 //     let output =
-//         run_executable_with_output(&executable, &[]).expect("Failed to run complex condition test");
+//         run_executable_with_output(executable, &[]).expect("Failed to run complex condition test");
 
 //     assert_eq!(output, 1);
 // }
@@ -169,7 +168,7 @@ fn test_nested_while_loops() {
 //         .expect("Failed to compile while complex test");
 
 //     let output =
-//         run_executable_with_output(&executable, &[]).expect("Failed to run while complex test");
+//         run_executable_with_output(executable, &[]).expect("Failed to run while complex test");
 
 //     // x=5, y=5 when loop ends, so x+y=10
 //     assert_eq!(output, 10);
@@ -187,7 +186,7 @@ fn test_return_in_if() {
         .expect("Failed to compile return in if test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run return in if test");
+        run_executable_with_output(executable, &[]).expect("Failed to run return in if test");
 
     assert_eq!(output, 42);
 }

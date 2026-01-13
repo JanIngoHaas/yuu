@@ -30,7 +30,7 @@ fn test_simple_enum_definition_and_instantiation() {
         .expect("Failed to compile simple enum test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run simple enum test");
+        run_executable_with_output(executable, &[]).expect("Failed to run simple enum test");
 
     assert_eq!(output, 1);
 }
@@ -64,8 +64,8 @@ fn test_enum_with_data_variants() {
     let executable = run_to_executable(source, "test_enum_data_variants.yuu")
         .expect("Failed to compile enum data variants test");
 
-    let output = run_executable_with_output(&executable, &[])
-        .expect("Failed to run enum data variants test");
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run enum data variants test");
 
     assert_eq!(output, 42);
 }
@@ -97,7 +97,7 @@ fn test_enum_match_unit_variants() {
     let executable = run_to_executable(source, "test_enum_match_unit_variants.yuu")
         .expect("Failed to compile enum match unit variants test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run enum match unit variants test");
 
     // 1 + 2 + 3 = 6
@@ -130,7 +130,7 @@ fn test_enum_match_data_variants() {
     let executable = run_to_executable(source, "test_enum_match_data_variants.yuu")
         .expect("Failed to compile enum match data variants test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run enum match data variants test");
 
     // 42 + 10 = 52
@@ -178,7 +178,7 @@ fn test_nested_enum_variants() {
         .expect("Failed to compile nested enum test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested enum test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested enum test");
 
     // 0 + 100 + (-404) = -304
     assert_eq!(output, -304);
@@ -222,7 +222,7 @@ fn test_enum_with_different_data_types() {
         .expect("Failed to compile enum mixed types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run enum mixed types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run enum mixed types test");
 
     // 42 + 99 + 1 + 0 = 142
     assert_eq!(output, 142);
@@ -266,7 +266,7 @@ fn test_enum_as_struct_field() {
     let executable = run_to_executable(source, "test_enum_struct_field.yuu")
         .expect("Failed to compile enum as struct field test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run enum as struct field test");
 
     // 100 + (200 + 50) + (-404) = 100 + 250 - 404 = -54
@@ -310,7 +310,7 @@ fn test_enum_match_with_default_case() {
         .expect("Failed to compile enum default case test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run enum default case test");
+        run_executable_with_output(executable, &[]).expect("Failed to run enum default case test");
 
     // 0 + 1 + 999 + 999 = 1999
     assert_eq!(output, 1999);
@@ -450,7 +450,7 @@ fn test_deeply_nested_types() {
     let executable = run_to_executable(source, "test_deeply_nested_types.yuu")
         .expect("Failed to compile deeply nested types test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run deeply nested types test");
 
     // (3+7) + (5 + 2*2 + 4*3) = 10 + 21 = 31

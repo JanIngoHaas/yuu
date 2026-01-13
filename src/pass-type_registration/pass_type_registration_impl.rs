@@ -2,9 +2,16 @@ use logos::Span;
 use ustr::Ustr;
 
 use crate::{
-    pass_diagnostics::YuuError, pass_parse::{SourceInfo, ast::*}, pass_type_inference::infer_type, utils::{
-        binding_info::BindingInfo, collections::{UstrHashMap, UstrIndexMap}, type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type}, type_registry::{EnumVariantInfo, StructFieldInfo, TypeRegistry}
-    }
+    pass_diagnostics::YuuError,
+    pass_parse::{SourceInfo, ast::*},
+    pass_type_inference::infer_type,
+    utils::{
+        UnionFieldInfo,
+        binding_info::BindingInfo,
+        collections::UstrIndexMap,
+        type_info_table::{TypeInfo, error_type, function_type, primitive_nil, unknown_type},
+        type_registry::{StructFieldInfo, TypeRegistry},
+    },
 };
 
 /// Errors from type registration analysis
@@ -30,13 +37,8 @@ impl Default for TypeRegistrationErrors {
 pub struct TypeRegistration;
 
 impl TypeRegistration {
-
     /// Run the type registration pass on the AST
-    pub fn run(
-        &self,
-        ast: &AST,
-        src_code: &SourceInfo,
-    ) -> (TypeRegistry, TypeRegistrationErrors) {
+    pub fn run(&self, ast: &AST, src_code: &SourceInfo) -> (TypeRegistry, TypeRegistrationErrors) {
         let mut type_registry = TypeRegistry::new();
         let mut errors = Vec::new();
 
@@ -67,10 +69,7 @@ impl Default for TypeRegistration {
     }
 }
 
-fn declare_and_define_functions(
-    structural: &StructuralNode,
-    data: &mut TransientData,
-) {
+fn declare_and_define_functions(structural: &StructuralNode, data: &mut TransientData) {
     match structural {
         StructuralNode::FuncDecl(decl) => {
             declare_function(
@@ -106,14 +105,7 @@ pub fn declare_function(
 ) -> &'static TypeInfo {
     let func_arg_types = args
         .iter()
-        .map(|arg| {
-            infer_type(
-                &arg.ty,
-                data.type_registry,
-                data.errors,
-                data.src_code,
-            )
-        })
+        .map(|arg| infer_type(&arg.ty, data.type_registry, data.errors, data.src_code))
         .collect::<Vec<_>>();
 
     let ret_type = if let Some(ty) = ret_ty {
@@ -146,12 +138,7 @@ fn define_user_def_types(
     match structural {
         StructuralNode::StructDef(struct_def_structural) => {
             for field in &struct_def_structural.fields {
-                let ty = infer_type(
-                    &field.ty,
-                    data.type_registry,
-                    data.errors,
-                    data.src_code,
-                );
+                let ty = infer_type(&field.ty, data.type_registry, data.errors, data.src_code);
                 helper_vec.push(ty);
             }
 
@@ -168,9 +155,10 @@ fn define_user_def_types(
         }
         StructuralNode::EnumDef(enum_def_structural) => {
             for variant in &enum_def_structural.variants {
-                let ty = variant.data_type.as_ref().map(|ty| {
-                    infer_type(ty, data.type_registry, data.errors, data.src_code)
-                });
+                let ty = variant
+                    .data_type
+                    .as_ref()
+                    .map(|ty| infer_type(ty, data.type_registry, data.errors, data.src_code));
                 helper_vec.push(ty.unwrap_or_else(|| error_type())); // Use error_type as placeholder for None
             }
 
@@ -180,14 +168,10 @@ fn define_user_def_types(
                 .resolve_enum_mut(enum_def_structural.decl.name)
                 .unwrap();
 
-            for (variant, ty) in enum_def_structural
-                .variants
-                .iter()
-                .zip(helper_vec.iter())
-            {
+            for (variant, ty) in enum_def_structural.variants.iter().zip(helper_vec.iter()) {
                 if variant.data_type.is_some() {
-                    let evi_info = evi.variants.get_mut(&variant.name).unwrap();
-                    evi_info.variant = Some(*ty);
+                    let evi_info = evi.variants_info.fields.get_mut(&variant.name).unwrap();
+                    evi_info.ty = *ty;
                 }
             }
         }
@@ -240,7 +224,7 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
                     src_location: Some(struct_def.span.clone()),
                 },
             );
-            
+
             if !is_new {
                 let error = YuuError::builder()
                     .kind(crate::pass_diagnostics::error::ErrorKind::InvalidSyntax)
@@ -253,17 +237,21 @@ fn declare_user_def_types(structural: &StructuralNode, data: &mut TransientData)
             }
         }
         StructuralNode::EnumDef(ed) => {
-            let mut enum_variant_defs = UstrHashMap::default();
+            let mut enum_variant_defs = UstrIndexMap::default();
 
             for (idx, variant) in ed.variants.iter().enumerate() {
-                let evi = EnumVariantInfo {
-                    variant_name: variant.name,
-                    variant_idx: idx as u64,
+                let evi = UnionFieldInfo {
+                    name: variant.name,
+                    field_idx: idx as u64,
                     binding_info: BindingInfo {
                         id: variant.id,
                         src_location: Some(variant.span.clone()),
                     },
-                    variant: variant.data_type.as_ref().map(|_x| unknown_type()),
+                    ty: variant
+                        .data_type
+                        .as_ref()
+                        .map(|_x| unknown_type())
+                        .unwrap_or(primitive_nil()),
                 };
                 enum_variant_defs.insert(variant.name, evi);
             }

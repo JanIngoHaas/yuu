@@ -3,8 +3,8 @@ use crate::pass_parse::SourceInfo;
 use crate::pass_parse::ast::TypeNode;
 use crate::utils::TypeRegistry;
 use crate::utils::type_info_table::{
-    TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64,
-    primitive_i64, primitive_u64,
+    TypeInfo, error_type, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
+    primitive_u64,
 };
 
 pub fn infer_type(
@@ -33,7 +33,7 @@ pub fn infer_type(
                 "bool" => primitive_bool(),
                 _ => {
                     // Try to resolve as either a struct or enum
-                    let type_info = registry.resolve_struct_or_enum(ident.name);
+                    let type_info = registry.resolve_composable_type(ident.name);
                     if let Some(info) = type_info {
                         info.ty()
                     } else {

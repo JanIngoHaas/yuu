@@ -16,7 +16,7 @@ fn test_type_inference_basic() {
         .expect("Failed to compile type inference test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run type inference test");
+        run_executable_with_output(executable, &[]).expect("Failed to run type inference test");
 
     assert_eq!(output, 42);
 }
@@ -33,7 +33,7 @@ fn test_explicit_type_annotations() {
         .expect("Failed to compile explicit types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run explicit types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run explicit types test");
 
     assert_eq!(output, 42);
 }
@@ -57,7 +57,7 @@ fn test_function_parameter_types() {
         .expect("Failed to compile parameter types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run parameter types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run parameter types test");
 
     assert_eq!(output, 8);
 }
@@ -81,7 +81,7 @@ fn test_return_type_matching() {
         .expect("Failed to compile return types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run return types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run return types test");
 
     assert_eq!(output, 42);
 }
@@ -106,7 +106,7 @@ fn test_struct_type_checking() {
         .expect("Failed to compile struct types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run struct types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run struct types test");
 
     assert_eq!(output, 25);
 }
@@ -124,7 +124,7 @@ fn test_mixed_arithmetic_types() {
         .expect("Failed to compile mixed arithmetic test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mixed arithmetic test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mixed arithmetic test");
 
     // 10 + 3 * 2 = 16
     assert_eq!(output, 16);
@@ -145,7 +145,7 @@ fn test_type_inference_from_function_calls() {
     let executable = run_to_executable(source, "test_infer_from_calls.yuu")
         .expect("Failed to compile inference from calls test");
 
-    let output = run_executable_with_output(&executable, &[])
+    let output = run_executable_with_output(executable, &[])
         .expect("Failed to run inference from calls test");
 
     assert_eq!(output, 42);
@@ -168,7 +168,7 @@ fn test_comparison_operator_types() {
         .expect("Failed to compile comparison types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run comparison types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run comparison types test");
 
     assert_eq!(output, 1);
 }
@@ -192,7 +192,7 @@ fn test_nested_type_inference() {
         .expect("Failed to compile nested inference test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run nested inference test");
+        run_executable_with_output(executable, &[]).expect("Failed to run nested inference test");
 
     assert_eq!(output, 42);
 }
@@ -210,7 +210,7 @@ fn test_mutability_type_checking() {
         .expect("Failed to compile mutability types test");
 
     let output =
-        run_executable_with_output(&executable, &[]).expect("Failed to run mutability types test");
+        run_executable_with_output(executable, &[]).expect("Failed to run mutability types test");
 
     assert_eq!(output, 30);
 }

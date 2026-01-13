@@ -82,6 +82,9 @@ pub enum TokenKind {
     #[token("enum")]
     EnumKw,
 
+    #[token("union")]
+    UnionKw,
+
     #[token("match")]
     MatchKw,
 
@@ -221,8 +224,6 @@ pub enum TokenKind {
     #[token("&")]
     Ampersand,
 
-
-
     #[token("~")]
     Tilde,
 
@@ -292,6 +293,7 @@ impl Display for TokenKind {
             TokenKind::NotEq => "'!='".fmt(f),
             TokenKind::WhileKw => "'while'".fmt(f),
             TokenKind::EnumKw => "'enum'".fmt(f),
+            TokenKind::UnionKw => "'union'".fmt(f),
             TokenKind::MatchKw => "'match'".fmt(f),
             TokenKind::Dot => "'.'".fmt(f),
             TokenKind::At => "'@'".fmt(f),

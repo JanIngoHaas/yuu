@@ -14,7 +14,11 @@ impl Parse {
         Self
     }
 
-    pub fn run(&self, tokens: Vec<Token>, source_info: SourceInfo) -> miette::Result<(AST, crate::pass_parse::add_ids::IdGenerator, SyntaxErrors)> {
+    pub fn run(
+        &self,
+        tokens: Vec<Token>,
+        source_info: SourceInfo,
+    ) -> miette::Result<(AST, crate::pass_parse::add_ids::IdGenerator, SyntaxErrors)> {
         let mut parser = Parser::new(tokens, source_info);
         let (ast, id_generator) = parser.parse_and_add_ids();
         let (syntax_errors, _) = parser.dismantle();

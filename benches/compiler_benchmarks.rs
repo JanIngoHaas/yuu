@@ -21,20 +21,20 @@ fn bench_parsing(c: &mut Criterion) {
     });
 }
 
-fn bench_compile_to_executable(c: &mut Criterion) {
-    let (source, filename) = load_test_file("gigantic_benchmark.yuu");
+// fn bench_compile_to_executable(c: &mut Criterion) {
+//     let (source, filename) = load_test_file("gigantic_benchmark.yuu");
+//
+//     c.bench_function("compile_to_executable", |b| {
+//         b.iter(|| {
+//             let mut pipeline =
+//                 Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
+//             let _executable = pipeline
+//                 .calc_executable()
+//                 .expect("Compilation to executable failed");
+//             black_box(pipeline);
+//         });
+//     });
+// }
 
-    c.bench_function("compile_to_executable", |b| {
-        b.iter(|| {
-            let mut pipeline =
-                Pipeline::new(black_box(source.clone()), black_box(filename.clone()));
-            let _executable = pipeline
-                .calc_executable()
-                .expect("Compilation to executable failed");
-            black_box(pipeline);
-        });
-    });
-}
-
-criterion_group!(benches, bench_parsing, bench_compile_to_executable);
+criterion_group!(benches, bench_parsing);
 criterion_main!(benches);

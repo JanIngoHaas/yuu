@@ -1,13 +1,10 @@
-use crate::{
-    pass_parse::BindingNode,
-    utils::type_info_table::TypeInfo,
-};
+use crate::{pass_parse::BindingNode, utils::type_info_table::TypeInfo};
 
 use super::pass_type_inference_impl::TransientData;
 
 // TODO: For non-identifier bindings, we need to consider the possibility that the expression type might not match
 // the binding type
-pub fn infer_binding(
+pub(crate) fn infer_binding(
     binding: &BindingNode,
     block_id: usize,
     expr_type: &'static TypeInfo,

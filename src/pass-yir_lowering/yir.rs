@@ -2,10 +2,9 @@ use crate::pass_parse::ast::InternUstr;
 use crate::pass_print_yir::yir_printer;
 use crate::utils::collections::IndexMap;
 use crate::utils::type_info_table::{
-    PrimitiveType, TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64,
-    primitive_nil, primitive_u64,
+    TypeInfo, primitive_bool, primitive_f32, primitive_f64, primitive_i64, primitive_nil,
+    primitive_u64,
 };
-use crate::utils::{EnumVariantInfo, StructFieldInfo, TypeRegistry};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -136,135 +135,161 @@ pub enum UnaryOp {
 
 #[derive(Clone, Debug)]
 pub enum ArrayInit {
-    Zero,                   // Zero-initialize all elements
-    Splat(Operand),         // Fill all elements with same value
-    Elements(Vec<Operand>), // Explicit element values
+    /// Zero-initialize all elements
+    Zero,
+    /// Fill all elements with same value
+    Splat(Operand),
+    /// Explicit element valuess
+    Elements(Vec<Operand>),
+}
+
+// Command structs for instructions
+
+/// Declares a variable on the stack, returns a pointer to it
+#[derive(Clone, Debug)]
+pub struct AllocaCmd {
+    pub target: Variable, // The variable being declared
+    pub count: u64,
+    pub align: Option<u64>,
+    pub init: Option<ArrayInit>,
+}
+
+/// Load value through a pointer
+#[derive(Clone, Debug)]
+pub struct LoadCmd {
+    pub target: Variable, // Target variable to store loaded value
+    pub source: Operand,  // Source pointer operand (must be a pointer type)
+}
+
+/// Store value through a pointer
+#[derive(Clone, Debug)]
+pub struct StoreCmd {
+    pub dest: Operand,  // Destination pointer operand (must be a pointer type)
+    pub value: Operand, // Value to store
+}
+
+/// Binary operation
+#[derive(Clone, Debug)]
+pub struct BinaryCmd {
+    pub target: Variable, // Result variable
+    pub op: BinOp,        // Operation
+    pub lhs: Operand,     // Left operand
+    pub rhs: Operand,     // Right operand
+}
+
+/// Unary operation
+#[derive(Clone, Debug)]
+pub struct UnaryCmd {
+    pub target: Variable, // Result variable
+    pub op: UnaryOp,      // Operation
+    pub operand: Operand, // Operand
+}
+
+/// Function call
+#[derive(Clone, Debug)]
+pub struct CallCmd {
+    pub target: Option<Variable>, // Optional target for return value
+    pub name: Ustr,               // Function name
+    pub args: Vec<Operand>,       // Arguments
+}
+
+/// Convert integer to pointer
+#[derive(Clone, Debug)]
+pub struct IntToPtrCmd {
+    pub target: Variable, // Result pointer variable
+    pub source: Operand,  // Source integer operand (must be u64)
+}
+
+#[derive(Clone, Debug)]
+pub enum MallocCount {
+    Scalar,
+    Multiple(Operand),
+}
+
+/// Heap allocation - returns a pointer to allocated memory
+#[derive(Clone, Debug)]
+pub struct HeapAllocCmd {
+    pub target: Variable,   // Pointer variable to store the heap address
+    pub count: MallocCount, // Number of elements to allocate (can be dynamic)
+    pub align: Option<u64>,
+}
+
+/// Heap deallocation - frees previously allocated memory
+#[derive(Clone, Debug)]
+pub struct HeapFreeCmd {
+    pub ptr: Operand, // Pointer to memory to free (must be heap-allocated)
+}
+
+/// MemCpy intrinsic
+#[derive(Clone, Debug)]
+pub struct MemCpyCmd {
+    pub dest: Operand,  // Destination pointer
+    pub src: Operand,   // Source pointer
+    pub count: Operand, // Number of bytes to copy
+}
+
+/// MemSet intrinsic
+#[derive(Clone, Debug)]
+pub struct MemSetCmd {
+    pub dest: Operand,  // Destination pointer
+    pub value: Operand, // Value to set (u8)
+    pub count: Operand, // Number of bytes to set
+}
+
+/// Typed index for GetElementPtr instructions
+#[derive(Clone, Debug)]
+pub enum GEPIndex {
+    /// Index into a struct field (must be a compile-time constant).
+    /// Used for selecting fields of a struct. corresponds to i32 in LLVM.
+    StructIndex(u32),
+    /// Index into an array or pointer offset.
+    /// Can be dynamic or constant. corresponds to i64 in LLVM.
+    ArrayIndex(Operand),
+}
+
+/// Get pointer to nested element (LLVM-style GEP with multiple indices)
+/// Supports typed indexing through structures and arrays.
+/// The first index is applied to the pointer-to-aggregate type,
+/// and subsequent indices navigate through nested aggregates.
+/// The result type is determined by target.ty().deref_ptr().
+#[derive(Clone, Debug)]
+pub struct GetElementPtrCmd {
+    pub target: Variable,       // Result pointer to element
+    pub base: Operand,          // Base pointer operand
+    pub indices: Vec<GEPIndex>, // Multiple indices for nested access
+}
+
+/// Marks that multiple stack variables are being killed (e.g., leaving scope)
+#[derive(Clone, Debug)]
+pub struct KillSetCmd {
+    pub vars: Vec<Variable>, // Stack variables being killed
+}
+
+/// Reinterpret bytes of one type as another type (bitcast/type punning)
+#[derive(Clone, Debug)]
+pub struct ReinterpCmd {
+    pub target: Variable,               // Result variable
+    pub source: Operand,                // Source operand to reinterpret
+    pub target_type: &'static TypeInfo, // Type to reinterpret as
 }
 
 #[derive(Clone, Debug)]
 pub enum Instruction {
-    // Declares a variable on the stack, returns a pointer to it
-    Alloca {
-        target: Variable, // The variable being declared
-        count: u64,
-        align: Option<u64>,
-        init: Option<ArrayInit>,
-    },
+    Alloca(AllocaCmd),
 
-    // Simple assignment or from constant to variable
-    StoreImmediate {
-        target: Variable, // Target variable to assign to
-        value: Operand,   // Source value
-    },
-
-    // Get pointer to a variable (for taking address of a variable)
-    TakeAddress {
-        target: Variable, // Pointer variable to store the address
-        source: Variable, // Variable whose address we're taking
-    },
-
-    // Get pointer to a field within a struct
-    GetFieldPtr {
-        target: Variable, // Result pointer variable
-        base: Operand,    // Base struct operand (either variable or pointer)
-        field: Ustr,      // Field name
-    },
-
-    // Load value through a pointer
-    Load {
-        target: Variable, // Target variable to store loaded value
-        source: Operand,  // Source pointer operand (must be a pointer type)
-    },
-
-    // Store value through a pointer
-    Store {
-        dest: Operand,  // Destination pointer operand (must be a pointer type)
-        value: Operand, // Value to store
-    },
-
-    // Binary operation
-    Binary {
-        target: Variable, // Result variable
-        op: BinOp,        // Operation
-        lhs: Operand,     // Left operand
-        rhs: Operand,     // Right operand
-    },
-
-    // Unary operation
-    Unary {
-        target: Variable, // Result variable
-        op: UnaryOp,      // Operation
-        operand: Operand, // Operand
-    },
-
-    // Function call
-    Call {
-        target: Option<Variable>, // Optional target for return value
-        name: Ustr,               // Function name
-        args: Vec<Operand>,       // Arguments
-    },
-
-    // Enum specific
-    GetVariantDataPtr {
-        target: Variable, // result pointer Variable to the data of the enum.
-        base: Operand,    // base operand (must be an enum)
-        variant: Ustr,    // variant name
-    },
-
-    LoadActiveVariantIdx {
-        target: Variable, // Variable to hold the active variant index
-        source: Operand,  // Base operand (must be an enum ptr)
-    },
-
-    StoreActiveVariantIdx {
-        dest: Variable, // Destination pointer operand (the enum itself, not the data ptr!)
-        value: Operand, // Must be of type u64
-    },
-
-    // Convert integer to pointer
-    IntToPtr {
-        target: Variable, // Result pointer variable
-        source: Operand,  // Source integer operand (must be u64)
-    },
-
-    // Heap allocation - returns a pointer to allocated memory
-    HeapAlloc {
-        target: Variable,        // Pointer variable to store the heap address
-        count: Operand,         // Number of elements to allocate (can be dynamic)
-        align: Option<u64>,
-        init: Option<ArrayInit>, // Array initialization (None for uninitialized)
-    },
-
-    // Heap deallocation - frees previously allocated memory
-    HeapFree {
-        ptr: Operand, // Pointer to memory to free (must be heap-allocated)
-    },
-
-    // MemCpy intrinsic
-    MemCpy {
-        dest: Operand,  // Destination pointer
-        src: Operand,   // Source pointer
-        count: Operand, // Number of bytes to copy
-    },
-
-    // MemSet intrinsic
-    MemSet {
-        dest: Operand,  // Destination pointer
-        value: Operand, // Value to set (u8)
-        count: Operand, // Number of bytes to set
-    },
-
-    // Get pointer to array element at index
-    GetElementPtr {
-        target: Variable, // Result pointer to element
-        base: Operand,    // Base array pointer
-        index: Operand,   // Index operand (must be u64/i64)
-    },
-
-    // Marks that multiple stack variables are being killed (e.g., leaving scope)
-    KillSet {
-        vars: Vec<Variable>, // Stack variables being killed
-    },
+    Load(LoadCmd),
+    Store(StoreCmd),
+    Binary(BinaryCmd),
+    Unary(UnaryCmd),
+    Call(CallCmd),
+    IntToPtr(IntToPtrCmd),
+    HeapAlloc(HeapAllocCmd),
+    HeapFree(HeapFreeCmd),
+    MemCpy(MemCpyCmd),
+    MemSet(MemSetCmd),
+    GetElementPtr(GetElementPtrCmd),
+    KillSet(KillSetCmd),
+    Reinterp(ReinterpCmd),
 }
 
 #[derive(Clone, Debug)]
@@ -298,36 +323,6 @@ pub struct BasicBlock {
     pub terminator: ControlFlow,
 }
 
-impl BasicBlock {
-    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
-        self.instructions.iter().filter_map(|instr| {
-            match instr {
-                Instruction::Alloca { target, .. } | Instruction::HeapAlloc { target, .. } => {
-                    return Some(target);
-                }
-                Instruction::StoreImmediate { .. } => {}
-                Instruction::TakeAddress { .. } => {}
-                Instruction::GetFieldPtr { .. } => {}
-                Instruction::Load { .. } => {}
-                Instruction::Store { .. } => {}
-                Instruction::Binary { .. } => {}
-                Instruction::Unary { .. } => {}
-                Instruction::Call { .. } => {}
-                Instruction::LoadActiveVariantIdx { .. } => {}
-                Instruction::GetVariantDataPtr { .. } => {}
-                Instruction::StoreActiveVariantIdx { .. } => {}
-                Instruction::IntToPtr { .. } => {}
-                Instruction::HeapFree { .. } => {}
-                Instruction::MemCpy { .. } => {}
-                Instruction::MemSet { .. } => {}
-                Instruction::GetElementPtr { .. } => {}
-                Instruction::KillSet { .. } => {}
-            };
-            None
-        })
-    }
-}
-
 #[derive(Clone)]
 pub struct Function {
     pub ast_id: usize,
@@ -343,19 +338,12 @@ pub struct Function {
 }
 
 impl Function {
-
     pub fn split_ast_id(&self) -> (u32, u32) {
         // TODO: Forbid usize == u32 ---> should be u64
         // Assume usize == u64
         let high = (self.ast_id >> 32) as u32;
         let low = (self.ast_id & 0xFFFFFFFF) as u32;
         (high, low)
-    }
-
-    pub fn calculate_var_decls(&self) -> impl Iterator<Item = &Variable> {
-        self.blocks
-            .values()
-            .flat_map(|block| block.calculate_var_decls())
     }
 
     pub fn new(name: Ustr, ast_id: usize, return_type: &'static TypeInfo) -> Self {
@@ -376,7 +364,8 @@ impl Function {
     }
 
     pub fn add_param(&mut self, name: Ustr, ty: &'static TypeInfo) -> Variable {
-        let param = self.fresh_variable(name, ty);
+        // Parameters are always stored on the stack, so we represent them as pointers
+        let param = self.fresh_variable(name, ty.ptr_to());
         self.params.push(param);
         param
     }
@@ -457,41 +446,10 @@ impl Function {
         }
     }
 
-    pub fn make_store_active_variant_idx(
-        &mut self,
-        dest: Variable,
-        variant_info: &EnumVariantInfo,
-    ) {
-        let value = Operand::U64Const(variant_info.variant_idx);
-        let instr = Instruction::StoreActiveVariantIdx { dest, value };
-        self.get_current_block_mut().instructions.push(instr);
-    }
-
-    pub fn make_load_active_variant_idx(&mut self, name_hint: Ustr, source: Operand) -> Variable {
-        let target = self.fresh_variable(name_hint, primitive_u64());
-        let instr = Instruction::LoadActiveVariantIdx { target, source };
-        self.get_current_block_mut().instructions.push(instr);
-        target
-    }
-
-    pub fn make_get_variant_data_ptr(
-        &mut self,
-        name_hint: Ustr,
-        base: Operand,
-        variant_info: &EnumVariantInfo,
-    ) -> Variable {
-        let target_type = variant_info
-            .variant
-            .expect("Variant must have data type")
-            .ptr_to();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::GetVariantDataPtr {
-            target,
-            base,
-            variant: variant_info.variant_name,
-        };
-        self.get_current_block_mut().instructions.push(instr);
-        target
+    pub fn make_return_if_no_terminator(&mut self, value: Option<Operand>) {
+        if !self.has_terminator(self.current_block) {
+            self.make_return(value);
+        }
     }
 
     // Unified alloca builder method
@@ -504,12 +462,12 @@ impl Function {
     ) -> Variable {
         let dest_ty = element_ty.ptr_to();
         let target = self.fresh_variable(name_hint, dest_ty);
-        let instr = Instruction::Alloca {
+        let instr = Instruction::Alloca(AllocaCmd {
             target,
             count,
             align: None,
             init,
-        };
+        });
         self.get_current_block_mut().instructions.push(instr);
         target
     }
@@ -561,45 +519,6 @@ impl Function {
         )
     }
 
-    // Convenience method that checks for valid types
-    pub fn make_alloca_if_valid_type(
-        &mut self,
-        name_hint: Ustr,
-        ty: &'static TypeInfo,
-        init_value: Option<Operand>,
-    ) -> Option<Variable> {
-        if matches!(ty, TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error) {
-            return None;
-        }
-
-        Some(self.make_alloca_single(name_hint, ty, init_value))
-    }
-
-    // Helper function to store only for valid types (not Inactive or pointers to Inactive)
-    pub fn make_store_if_valid_type(&mut self, target: Variable, value: Operand) -> bool {
-        // Check if the value's type is valid using the same pattern as existing debug assertions
-        let value_type = value.ty();
-        if matches!(
-            value_type,
-            TypeInfo::Pointer(TypeInfo::Error) | TypeInfo::Error
-        ) {
-            return false;
-        }
-
-        self.make_store(target, value);
-        true
-    }
-
-    // Helper function to store only if the target variable exists (reducing if-let boilerplate)
-    pub fn make_store_if_exists(&mut self, target: Option<Variable>, value: Operand) -> bool {
-        if let Some(var) = target {
-            self.make_store(var, value);
-            true
-        } else {
-            false
-        }
-    }
-
     // Builder method for Assign
 
     // Use make_store instead of make_assign
@@ -641,62 +560,27 @@ impl Function {
             Some(self.fresh_variable(target, return_type))
         };
         let current_block = self.get_current_block_mut();
-        let instr = Instruction::Call { target, name, args };
+        let instr = Instruction::Call(CallCmd { target, name, args });
         current_block.instructions.push(instr);
         target
     } // Builder method for TakeAddress
-    pub fn make_take_address(&mut self, name_hint: Ustr, source: Variable) -> Variable {
-        let target_type = source.ty().ptr_to();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::TakeAddress { target, source };
-        self.get_current_block_mut().instructions.push(instr);
-        target
-    } // Builder method for GetFieldPtr
-    pub fn make_get_field_ptr(
-        &mut self,
-        name_hint: Ustr,
-        base: Operand,
-        field_info: &StructFieldInfo,
-    ) -> Variable {
-        let base_type = base.ty();
-        debug_assert!(
-            matches!(base_type, TypeInfo::Pointer(_)),
-            "make_get_field_ptr: base operand must be a pointer type, got {:?}",
-            base_type
-        );
 
-        if let TypeInfo::Pointer(inner_type) = base_type {
-            debug_assert!(
-                matches!(inner_type, TypeInfo::Struct(_)),
-                "make_get_field_ptr: base must be pointer to struct, got pointer to {:?}",
-                inner_type
-            );
-        }
-
-        let target_type = field_info.ty.ptr_to();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::GetFieldPtr {
-            target,
-            base,
-            field: field_info.name,
-        };
-        self.get_current_block_mut().instructions.push(instr);
-
-        target
-    } // Builder method for Load
+    // Builder method for Load
     pub fn make_load(&mut self, name_hint: Ustr, source: Operand) -> Variable {
-        let source_ty = source.ty();
         debug_assert!(
-            source_ty.is_ptr(),
+            source.ty().is_ptr(),
             "Load source must be a pointer, got {}",
-            source_ty
+            source.ty()
         );
-        let target_type = source_ty.deref_ptr();
-        let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::Load { target, source };
+
+        let loaded_ty = source.ty().deref_ptr();
+        let target = self.fresh_variable(name_hint, loaded_ty);
+        let instr = Instruction::Load(LoadCmd { target, source });
         self.get_current_block_mut().instructions.push(instr);
+
         target
-    } // Builder method for Store
+    }
+
     pub fn make_store(&mut self, dest: Variable, value: Operand) -> Variable {
         let dest_ty = dest.ty();
 
@@ -715,38 +599,10 @@ impl Function {
             dest_ty
         );
 
-        // If we have a Immediate value, we can just store it directly
-        let value_ptr = match value {
-            Operand::I64Const(_)
-            | Operand::U64Const(_)
-            | Operand::F32Const(_)
-            | Operand::F64Const(_)
-            | Operand::BoolConst(_) => {
-                let instr = Instruction::StoreImmediate {
-                    target: dest,
-                    value,
-                };
-                self.get_current_block_mut().instructions.push(instr);
-                return dest;
-            }
-            Operand::NoOp => {
-                // NoOp is a special case, we can just return the destination - there is nothing to store
-                return dest;
-            }
-            Operand::Variable(_) => value,
-        };
-
-        debug_assert_eq!(
-            value_ptr.ty(),
-            dest_ty.deref_ptr(),
-            "Store type mismatch: dest expects to store {}, value is {}",
-            dest_ty.deref_ptr(),
-            value_ptr.ty()
-        );
-        let instr = Instruction::Store {
+        let instr = Instruction::Store(StoreCmd {
             dest: Operand::Variable(dest),
-            value: value_ptr,
-        };
+            value,
+        });
         self.get_current_block_mut().instructions.push(instr);
 
         dest
@@ -761,12 +617,12 @@ impl Function {
         result_type: &'static TypeInfo,
     ) -> Variable {
         let target = self.fresh_variable(name_hint, result_type);
-        let instr = Instruction::Binary {
+        let instr = Instruction::Binary(BinaryCmd {
             target,
             op,
             lhs,
             rhs,
-        };
+        });
         self.get_current_block_mut().instructions.push(instr);
 
         target
@@ -779,11 +635,11 @@ impl Function {
         operand: Operand,
     ) -> Variable {
         let target = self.fresh_variable(name_hint, result_type);
-        let instr = Instruction::Unary {
+        let instr = Instruction::Unary(UnaryCmd {
             target,
             op,
             operand,
-        };
+        });
         self.get_current_block_mut().instructions.push(instr);
 
         target
@@ -797,53 +653,90 @@ impl Function {
         source: Operand,
     ) -> Variable {
         let target = self.fresh_variable(name_hint, target_type);
-        let instr = Instruction::IntToPtr { target, source };
+        let instr = Instruction::IntToPtr(IntToPtrCmd { target, source });
         self.get_current_block_mut().instructions.push(instr);
         target
     }
 
     // Unified heap alloc builder method
-    pub fn make_heap_alloc(
+    pub fn make_heap_alloc_with_splat(
         &mut self,
         name_hint: Ustr,
         element_ty: &'static TypeInfo,
         count: Operand,
-        init: Option<ArrayInit>,
+        init_value: Operand,
     ) -> Variable {
-        let dest_ty = element_ty.ptr_to();
-        let target = self.fresh_variable(name_hint, dest_ty);
-        let instr = Instruction::HeapAlloc {
-            target,
+        use crate::utils::type_info_table::{primitive_bool, primitive_u64};
+
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        // 1. Initialize index counter variable on stack
+        let idx_var = self.make_alloca_single(
+            "splat_idx".intern(),
+            primitive_u64(),
+            Some(Operand::U64Const(0)),
+        );
+
+        // Create blocks
+        let cond_block = self.add_block("splat_cond".intern());
+        let body_block = self.add_block("splat_body".intern());
+        let exit_block = self.add_block("splat_exit".intern());
+
+        // Jump to condition from current block
+        self.make_jump(cond_block);
+
+        // --- Condition Block ---
+        self.set_current_block(&cond_block);
+        // Load index
+        let idx_val = self.make_load("idx_val".intern(), Operand::Variable(idx_var));
+
+        // Check idx < count
+        let cmp_var = self.make_binary(
+            "cmp_idx".intern(),
+            BinOp::LessThan,
+            Operand::Variable(idx_val),
             count,
-            align: None,
-            init,
-        };
-        self.get_current_block_mut().instructions.push(instr);
-        target
+            primitive_bool(),
+        );
+
+        self.make_branch_to_existing(Operand::Variable(cmp_var), body_block, exit_block);
+
+        // --- Body Block ---
+        self.set_current_block(&body_block);
+
+        // Read current index again
+        let curr_idx = self.make_load("curr_idx".intern(), Operand::Variable(idx_var));
+
+        // Calculate pointer to element: ptr[idx]
+        let elem_ptr = self.make_get_element_ptr(
+            "elem_ptr".intern(),
+            Operand::Variable(ptr_var),
+            vec![GEPIndex::ArrayIndex(Operand::Variable(curr_idx))],
+            element_ty,
+        );
+
+        // Store Init Value
+        self.make_store(elem_ptr, init_value);
+
+        // Increment index
+        let next_idx = self.make_binary(
+            "next_idx".intern(),
+            BinOp::Add,
+            Operand::Variable(curr_idx),
+            Operand::U64Const(1),
+            primitive_u64(),
+        );
+        self.make_store(idx_var, Operand::Variable(next_idx));
+
+        // Jump back to condition
+        self.make_jump(cond_block);
+
+        // --- Exit Block ---
+        self.set_current_block(&exit_block);
+
+        ptr_var
     }
 
-    // Convenience method for single element heap allocation
-    pub fn make_heap_alloc_single(
-        &mut self,
-        name_hint: Ustr,
-        ty: &'static TypeInfo,
-        init_value: Option<Operand>,
-    ) -> Variable {
-        let init = init_value.map(ArrayInit::Splat);
-        self.make_heap_alloc(name_hint, ty, Operand::U64Const(1), init)
-    }
-
-    // Convenience method for zero-initialized heap array
-    pub fn make_heap_alloc_zeroed(
-        &mut self,
-        name_hint: Ustr,
-        element_ty: &'static TypeInfo,
-        count: Operand,
-    ) -> Variable {
-        self.make_heap_alloc(name_hint, element_ty, count, Some(ArrayInit::Zero))
-    }
-
-    // Convenience method for heap array with explicit values
     pub fn make_heap_alloc_with_values(
         &mut self,
         name_hint: Ustr,
@@ -851,12 +744,90 @@ impl Function {
         values: Vec<Operand>,
     ) -> Variable {
         let count = Operand::U64Const(values.len() as u64);
-        self.make_heap_alloc(
-            name_hint,
-            element_ty,
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        for (i, val) in values.iter().enumerate() {
+            let idx = Operand::U64Const(i as u64);
+            let elem_ptr = self.make_get_element_ptr(
+                "lit_elem_ptr".intern(),
+                Operand::Variable(ptr_var),
+                vec![GEPIndex::ArrayIndex(idx)],
+                element_ty,
+            );
+            self.make_store(elem_ptr, *val);
+        }
+        ptr_var
+    }
+
+    pub fn make_heap_alloc_zeroed(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: Operand,
+        element_size_bytes: u64,
+    ) -> Variable {
+        use crate::utils::type_info_table::primitive_u64;
+
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        let total_size_var = self.make_binary(
+            "array_total_size".intern(),
+            BinOp::Mul,
+            Operand::U64Const(element_size_bytes),
             count,
-            Some(ArrayInit::Elements(values)),
-        )
+            primitive_u64(),
+        );
+
+        let zero = Operand::U64Const(0);
+        self.make_memset(
+            Operand::Variable(ptr_var),
+            zero,
+            Operand::Variable(total_size_var),
+        );
+
+        ptr_var
+    }
+
+    pub fn make_heap_alloc(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: Operand,
+    ) -> Variable {
+        self.make_heap_alloc_helper(name_hint, element_ty, MallocCount::Multiple(count))
+    }
+
+    // Private helper that centralizes HeapAlloc construction
+    fn make_heap_alloc_helper(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: MallocCount,
+    ) -> Variable {
+        let dest_ty = element_ty.ptr_to();
+        let target = self.fresh_variable(name_hint, dest_ty);
+        let instr = Instruction::HeapAlloc(HeapAllocCmd {
+            target,
+            count,
+            align: None,
+        });
+        self.get_current_block_mut().instructions.push(instr);
+        target
+    }
+
+    // Convenience method for single element heap allocation
+    pub fn make_heap_alloc_scalar(
+        &mut self,
+        name_hint: Ustr,
+        ty: &'static TypeInfo,
+        init_value: Option<Operand>,
+    ) -> Variable {
+        let target = self.make_heap_alloc_helper(name_hint, ty, MallocCount::Scalar);
+
+        if let Some(val) = init_value {
+            self.make_store(target, val);
+        }
+        target
     }
 
     // Builder method for heap deallocation
@@ -867,7 +838,7 @@ impl Function {
             ptr.ty()
         );
 
-        let instr = Instruction::HeapFree { ptr };
+        let instr = Instruction::HeapFree(HeapFreeCmd { ptr });
         self.get_current_block_mut().instructions.push(instr);
     }
 
@@ -877,7 +848,7 @@ impl Function {
         debug_assert!(src.ty().is_ptr(), "MemCpy src must be a pointer");
         debug_assert_eq!(count.ty(), primitive_u64(), "MemCpy count must be u64");
 
-        let instr = Instruction::MemCpy { dest, src, count };
+        let instr = Instruction::MemCpy(MemCpyCmd { dest, src, count });
         self.get_current_block_mut().instructions.push(instr);
     }
 
@@ -887,16 +858,33 @@ impl Function {
         // Value typically treated as u8 in memset, but we accept any operand and backend handles it
         debug_assert_eq!(count.ty(), primitive_u64(), "MemSet count must be u64");
 
-        let instr = Instruction::MemSet { dest, value, count };
+        let instr = Instruction::MemSet(MemSetCmd { dest, value, count });
         self.get_current_block_mut().instructions.push(instr);
     }
 
     // Builder method for killing multiple stack variables
     pub fn make_kill_set(&mut self, vars: Vec<Variable>) {
         if !vars.is_empty() {
-            let instr = Instruction::KillSet { vars };
+            let instr = Instruction::KillSet(KillSetCmd { vars });
             self.get_current_block_mut().instructions.push(instr);
         }
+    }
+
+    // Builder method for reinterpreting bytes as a different type
+    pub fn make_reinterp(
+        &mut self,
+        name_hint: Ustr,
+        source: Operand,
+        target_type: &'static TypeInfo,
+    ) -> Variable {
+        let target = self.fresh_variable(name_hint, target_type);
+        let instr = Instruction::Reinterp(ReinterpCmd {
+            target,
+            source,
+            target_type,
+        });
+        self.get_current_block_mut().instructions.push(instr);
+        target
     }
 
     // Builder method for array element pointer access
@@ -904,35 +892,52 @@ impl Function {
         &mut self,
         name_hint: Ustr,
         base: Operand,
-        index: Operand,
+        indices: Vec<GEPIndex>,
+        result_pointee_ty: &'static TypeInfo,
     ) -> Variable {
         let base_ty = base.ty();
         debug_assert!(
             base_ty.is_ptr(),
-            "Array base must be pointer, got {}",
+            "GEP base must be a pointer, got {}",
             base_ty
         );
 
+        debug_assert!(!indices.is_empty(), "GEP must have at least one index");
+
         debug_assert!(
-            matches!(
-                index.ty(),
-                TypeInfo::BuiltInPrimitive(PrimitiveType::I64)
-                    | TypeInfo::BuiltInPrimitive(PrimitiveType::U64)
+            !matches!(
+                result_pointee_ty,
+                TypeInfo::Error | TypeInfo::Pointer(TypeInfo::Error)
             ),
-            "Array index must be i64 or u64, got {}",
-            index.ty()
+            "GEP target pointee type cannot be error"
         );
 
-        let element_ty = base_ty.deref_ptr();
-        let target = self.fresh_variable(name_hint, element_ty.ptr_to());
+        let target_ty = result_pointee_ty.ptr_to();
+        let target = self.fresh_variable(name_hint, target_ty);
 
-        let instr = Instruction::GetElementPtr {
+        let instr = Instruction::GetElementPtr(GetElementPtrCmd {
             target,
             base,
-            index,
-        };
+            indices,
+        });
         self.get_current_block_mut().instructions.push(instr);
         target
+    }
+
+    // Convenience method for single-index GEP
+    pub fn make_get_element_ptr_single(
+        &mut self,
+        name_hint: Ustr,
+        base: Operand,
+        index: Operand,
+        result_pointee_ty: &'static TypeInfo,
+    ) -> Variable {
+        self.make_get_element_ptr(
+            name_hint,
+            base,
+            vec![GEPIndex::ArrayIndex(index)],
+            result_pointee_ty,
+        )
     }
 
     // pub fn make_enum(
@@ -999,33 +1004,15 @@ impl Function {
         jump_targets: IndexMap<u64, Label>,
         default: Option<Label>,
     ) {
-        //let loaded_scrutinee = self.load_if_pointer(scrutinee, "enum_scrutinee".intern());
-
-        let loaded_scrutinee = match scrutinee.ty() {
-            TypeInfo::Pointer(TypeInfo::Enum(_et)) => {
-                // Load only the active variant index for this operation...
-                Operand::Variable(
-                    self.make_load_active_variant_idx("variant_idx".intern(), scrutinee),
-                )
-            }
-            TypeInfo::Enum(_et) => {
-                // For enum values, we also need to load the variant index
-                Operand::Variable(
-                    self.make_load_active_variant_idx("variant_idx".intern(), scrutinee),
-                )
-            }
-            _ => scrutinee,
-        };
-
         debug_assert_eq!(
-            loaded_scrutinee.ty(),
+            scrutinee.ty(),
             primitive_u64(),
             "Jump table scrutinee must be u64, got {}",
-            loaded_scrutinee.ty()
+            scrutinee.ty()
         );
 
         self.set_terminator(ControlFlow::JumpTable {
-            scrutinee: loaded_scrutinee,
+            scrutinee,
             jump_targets,
             default,
         });
