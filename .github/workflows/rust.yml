@@ -16,9 +16,9 @@ jobs:
 
     steps:
     - name: Install LLVM
-      uses: egor-tensin/setup-clang@v2.1
-      with:
-        version: "21.1"
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-21 clang-21
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
