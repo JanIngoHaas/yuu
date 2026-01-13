@@ -18,7 +18,7 @@ jobs:
     - name: Install LLVM
       uses: KyleMayes/install-llvm-action@v2
       with:
-        version: "21.1"
+        version: "21.0"
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
