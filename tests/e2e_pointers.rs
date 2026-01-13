@@ -440,6 +440,7 @@ fn main() -> i64:
 
     let executable = run_to_executable(source, "test_pointer_arithmetic_with_structs.yuu")
         .expect("Failed to compile");
+
     let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     // Expected: 5 * 3 + 7 = 15 + 7 = 22
     assert_eq!(result, 22);

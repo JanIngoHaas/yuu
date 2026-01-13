@@ -212,7 +212,6 @@ pub struct HeapAllocCmd {
     pub target: Variable,   // Pointer variable to store the heap address
     pub count: MallocCount, // Number of elements to allocate (can be dynamic)
     pub align: Option<u64>,
-    pub init: Option<ArrayInit>, // Array initialization (None for uninitialized)
 }
 
 /// Heap deallocation - frees previously allocated memory
@@ -447,6 +446,12 @@ impl Function {
         }
     }
 
+    pub fn make_return_if_no_terminator(&mut self, value: Option<Operand>) {
+        if !self.has_terminator(self.current_block) {
+            self.make_return(value);
+        }
+    }
+
     // Unified alloca builder method
     pub fn make_alloca(
         &mut self,
@@ -654,14 +659,142 @@ impl Function {
     }
 
     // Unified heap alloc builder method
+    pub fn make_heap_alloc_with_splat(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: Operand,
+        init_value: Operand,
+    ) -> Variable {
+        use crate::utils::type_info_table::{primitive_bool, primitive_u64};
+
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        // 1. Initialize index counter variable on stack
+        let idx_var = self.make_alloca_single(
+            "splat_idx".intern(),
+            primitive_u64(),
+            Some(Operand::U64Const(0)),
+        );
+
+        // Create blocks
+        let cond_block = self.add_block("splat_cond".intern());
+        let body_block = self.add_block("splat_body".intern());
+        let exit_block = self.add_block("splat_exit".intern());
+
+        // Jump to condition from current block
+        self.make_jump(cond_block);
+
+        // --- Condition Block ---
+        self.set_current_block(&cond_block);
+        // Load index
+        let idx_val = self.make_load("idx_val".intern(), Operand::Variable(idx_var));
+
+        // Check idx < count
+        let cmp_var = self.make_binary(
+            "cmp_idx".intern(),
+            BinOp::LessThan,
+            Operand::Variable(idx_val),
+            count,
+            primitive_bool(),
+        );
+
+        self.make_branch_to_existing(Operand::Variable(cmp_var), body_block, exit_block);
+
+        // --- Body Block ---
+        self.set_current_block(&body_block);
+
+        // Read current index again
+        let curr_idx = self.make_load("curr_idx".intern(), Operand::Variable(idx_var));
+
+        // Calculate pointer to element: ptr[idx]
+        let elem_ptr = self.make_get_element_ptr(
+            "elem_ptr".intern(),
+            Operand::Variable(ptr_var),
+            vec![GEPIndex::ArrayIndex(Operand::Variable(curr_idx))],
+            element_ty,
+        );
+
+        // Store Init Value
+        self.make_store(elem_ptr, init_value);
+
+        // Increment index
+        let next_idx = self.make_binary(
+            "next_idx".intern(),
+            BinOp::Add,
+            Operand::Variable(curr_idx),
+            Operand::U64Const(1),
+            primitive_u64(),
+        );
+        self.make_store(idx_var, Operand::Variable(next_idx));
+
+        // Jump back to condition
+        self.make_jump(cond_block);
+
+        // --- Exit Block ---
+        self.set_current_block(&exit_block);
+
+        ptr_var
+    }
+
+    pub fn make_heap_alloc_with_values(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        values: Vec<Operand>,
+    ) -> Variable {
+        let count = Operand::U64Const(values.len() as u64);
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        for (i, val) in values.iter().enumerate() {
+            let idx = Operand::U64Const(i as u64);
+            let elem_ptr = self.make_get_element_ptr(
+                "lit_elem_ptr".intern(),
+                Operand::Variable(ptr_var),
+                vec![GEPIndex::ArrayIndex(idx)],
+                element_ty,
+            );
+            self.make_store(elem_ptr, *val);
+        }
+        ptr_var
+    }
+
+    pub fn make_heap_alloc_zeroed(
+        &mut self,
+        name_hint: Ustr,
+        element_ty: &'static TypeInfo,
+        count: Operand,
+        element_size_bytes: u64,
+    ) -> Variable {
+        use crate::utils::type_info_table::primitive_u64;
+
+        let ptr_var = self.make_heap_alloc(name_hint, element_ty, count);
+
+        let total_size_var = self.make_binary(
+            "array_total_size".intern(),
+            BinOp::Mul,
+            Operand::U64Const(element_size_bytes),
+            count,
+            primitive_u64(),
+        );
+
+        let zero = Operand::U64Const(0);
+        self.make_memset(
+            Operand::Variable(ptr_var),
+            zero,
+            Operand::Variable(total_size_var),
+        );
+
+        ptr_var
+    }
+
     pub fn make_heap_alloc(
         &mut self,
         name_hint: Ustr,
         element_ty: &'static TypeInfo,
         count: Operand,
-        init: Option<ArrayInit>,
     ) -> Variable {
-        self.make_heap_alloc_helper(name_hint, element_ty, MallocCount::Multiple(count), init)
+        self.make_heap_alloc_helper(name_hint, element_ty, MallocCount::Multiple(count))
     }
 
     // Private helper that centralizes HeapAlloc construction
@@ -670,7 +803,6 @@ impl Function {
         name_hint: Ustr,
         element_ty: &'static TypeInfo,
         count: MallocCount,
-        init: Option<ArrayInit>,
     ) -> Variable {
         let dest_ty = element_ty.ptr_to();
         let target = self.fresh_variable(name_hint, dest_ty);
@@ -678,47 +810,24 @@ impl Function {
             target,
             count,
             align: None,
-            init,
         });
         self.get_current_block_mut().instructions.push(instr);
         target
     }
 
     // Convenience method for single element heap allocation
-    pub fn make_heap_alloc_sclar(
+    pub fn make_heap_alloc_scalar(
         &mut self,
         name_hint: Ustr,
         ty: &'static TypeInfo,
         init_value: Option<Operand>,
     ) -> Variable {
-        let init = init_value.map(ArrayInit::Splat);
-        self.make_heap_alloc_helper(name_hint, ty, MallocCount::Scalar, init)
-    }
+        let target = self.make_heap_alloc_helper(name_hint, ty, MallocCount::Scalar);
 
-    // Convenience method for zero-initialized heap array
-    pub fn make_heap_alloc_zeroed(
-        &mut self,
-        name_hint: Ustr,
-        element_ty: &'static TypeInfo,
-        count: Operand,
-    ) -> Variable {
-        self.make_heap_alloc(name_hint, element_ty, count, Some(ArrayInit::Zero))
-    }
-
-    // Convenience method for heap array with explicit values
-    pub fn make_heap_alloc_with_values(
-        &mut self,
-        name_hint: Ustr,
-        element_ty: &'static TypeInfo,
-        values: Vec<Operand>,
-    ) -> Variable {
-        let count = Operand::U64Const(values.len() as u64);
-        self.make_heap_alloc(
-            name_hint,
-            element_ty,
-            count,
-            Some(ArrayInit::Elements(values)),
-        )
+        if let Some(val) = init_value {
+            self.make_store(target, val);
+        }
+        target
     }
 
     // Builder method for heap deallocation

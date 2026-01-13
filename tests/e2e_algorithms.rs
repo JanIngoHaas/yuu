@@ -109,14 +109,12 @@ fn test_power_function() {
     "#;
 
     let executable =
-        run_to_yir(source, "test_power_function.yuu").expect("Failed to compile power test");
+        run_to_executable(source, "test_power_function.yuu").expect("Failed to compile power test");
 
-    //let output = run_executable_with_output(executable, &[]).expect("Failed to run power test");
-
-    println!("{}", executable);
+    let output = run_executable_with_output(executable, &[]).expect("Failed to run power test");
 
     // 2^8 = 256
-    // assert_eq!(output, 256);
+    assert_eq!(output, 256);
 }
 
 #[test]

@@ -9,9 +9,7 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{
-    AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue,
-};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue};
 use std::path::Path;
 
 use crate::pass_yir_lowering::yir;
@@ -1128,19 +1126,16 @@ impl LLVMLowerer {
     }
 
     fn lower_heap_alloc<'ctx>(&self, cmd: &yir::HeapAllocCmd, td: &mut TransientData<'ctx>) {
-        let ty = self.lower_type_basic(td.type_registry, cmd.target.ty(), td.context);
-        let malloced_ptr = match cmd.count {
-            yir::MallocCount::Scalar => {
-                let malloced_ptr = td.builder.build_malloc(ty, "heap_alloc").unwrap();
-                malloced_ptr
-            }
+        let elem_ty = cmd.target.ty().deref_ptr();
+        let lty = self.lower_type_basic(td.type_registry, elem_ty, td.context);
+
+        let malloced_ptr = match &cmd.count {
+            yir::MallocCount::Scalar => td.builder.build_malloc(lty, "heap_alloc").unwrap(),
             yir::MallocCount::Multiple(operand) => {
-                let count_val = self.lower_operand(&operand, td);
-                let malloced_ptr = td
-                    .builder
-                    .build_array_malloc(ty, count_val.into_int_value(), "heap_alloc")
-                    .unwrap();
-                malloced_ptr
+                let count_val = self.lower_operand(operand, td);
+                td.builder
+                    .build_array_malloc(lty, count_val.into_int_value(), "heap_alloc")
+                    .unwrap()
             }
         };
 

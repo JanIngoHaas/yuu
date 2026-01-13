@@ -754,34 +754,27 @@ impl<'a> TransientData<'a> {
 
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays are stored as pointers
-                        let element_layout = calculate_type_layout(element_type, self.tr);
 
-                        // Calculate total size: element_size * count
-                        let total_size_var = self.function.make_binary(
-                            "array_total_size".intern(),
-                            crate::pass_yir_lowering::yir::BinOp::Mul,
-                            Operand::U64Const(element_layout.size as u64),
-                            count_operand,
-                            primitive_u64(),
-                        );
-                        self.add_temporary(total_size_var);
-
-                        // Create ArrayInit based on init_value
-                        let init = if let Some(init_value) = &array_expr.init_expr {
+                        let ptr_var = if let Some(init_value) = &array_expr.init_expr {
                             let init_operand = self.lower_expr(init_value, ContextKind::AsIs);
-                            Some(crate::pass_yir_lowering::yir::ArrayInit::Splat(
+                            self.function.make_heap_alloc_with_splat(
+                                "heap_array".intern(),
+                                element_type,
+                                count_operand,
                                 init_operand,
-                            ))
+                            )
                         } else {
-                            None
-                        };
+                            // Zero initialization using MemSet
+                            // Calculate total size: element_size * count
+                            let element_layout = calculate_type_layout(element_type, self.tr);
 
-                        let ptr_var = self.function.make_heap_alloc(
-                            "heap_array".intern(),
-                            element_type,
-                            count_operand,
-                            init,
-                        );
+                            self.function.make_heap_alloc_zeroed(
+                                "heap_array".intern(),
+                                element_type,
+                                count_operand,
+                                element_layout.size as u64,
+                            )
+                        };
                         self.add_temporary(ptr_var);
                         Operand::Variable(ptr_var)
                     }
@@ -800,7 +793,6 @@ impl<'a> TransientData<'a> {
 
                         // Get element type
                         let element_type = expr_type.deref_ptr(); // Arrays decay to pointers
-                        // IMMEDIATELY
 
                         let ptr_var = self.function.make_heap_alloc_with_values(
                             "heap_array_literal".intern(),
@@ -808,13 +800,14 @@ impl<'a> TransientData<'a> {
                             element_operands,
                         );
                         self.add_temporary(ptr_var);
+
                         Operand::Variable(ptr_var)
                     }
                     ExprNode::StructInstantiation(struct_instantiation_expr) => {
                         let value_type = self.get_type(struct_instantiation_expr.id);
 
                         // Allocate memory on heap first
-                        let ptr_var = self.function.make_heap_alloc_sclar(
+                        let ptr_var = self.function.make_heap_alloc_scalar(
                             "heap_ptr".intern(),
                             value_type,
                             None,
@@ -858,7 +851,7 @@ impl<'a> TransientData<'a> {
                         let value_type = self.get_type(heap_alloc_expr.expr.node_id());
 
                         // For non-struct/array literals, fall back to stack-then-copy
-                        let ptr_var = self.function.make_heap_alloc_sclar(
+                        let ptr_var = self.function.make_heap_alloc_scalar(
                             "heap_ptr".intern(),
                             value_type,
                             None,
@@ -1361,14 +1354,8 @@ impl YirLowering {
                     // Generate KillSet for function parameters at end of function
                     data.pop_scope_and_generate_killset();
 
-                    // TODO: Implement a helper make_return_if_no_terminator
-                    if data
-                        .function
-                        .get_current_block()
-                        .map(|x| &x.terminator)
-                        .is_none()
-                    {
-                        data.function.make_return(None);
+                    if data.function.return_type.is_nil() {
+                        data.function.make_return_if_no_terminator(None);
                     }
 
                     data.function.sort_blocks_by_id();

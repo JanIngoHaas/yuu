@@ -861,7 +861,7 @@ fn infer_enum_instantiation(
     inferred_ty
 }
 
-pub fn infer_expr(
+pub(crate) fn infer_expr(
     expr: &ExprNode,
     block_id: usize,
     data: &mut TransientData,

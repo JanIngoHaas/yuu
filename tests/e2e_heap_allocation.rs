@@ -193,3 +193,35 @@ fn main() -> i64:
     let result = run_executable_with_output(executable, &[]).expect("Failed to run");
     assert_eq!(result, 30);
 }
+
+#[test]
+fn test_heap_array_repeat() {
+    let source = r#"
+fn main() -> i64:
+    let arr = new [42; 10];
+    let val = *arr;
+    ~arr;
+    return val .
+    "#;
+
+    let executable =
+        run_to_executable(source, "test_heap_array_repeat.yuu").expect("Failed to compile");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn test_heap_array_literal() {
+    let source = r#"
+fn main() -> i64:
+    let arr = new [10, 20, 30];
+    let val = *(arr + 1);
+    ~arr;
+    return val .
+    "#;
+
+    let executable =
+        run_to_executable(source, "test_heap_array_literal.yuu").expect("Failed to compile");
+    let result = run_executable_with_output(executable, &[]).expect("Failed to run");
+    assert_eq!(result, 20);
+}

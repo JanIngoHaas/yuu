@@ -118,7 +118,7 @@ fn infer_return_stmt(return_stmt: &ReturnStmt, block_id: usize, data: &mut Trans
     }
 }
 
-pub fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientData) {
+pub(crate) fn infer_stmt(stmt: &StmtNode, block_id: usize, data: &mut TransientData) {
     match stmt {
         StmtNode::Let(let_stmt) => {
             infer_let_stmt(let_stmt, block_id, data);
@@ -251,7 +251,7 @@ fn infer_while_stmt(while_stmt: &WhileStmt, block_id: usize, data: &mut Transien
     infer_block_stmt(&while_stmt.condition_block.body, block_id, data);
 }
 
-pub fn infer_block_stmt(block_stmt: &BlockStmt, block_id: usize, data: &mut TransientData) {
+pub(crate) fn infer_block_stmt(block_stmt: &BlockStmt, block_id: usize, data: &mut TransientData) {
     // Create a new child scope for the block
     let child_block_id = data.block_tree.make_child(
         block_id,

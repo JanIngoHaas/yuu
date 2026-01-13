@@ -456,27 +456,6 @@ pub fn format_instruction(
                 colorize("ALIGN", "keyword", do_color),
                 colorize(&align_str, "constant", do_color)
             )?;
-            if let Some(init) = &cmd.init {
-                write!(f, ", {} ", colorize("INIT", "keyword", do_color))?;
-                match init {
-                    ArrayInit::Zero => {
-                        write!(f, "{}", colorize("ZERO", "keyword", do_color))?;
-                    }
-                    ArrayInit::Splat(operand) => {
-                        write!(f, "{}", format_operand(operand, do_color))?;
-                    }
-                    ArrayInit::Elements(elements) => {
-                        write!(f, "[")?;
-                        for (i, element) in elements.iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", format_operand(element, do_color))?;
-                        }
-                        write!(f, "]")?;
-                    }
-                }
-            }
             writeln!(f)
         }
         Instruction::HeapFree(cmd) => {

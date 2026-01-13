@@ -43,7 +43,7 @@ fn infer_func_def(def: &FuncDefStructural, current_block_id: usize, data: &mut T
     data.current_function_return_type = error_type();
 }
 
-pub fn infer_structural(
+pub(crate) fn infer_structural(
     structural: &StructuralNode,
     current_block_id: usize,
     data: &mut TransientData,

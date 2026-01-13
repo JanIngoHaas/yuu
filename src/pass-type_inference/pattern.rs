@@ -164,7 +164,7 @@ fn infer_enum_pattern(
     }
 }
 
-pub fn infer_pattern(
+pub(crate) fn infer_pattern(
     pattern: &RefutablePatternNode,
     scrutinee_ty: &&'static TypeInfo,
     scrutinee_expr: &ExprNode,
