@@ -14,6 +14,8 @@ use std::path::Path;
 
 use crate::pass_yir_lowering::yir;
 use crate::utils::TypeRegistry;
+use crate::utils::c_abi::CAbi;
+use crate::utils::c_abi::CAbiLowerer;
 use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::{PrimitiveType, TypeInfo};
 
@@ -23,8 +25,11 @@ pub struct TransientData<'ctx> {
     pub module: LlvmModule<'ctx>,
     pub builder: Builder<'ctx>,
     pub type_registry: &'ctx TypeRegistry,
+    /// Data layout and target info
     pub target_data: TargetData,
     pub target_machine: TargetMachine,
+    /// C ABI lowering strategy (cached for the duration of lowering)
+    pub c_abi_lowerer: &'static dyn CAbiLowerer,
     /// Current function being lowered
     pub function: Option<FunctionValue<'ctx>>,
     /// Map YIR Variables -> LLVM pointer values (allocated stack slots / locals)
@@ -75,6 +80,7 @@ impl<'ctx> TransientData<'ctx> {
             type_registry,
             target_data,
             target_machine,
+            c_abi_lowerer: CAbi::get_host_abi(),
             function: None,
             var_map: FastHashMap::default(),
             block_map: FastHashMap::default(),
@@ -213,9 +219,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
-                    // They should be resolved when we encounter the definition
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -226,8 +231,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -259,8 +264,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -271,8 +276,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -326,8 +331,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -338,8 +343,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -487,23 +492,27 @@ impl LLVMLowerer {
         function
     }
 
-    /// Declare a function (create its signature in the LLVM module)
+    /// Declare a function
     /// This must be called before lowering function bodies to support recursive calls
     pub fn declare_function(&self, func: &yir::Function, td: &mut TransientData) {
-        // Pragmatic C-like ABI approach:
-        // - Primitives (int, float, bool) and pointers: pass directly
-        // - Structs: pass by pointer (caller allocates, passes pointer)
-        // - Return values: primitives/pointers directly, structs via hidden sret parameter
-        // This avoids complex platform-specific ABI rules until we can use LLVM's ABI library.
+        if !func.follow_c_abi {
+            // Internal functions - fastcall
+            self.declare_function_direct(func, td);
+        } else {
+            // TODO: Later: Refactor this and abstract it into a trait, so we support more ABIs
+            // External C functions - currently applies x64 System V ABI lowering
+            self.declare_function_with_c_abi(func, td);
+        }
+    }
 
+    /// Internal/fast path - no ABI lowering
+    fn declare_function_direct(&self, func: &yir::Function, td: &mut TransientData) {
         let llvm_ret_type = self.lower_type(td.type_registry, func.return_type, td.context);
 
         let llvm_param_types: Vec<_> = func
             .params
             .iter()
             .map(|param| {
-                // YIR parameters are always pointer types (representing stack storage)
-                // Extract the underlying value type for the LLVM function signature
                 self.lower_type_basic(td.type_registry, param.ty().deref_ptr(), td.context)
             })
             .collect();
@@ -511,20 +520,130 @@ impl LLVMLowerer {
         let llvm_param_metadata_types: Vec<BasicMetadataTypeEnum> =
             llvm_param_types.iter().map(|ty| (*ty).into()).collect();
 
-        // Create the function type and add it to the module
         let fn_type = match llvm_ret_type {
             AnyTypeEnum::VoidType(void_ty) => void_ty.fn_type(&llvm_param_metadata_types, false),
             AnyTypeEnum::IntType(int_ty) => int_ty.fn_type(&llvm_param_metadata_types, false),
             AnyTypeEnum::FloatType(float_ty) => float_ty.fn_type(&llvm_param_metadata_types, false),
             AnyTypeEnum::PointerType(ptr_ty) => ptr_ty.fn_type(&llvm_param_metadata_types, false),
             AnyTypeEnum::StructType(struct_ty) => {
-                // For struct returns, we should use sret, but for now just return directly
                 struct_ty.fn_type(&llvm_param_metadata_types, false)
             }
             _ => panic!("Unsupported return type for LLVM function"),
         };
 
-        let _llvm_fn = td.module.add_function(&func.name, fn_type, None);
+        let llvm_fn = td.module.add_function(&func.name, fn_type, None);
+
+        // LLVM Fast calling convention = 8
+        llvm_fn.set_call_conventions(8);
+    }
+
+    // TODO: Check that again
+    /// C ABI path - with proper lowering strategy
+    fn declare_function_with_c_abi(&self, func: &yir::Function, td: &mut TransientData) {
+        use crate::utils::c_abi::{ParamLowering, ReturnLowering};
+
+        // Classify return type
+        let ret_lowering = td
+            .c_abi_lowerer
+            .classify_return(func.return_type, td.type_registry);
+
+        // Build parameter list
+        let mut llvm_params = Vec::new();
+
+        // Handle sret: if return is sret, it becomes the FIRST parameter
+        let uses_sret = matches!(ret_lowering, ReturnLowering::Sret);
+        if uses_sret {
+            // Add hidden sret parameter as FIRST parameter
+            llvm_params.push(td.context.ptr_type(inkwell::AddressSpace::default()).into());
+        }
+
+        // Now handle regular parameters
+        for param in &func.params {
+            let param_ty = param.ty().deref_ptr();
+            let lowering = td.c_abi_lowerer.classify_param(param_ty, td.type_registry);
+
+            match lowering {
+                ParamLowering::Direct => {
+                    llvm_params.push(
+                        self.lower_type_basic(td.type_registry, param_ty, td.context)
+                            .into(),
+                    );
+                }
+                ParamLowering::CoerceToInt { bits } => {
+                    llvm_params.push(td.context.custom_width_int_type(bits).into());
+                }
+                ParamLowering::CoerceToVec2Float => {
+                    llvm_params.push(td.context.f32_type().vec_type(2).into());
+                }
+                ParamLowering::Split { lo_bits, hi_bits } => {
+                    // Split into TWO parameters
+                    llvm_params.push(td.context.custom_width_int_type(lo_bits).into());
+                    llvm_params.push(td.context.custom_width_int_type(hi_bits).into());
+                }
+                ParamLowering::ByVal => {
+                    // Pass as pointer (will add byval attribute below)
+                    llvm_params.push(td.context.ptr_type(inkwell::AddressSpace::default()).into());
+                }
+            }
+        }
+
+        // Build the function type based on return lowering
+        let fn_type = match ret_lowering {
+            ReturnLowering::Sret => {
+                // Return void when using sret
+                td.context.void_type().fn_type(&llvm_params, false)
+            }
+            ReturnLowering::Direct => {
+                match self.lower_type(td.type_registry, func.return_type, td.context) {
+                    AnyTypeEnum::VoidType(t) => t.fn_type(&llvm_params, false),
+                    AnyTypeEnum::IntType(t) => t.fn_type(&llvm_params, false),
+                    AnyTypeEnum::FloatType(t) => t.fn_type(&llvm_params, false),
+                    AnyTypeEnum::PointerType(t) => t.fn_type(&llvm_params, false),
+                    AnyTypeEnum::StructType(t) => t.fn_type(&llvm_params, false),
+                    _ => panic!("Unexpected return type"),
+                }
+            }
+            ReturnLowering::CoerceToInt { bits } => td
+                .context
+                .custom_width_int_type(bits)
+                .fn_type(&llvm_params, false),
+            ReturnLowering::Pair { lo_bits, hi_bits } => {
+                // Return as struct { iN, iM }
+                let struct_ty = td.context.struct_type(
+                    &[
+                        td.context.custom_width_int_type(lo_bits).into(),
+                        td.context.custom_width_int_type(hi_bits).into(),
+                    ],
+                    false,
+                );
+                struct_ty.fn_type(&llvm_params, false)
+            }
+        };
+
+        let llvm_fn = td.module.add_function(&func.name, fn_type, None);
+
+        // Add sret attribute to first parameter if needed
+        if uses_sret {
+            let struct_ty = self.lower_type_basic(td.type_registry, func.return_type, td.context);
+            let any_ty = match struct_ty {
+                BasicTypeEnum::ArrayType(t) => AnyTypeEnum::ArrayType(t),
+                BasicTypeEnum::FloatType(t) => AnyTypeEnum::FloatType(t),
+                BasicTypeEnum::IntType(t) => AnyTypeEnum::IntType(t),
+                BasicTypeEnum::PointerType(t) => AnyTypeEnum::PointerType(t),
+                BasicTypeEnum::StructType(t) => AnyTypeEnum::StructType(t),
+                BasicTypeEnum::VectorType(t) => AnyTypeEnum::VectorType(t),
+                BasicTypeEnum::ScalableVectorType(t) => AnyTypeEnum::ScalableVectorType(t),
+            };
+            llvm_fn.add_attribute(
+                inkwell::attributes::AttributeLoc::Param(0),
+                td.context.create_type_attribute(
+                    inkwell::attributes::Attribute::get_named_enum_kind_id("sret"),
+                    any_ty,
+                ),
+            );
+        }
+
+        // TODO: Add byval attributes for ByVal parameters (need to track which params are byval)
     }
 
     /// Lower the body of a function (assumes the function has already been declared)

@@ -573,6 +573,18 @@ pub enum TypeNode {
     LuaMeta(LuaMetaType),
 }
 
+impl TypeNode {
+    pub fn span(&self) -> Span {
+        match self {
+            TypeNode::BuiltIn(t) => t.span.clone(),
+            TypeNode::Ident(t) => t.span.clone(),
+            TypeNode::Pointer(t) => t.span.clone(),
+            TypeNode::Array(t) => t.span.clone(),
+            TypeNode::LuaMeta(t) => t.span.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Arg {
     pub ty: TypeNode,
@@ -589,6 +601,7 @@ pub struct FuncDeclStructural {
     pub name: Ustr,
     pub args: Vec<Arg>,
     pub ret_ty: Option<Box<TypeNode>>,
+    pub is_extern: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

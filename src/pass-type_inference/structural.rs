@@ -49,10 +49,20 @@ pub(crate) fn infer_structural(
     data: &mut TransientData,
 ) {
     match structural {
-        StructuralNode::FuncDecl(_decl) => {}
+        StructuralNode::FuncDecl(decl) => {
+            // Type inference for extern functions (is_extern flag)
+            if decl.is_extern {
+                for arg in &decl.args {
+                    let _ = infer_type(&arg.ty, data.type_registry, data.errors, data.src_code);
+                }
+                if let Some(ret) = &decl.ret_ty {
+                    let _ = infer_type(ret, data.type_registry, data.errors, data.src_code);
+                }
+            }
+        }
         StructuralNode::FuncDef(def) => infer_func_def(def, current_block_id, data),
-        StructuralNode::Error(estr) => {
-            data.type_info_table.insert(*estr, error_type());
+        StructuralNode::Error(_estr) => {
+            // data.type_info_table.insert(*estr, error_type());
         }
         // Already did that in collect_structural
         StructuralNode::StructDecl(_struct_decl) => {}

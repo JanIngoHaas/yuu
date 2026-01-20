@@ -1451,6 +1451,7 @@ impl Parser {
                 name,
                 args,
                 ret_ty,
+                is_extern: false,
             },
         )
     }
@@ -1621,6 +1622,27 @@ impl Parser {
             metadata: None,
         };
         Ok((span, out))
+    }
+
+    pub fn parse_extern_func_decl(&mut self) -> ParseResult<(Span, FuncDeclStructural)> {
+        let extern_tkn = self
+            .lexer
+            .expect(&[TokenKind::ExternKw], &mut self.errors)?;
+
+        // Parse the function declaration normally
+        let (decl_span, mut decl) = self.parse_func_decl()?;
+
+        // Mark as extern and update span to include "extern" keyword
+        decl.is_extern = true;
+        let extended_span = extern_tkn.span.start..decl_span.end;
+        decl.span = extended_span.clone();
+
+        // Consume semicolon terminator
+        let _ = self
+            .lexer
+            .expect(&[TokenKind::Semicolon], &mut self.errors)?;
+
+        Ok((extended_span, decl))
     }
 
     pub fn parse_struct_decl(&mut self) -> ParseResult<(Span, StructDeclStructural)> {
@@ -1938,6 +1960,10 @@ impl Parser {
             TokenKind::EnumKw => {
                 let (range, enum_) = self.parse_enum_def()?;
                 (range, StructuralNode::EnumDef(enum_))
+            }
+            TokenKind::ExternKw => {
+                let (range, func) = self.parse_extern_func_decl()?;
+                (range, StructuralNode::FuncDecl(func))
             }
             _ => {
                 self.errors.push(

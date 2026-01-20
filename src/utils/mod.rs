@@ -1,5 +1,6 @@
 pub mod binding_info;
 pub mod block;
+pub mod c_abi;
 pub mod c_packing;
 pub mod collections;
 pub mod lua_executor;

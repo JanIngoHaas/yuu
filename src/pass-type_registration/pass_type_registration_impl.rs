@@ -91,6 +91,7 @@ fn declare_and_define_functions(structural: &StructuralNode, data: &mut Transien
                 data,
             );
         }
+
         _ => (),
     };
 }
