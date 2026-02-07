@@ -1,0 +1,53 @@
+// Minimal enum/union-like ABI fixture
+
+enum Unionish:
+    I: i64,
+    F: f32,
+    D: f64,
+.
+
+struct UnionCarrier:
+    a: Unionish,
+    b: Unionish,
+.
+
+fn make_i(v: i64) -> Unionish:
+    return Unionish::I(v) .
+
+fn make_f(v: f32) -> Unionish:
+    return Unionish::F(v) .
+
+fn make_d(v: f64) -> Unionish:
+    return Unionish::D(v) .
+
+fn read_i_or(x: Unionish, fallback: i64) -> i64:
+    match x:
+        Unionish::I(v): return v .
+        Unionish::F(v): return fallback .
+        Unionish::D(v): return fallback .
+    end
+end
+
+fn bounce_unionish(x: Unionish) -> Unionish:
+    return x .
+
+fn bounce_union_carrier(x: UnionCarrier) -> UnionCarrier:
+    return x .
+
+fn main() -> i64:
+    let a = make_i(9);
+    let b = make_f(2.0f);
+    let c = make_d(3.0ff);
+
+    let a2 = bounce_unionish(a);
+    let b2 = bounce_unionish(b);
+    let c2 = bounce_unionish(c);
+
+    let uc0 = UnionCarrier { a: a2, b: b2 };
+    let uc1 = bounce_union_carrier(uc0);
+
+    let x = read_i_or(uc1.a, -100);
+    let y = read_i_or(uc1.b, 13);
+    let z = read_i_or(c2, 17);
+
+    return x + y + z .
