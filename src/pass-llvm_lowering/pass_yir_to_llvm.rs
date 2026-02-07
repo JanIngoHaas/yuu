@@ -8,14 +8,23 @@ use inkwell::targets::TargetData;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::types::{AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue};
+use inkwell::types::{AnyTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::values::{
+    BasicMetadataValueEnum, BasicValue, BasicValueEnum, CallSiteValue, FunctionValue, PointerValue,
+};
 use std::path::Path;
+use ustr::Ustr;
 
 use crate::pass_yir_lowering::yir;
 use crate::utils::TypeRegistry;
+use crate::utils::c_abi::{
+    AbiSignature, CAbi, CAbiLowerer, FunctionAbiKind, ParamLowering, ReturnLowering,
+};
 use crate::utils::collections::FastHashMap;
 use crate::utils::type_info_table::{PrimitiveType, TypeInfo};
+
+#[path = "pass_yir_to_llvm_helpers.rs"]
+mod pass_yir_to_llvm_helpers;
 
 // Transient lowering state kept while lowering a module/function.
 pub struct TransientData<'ctx> {
@@ -23,8 +32,17 @@ pub struct TransientData<'ctx> {
     pub module: LlvmModule<'ctx>,
     pub builder: Builder<'ctx>,
     pub type_registry: &'ctx TypeRegistry,
+    /// Data layout and target info
     pub target_data: TargetData,
     pub target_machine: TargetMachine,
+    /// C ABI lowering strategy (cached for the duration of lowering)
+    pub c_abi_lowerer: &'static dyn CAbiLowerer,
+    /// Canonical ABI signatures for every function in this module.
+    pub abi_signatures: FastHashMap<Ustr, AbiSignature>,
+    /// ABI signature for the function currently being lowered.
+    pub current_abi_signature: Option<AbiSignature>,
+    /// SRet destination pointer for the function currently being lowered.
+    pub current_sret_ptr: Option<PointerValue<'ctx>>,
     /// Current function being lowered
     pub function: Option<FunctionValue<'ctx>>,
     /// Map YIR Variables -> LLVM pointer values (allocated stack slots / locals)
@@ -75,6 +93,10 @@ impl<'ctx> TransientData<'ctx> {
             type_registry,
             target_data,
             target_machine,
+            c_abi_lowerer: CAbi::get_host_abi(),
+            abi_signatures: FastHashMap::default(),
+            current_abi_signature: None,
+            current_sret_ptr: None,
             function: None,
             var_map: FastHashMap::default(),
             block_map: FastHashMap::default(),
@@ -213,9 +235,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
-                    // They should be resolved when we encounter the definition
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -226,8 +247,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -259,8 +280,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -271,8 +292,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -326,8 +347,8 @@ impl LLVMLowerer {
         // Pass 1: Declare all functions (create function signatures)
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(function) => {
+                    self.declare_function(function, &mut td);
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.declare_function(function, &mut td);
@@ -338,8 +359,8 @@ impl LLVMLowerer {
         // Pass 2: Lower function bodies
         for (_name, fds) in &module.functions {
             match fds {
-                yir::FunctionDeclarationState::Declared(_function) => {
-                    // For now, we don't need to handle forward declarations
+                yir::FunctionDeclarationState::Extern(_function) => {
+                    // Extern functions only need declarations
                 }
                 yir::FunctionDeclarationState::Defined(function) => {
                     self.lower_function_body(function, &mut td);
@@ -487,64 +508,35 @@ impl LLVMLowerer {
         function
     }
 
-    /// Declare a function (create its signature in the LLVM module)
+    /// Declare a function
     /// This must be called before lowering function bodies to support recursive calls
+    // partially implemented by @gpt-5.3-codex
     pub fn declare_function(&self, func: &yir::Function, td: &mut TransientData) {
-        // Pragmatic C-like ABI approach:
-        // - Primitives (int, float, bool) and pointers: pass directly
-        // - Structs: pass by pointer (caller allocates, passes pointer)
-        // - Return values: primitives/pointers directly, structs via hidden sret parameter
-        // This avoids complex platform-specific ABI rules until we can use LLVM's ABI library.
-
-        let llvm_ret_type = self.lower_type(td.type_registry, func.return_type, td.context);
-
-        let llvm_param_types: Vec<_> = func
-            .params
-            .iter()
-            .map(|param| {
-                // YIR parameters are always pointer types (representing stack storage)
-                // Extract the underlying value type for the LLVM function signature
-                self.lower_type_basic(td.type_registry, param.ty().deref_ptr(), td.context)
-            })
-            .collect();
-
-        let llvm_param_metadata_types: Vec<BasicMetadataTypeEnum> =
-            llvm_param_types.iter().map(|ty| (*ty).into()).collect();
-
-        // Create the function type and add it to the module
-        let fn_type = match llvm_ret_type {
-            AnyTypeEnum::VoidType(void_ty) => void_ty.fn_type(&llvm_param_metadata_types, false),
-            AnyTypeEnum::IntType(int_ty) => int_ty.fn_type(&llvm_param_metadata_types, false),
-            AnyTypeEnum::FloatType(float_ty) => float_ty.fn_type(&llvm_param_metadata_types, false),
-            AnyTypeEnum::PointerType(ptr_ty) => ptr_ty.fn_type(&llvm_param_metadata_types, false),
-            AnyTypeEnum::StructType(struct_ty) => {
-                // For struct returns, we should use sret, but for now just return directly
-                struct_ty.fn_type(&llvm_param_metadata_types, false)
-            }
-            _ => panic!("Unsupported return type for LLVM function"),
-        };
-
-        let _llvm_fn = td.module.add_function(&func.name, fn_type, None);
+        let signature = self.build_function_signature(func, td);
+        self.declare_function_with_signature(func, &signature, td);
+        td.abi_signatures.insert(func.name, signature);
     }
 
     /// Lower the body of a function (assumes the function has already been declared)
+    // partially implemented by @gpt-5.3-codex
     pub fn lower_function_body(&self, func: &yir::Function, td: &mut TransientData) {
+        let signature = td
+            .abi_signatures
+            .get(&func.name)
+            .cloned()
+            .unwrap_or_else(|| self.build_function_signature(func, td));
+
         // Get the function that was already declared
         let llvm_fn = td
             .module
             .get_function(&func.name)
-            .expect("ICE: Function should have been declared before lowering body");
+            .expect("Compiler Bug: Function should have been declared before lowering body");
 
         td.function = Some(llvm_fn);
-
-        // Get the parameter types again (we need them for allocas)
-        let llvm_param_types: Vec<_> = func
-            .params
-            .iter()
-            .map(|param| {
-                self.lower_type_basic(td.type_registry, param.ty().deref_ptr(), td.context)
-            })
-            .collect();
+        td.current_abi_signature = Some(signature.clone());
+        td.current_sret_ptr = None;
+        td.var_map.clear();
+        td.block_map.clear();
 
         // Create LLVM basic blocks for each YIR block and record in block_map
         for (id, yir_block) in func.blocks.iter() {
@@ -559,23 +551,19 @@ impl LLVMLowerer {
         let entry_llvm_bb = *td.block_map.get(&func.entry_block).unwrap();
         td.builder.position_at_end(entry_llvm_bb);
 
-        let llvm_params = llvm_fn.get_param_iter();
-        for ((yir_param, param_ty), param_value) in func
-            .params
-            .iter()
-            .zip(llvm_param_types.iter())
-            .zip(llvm_params)
-        {
-            // Create alloca for the parameter value
-            let alloca = td
-                .builder
-                .build_alloca(*param_ty, yir_param.name())
-                .unwrap();
-            // Store the incoming parameter value into the alloca
-            let _ = td.builder.build_store(alloca, param_value).unwrap();
-            // Map the YIR parameter variable to the alloca pointer
-            // This means when we reference this parameter in YIR, we'll load from this alloca
-            td.var_map.insert(*yir_param, alloca.into());
+        let mut llvm_params = llvm_fn.get_param_iter();
+        let mut next_param = || {
+            llvm_params
+                .next()
+                .expect("Compiler Bug: Missing lowered LLVM function parameter")
+        };
+
+        if signature.uses_sret() {
+            td.current_sret_ptr = Some(next_param().into_pointer_value());
+        }
+
+        for (yir_param, lowering) in func.params.iter().zip(signature.param_lowerings.iter()) {
+            self.bind_lowered_param_to_local(*yir_param, *lowering, &mut next_param, td);
         }
 
         // Iterate blocks in order and lower each
@@ -616,6 +604,7 @@ impl LLVMLowerer {
         }
     }
 
+    // partially implemented by @gpt-5.3-codex
     fn lower_terminator<'ctx>(&self, terminator: &yir::ControlFlow, td: &mut TransientData<'ctx>) {
         match terminator {
             yir::ControlFlow::Jump { target } => {
@@ -667,7 +656,7 @@ impl LLVMLowerer {
                 let default_bb = if let Some(default_label) = default {
                     *td.block_map
                         .get(&default_label.id())
-                        .expect("ICE: Default block not found in block_map")
+                        .expect("Compiler Bug: Default block not found in block_map")
                 } else {
                     // If no default provided, create an unreachable block
                     let unreachable_bb = td
@@ -683,7 +672,7 @@ impl LLVMLowerer {
                     let target_bb = *td
                         .block_map
                         .get(&target_label.id())
-                        .expect("ICE: Jump target block not found in block_map");
+                        .expect("Compiler Bug: Jump target block not found in block_map");
                     switch_cases.push((case_value, target_bb));
                 }
 
@@ -701,18 +690,39 @@ impl LLVMLowerer {
                 }
             }
             yir::ControlFlow::Return(opt) => {
-                // TODO: Lower return value properly according to function return type
-                match opt {
-                    Some(return_operand) => {
-                        // Lower the return value and return it
+                let signature = td
+                    .current_abi_signature
+                    .as_ref()
+                    .expect("Compiler Bug: Missing ABI signature while lowering return");
+
+                match (signature.return_lowering, opt) {
+                    (ReturnLowering::Direct, None) => {
+                        td.builder.build_return(None).unwrap();
+                    }
+                    (ReturnLowering::Sret, Some(return_operand)) => {
                         let return_value = self.lower_operand(return_operand, td);
-                        let _ = td.builder.build_return(Some(&return_value));
+                        let sret_ptr = td.current_sret_ptr.expect(
+                            "Compiler Bug: Missing sret pointer while lowering return for sret function",
+                        );
+                        td.builder.build_store(sret_ptr, return_value).unwrap();
+                        td.builder.build_return(None).unwrap();
                     }
-                    None => {
-                        // Void return
-                        let _ = td.builder.build_return(None);
+                    (ReturnLowering::Sret, None) => {
+                        td.builder.build_return(None).unwrap();
                     }
-                }
+                    (lowering, Some(return_operand)) => {
+                        let return_value = self.lower_operand(return_operand, td);
+                        let packed =
+                            self.pack_return_value_for_abi(return_value, lowering, "ret", td);
+                        td.builder.build_return(Some(&packed)).unwrap();
+                    }
+                    (lowering, None) => {
+                        panic!(
+                            "Compiler Bug: Missing return value for ABI lowering {:?}",
+                            lowering
+                        );
+                    }
+                };
             }
             yir::ControlFlow::Unterminated => {
                 td.builder.build_unreachable().unwrap();
@@ -1082,34 +1092,60 @@ impl LLVMLowerer {
         td.var_map.insert(cmd.target, result);
     }
 
+    // partially implemented by @gpt-5.3-codex
     fn lower_call<'ctx>(&self, cmd: &yir::CallCmd, td: &mut TransientData<'ctx>) {
-        // Get the function from the module
         let callee_fn = td.module.get_function(&cmd.name).unwrap_or_else(|| {
             panic!(
-                "ICE: Function '{}' not found in module during call lowering",
+                "Compiler Bug: Function '{}' not found in module during call lowering",
                 cmd.name
             )
         });
 
-        // Lower all arguments
-        let args: Vec<BasicMetadataValueEnum> = cmd
-            .args
-            .iter()
-            .map(|arg| self.lower_operand(arg, td).into())
-            .collect();
+        let signature = td
+            .abi_signatures
+            .get(&cmd.name)
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "Compiler Bug: Missing ABI signature for callee '{}'",
+                    cmd.name
+                )
+            });
 
-        // Build the call instruction
+        if cmd.args.len() != signature.param_lowerings.len() {
+            panic!(
+                "Compiler Bug: ABI signature/argument mismatch for '{}': {} args in call, {} in signature",
+                cmd.name,
+                cmd.args.len(),
+                signature.param_lowerings.len()
+            );
+        }
+
+        let packed_arg_count = Self::lowered_param_count(&signature.param_lowerings)
+            + usize::from(signature.uses_sret());
+        let mut packed_args: Vec<BasicMetadataValueEnum> = Vec::with_capacity(packed_arg_count);
+        let mut sret_slot = None;
+
+        if signature.uses_sret() {
+            let ret_ty = self.lower_type_basic(td.type_registry, signature.return_type, td.context);
+            let slot = td.builder.build_alloca(ret_ty, "call_sret_slot").unwrap();
+            packed_args.push(slot.into());
+            sret_slot = Some(slot);
+        }
+
+        for (arg, lowering) in cmd.args.iter().zip(signature.param_lowerings.iter()) {
+            self.append_packed_call_arg(arg, *lowering, &mut packed_args, td);
+        }
+
         let call_result = td
             .builder
-            .build_call(callee_fn, &args, &format!("{}_call", cmd.name))
+            .build_call(callee_fn, &packed_args, &format!("{}_call", cmd.name))
             .unwrap();
+        self.apply_callsite_abi_attributes(call_result, cmd, &signature, td);
 
-        // If there's a target variable, store the return value
         if let Some(target) = cmd.target {
-            let return_value = call_result.try_as_basic_value().expect_basic("ehm wud?");
-            td.var_map.insert(target, return_value);
+            self.unpack_call_result_for_abi(target, call_result, &signature, sret_slot, td);
         }
-        // If target is None, this is a void function call (no return value to store)
     }
 
     fn lower_int_to_ptr<'ctx>(&self, cmd: &yir::IntToPtrCmd, td: &mut TransientData<'ctx>) {
@@ -1264,10 +1300,10 @@ impl LLVMLowerer {
                 let ptr = td
                     .var_map
                     .get(var)
-                    .expect("ICE: Variable not found in var_map during operand lowering");
+                    .expect("Compiler Bug: Variable not found in var_map during operand lowering");
                 *ptr
             }
-            yir::Operand::NoOp => panic!("ICE: Cannot lower NoOp operand to LLVM value"),
+            yir::Operand::NoOp => panic!("Compiler Bug: Cannot lower NoOp operand to LLVM value"),
         }
     }
 }

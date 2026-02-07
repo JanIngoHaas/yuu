@@ -1,0 +1,139 @@
+// Larger ABI stress fixture (struct-focused) for Yuu vs C Godbolt comparison.
+
+struct If32:
+    i: i64,
+    f: f32,
+.
+
+struct Fi32:
+    f: f32,
+    i: i64,
+.
+
+struct If64:
+    i: i64,
+    f: f64,
+.
+
+struct Fi64:
+    f: f64,
+    i: i64,
+.
+
+struct Ff32:
+    a: f32,
+    b: f32,
+.
+
+struct Ii64:
+    a: i64,
+    b: i64,
+.
+
+struct Big:
+    a: i64,
+    b: i64,
+    c: i64,
+.
+
+struct Nested:
+    left: If32,
+    right: i64,
+.
+
+fn make_if32(i: i64) -> If32:
+    return If32 { i: i, f: 2.5 } .
+
+fn bounce_if32(x: If32) -> If32:
+    return If32 { i: x.i, f: x.f } .
+
+fn consume_if32(x: If32) -> i64:
+    return x.i .
+
+fn make_fi32(i: i64) -> Fi32:
+    return Fi32 { f: 3.5, i: i } .
+
+fn consume_fi32(x: Fi32) -> i64:
+    return x.i .
+
+fn make_if64(i: i64) -> If64:
+    return If64 { i: i, f: 2.25ff } .
+
+fn bounce_if64(x: If64) -> If64:
+    return If64 { i: x.i, f: x.f } .
+
+fn consume_if64(x: If64) -> i64:
+    return x.i .
+
+fn make_fi64(i: i64) -> Fi64:
+    return Fi64 { f: 3.25ff, i: i } .
+
+fn consume_fi64(x: Fi64) -> i64:
+    return x.i .
+
+fn make_ff32(a: f32, b: f32) -> Ff32:
+    return Ff32 { a: a, b: b } .
+
+fn bounce_ff32(x: Ff32) -> Ff32:
+    return Ff32 { a: x.a, b: x.b } .
+
+fn take_ff32(_x: Ff32) -> i64:
+    return 11 .
+
+fn make_ii64(a: i64, b: i64) -> Ii64:
+    return Ii64 { a: a, b: b } .
+
+fn sum_ii64(x: Ii64) -> i64:
+    return x.a + x.b .
+
+fn make_big(a: i64, b: i64, c: i64) -> Big:
+    return Big { a: a, b: b, c: c } .
+
+fn rotate_big(x: Big) -> Big:
+    return Big { a: x.c, b: x.a, c: x.b } .
+
+fn sum_big(x: Big) -> i64:
+    return x.a + x.b + x.c .
+
+fn make_nested(i: i64, r: i64) -> Nested:
+    return Nested { left: If32 { i: i, f: 6.5 }, right: r } .
+
+fn bounce_nested(x: Nested) -> Nested:
+    return Nested { left: x.left, right: x.right } .
+
+fn sum_nested(x: Nested) -> i64:
+    return x.left.i + x.right .
+
+fn main() -> i64:
+    let if32 = make_if32(5);
+    let if32b = bounce_if32(if32);
+
+    let fi32 = make_fi32(7);
+    let if64 = make_if64(8);
+    let if64b = bounce_if64(if64);
+    let fi64 = make_fi64(9);
+
+    let ff = make_ff32(1.0, 2.0);
+    let ffb = bounce_ff32(ff);
+
+    let ii = make_ii64(2, 3);
+
+    let big = make_big(1, 2, 3);
+    let bigr = rotate_big(big);
+
+    let nested = make_nested(4, 6);
+    let nestedb = bounce_nested(nested);
+
+    let mut acc = 0;
+    acc = acc + consume_if32(if32);
+    acc = acc + consume_if32(if32b);
+    acc = acc + consume_fi32(fi32);
+    acc = acc + consume_if64(if64);
+    acc = acc + consume_if64(if64b);
+    acc = acc + consume_fi64(fi64);
+    acc = acc + take_ff32(ffb);
+    acc = acc + sum_ii64(ii);
+    acc = acc + sum_big(bigr);
+    acc = acc + sum_nested(nestedb);
+
+    return acc .

@@ -1315,61 +1315,87 @@ impl YirLowering {
     }
 
     fn lower_ast(&self, ast: &AST, tr: &TypeRegistry, emit_kill_sets: bool) -> Module {
-        let functions: Vec<Function> = ast
+        let functions: Vec<(Function, bool)> = ast
             .structurals
             .par_iter()
             .filter_map(|structural| {
-                if let StructuralNode::FuncDef(func) = structural.as_ref() {
-                    let return_type = match tr.get_structural_type(func.id) {
-                        TypeInfo::Function(ft) => ft.ret,
-                        _ => unreachable!("Expected function type"),
-                    };
+                match structural.as_ref() {
+                    StructuralNode::FuncDef(func) => {
+                        let return_type = match tr.get_structural_type(func.id) {
+                            TypeInfo::Function(ft) => ft.ret,
+                            _ => unreachable!("Expected function type"),
+                        };
 
-                    // Extract metadata from StructuralElement wrapper
-                    let metadata = &structural.metadata;
+                        // Extract metadata from StructuralElement wrapper
+                        let metadata = &structural.metadata;
 
-                    let mut data = TransientData::new(
-                        Function::new(func.decl.name, structural.node.node_id(), return_type),
-                        tr,
-                        &metadata.type_info_table,
-                        &metadata.binding_table,
-                        emit_kill_sets,
-                    );
+                        let mut data = TransientData::new(
+                            Function::new(func.decl.name, structural.node.node_id(), return_type),
+                            tr,
+                            &metadata.type_info_table,
+                            &metadata.binding_table,
+                            emit_kill_sets,
+                        );
 
-                    // Push function-level scope for parameters
-                    data.push_scope();
+                        // Push function-level scope for parameters
+                        data.push_scope();
 
-                    for arg in &func.decl.args {
-                        let (ty, name) = (data.get_type(arg.id), arg.name);
-                        // add_param automatically converts to pointer type for stack storage
-                        let param = data.function.add_param(name, ty);
-                        data.var_map.insert(arg.id, param);
+                        for arg in &func.decl.args {
+                            let (ty, name) = (data.get_type(arg.id), arg.name);
+                            // add_param automatically converts to pointer type for stack storage
+                            let param = data.function.add_param(name, ty);
+                            data.var_map.insert(arg.id, param);
 
-                        // Add parameter to function scope
-                        data.add_variable_to_current_scope(param);
+                            // Add parameter to function scope
+                            data.add_variable_to_current_scope(param);
+                        }
+
+                        data.lower_block_body(&func.body);
+
+                        // Generate KillSet for function parameters at end of function
+                        data.pop_scope_and_generate_killset();
+
+                        if data.function.return_type.is_nil() {
+                            data.function.make_return_if_no_terminator(None);
+                        }
+
+                        data.function.sort_blocks_by_id();
+                        Some((data.function, false))
                     }
+                    StructuralNode::FuncDecl(decl) if decl.is_extern => {
+                        let return_type = match tr.get_structural_type(decl.id) {
+                            TypeInfo::Function(ft) => ft.ret,
+                            _ => unreachable!("Expected function type"),
+                        };
 
-                    data.lower_block_body(&func.body);
+                        let mut func =
+                            Function::new(decl.name, structural.node.node_id(), return_type);
 
-                    // Generate KillSet for function parameters at end of function
-                    data.pop_scope_and_generate_killset();
+                        // Add parameters - LLVM lowering will correct the types for C ABI
+                        let arg_types = match tr.get_structural_type(decl.id) {
+                            TypeInfo::Function(ft) => &ft.args,
+                            _ => unreachable!(),
+                        };
 
-                    if data.function.return_type.is_nil() {
-                        data.function.make_return_if_no_terminator(None);
+                        for (arg, arg_ty) in decl.args.iter().zip(arg_types.iter()) {
+                            func.add_param(arg.name, arg_ty);
+                        }
+
+                        Some((func, true))
                     }
-
-                    data.function.sort_blocks_by_id();
-                    Some(data.function)
-                } else {
-                    None
+                    _ => None,
                 }
             })
             .collect();
 
         let mut module = Module::new();
 
-        for func in functions {
-            module.define_function(func);
+        for (func, is_extern) in functions {
+            if is_extern {
+                module.declare_function(func);
+            } else {
+                module.define_function(func);
+            }
         }
 
         for structural in &ast.structurals {

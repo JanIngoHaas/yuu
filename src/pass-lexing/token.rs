@@ -94,6 +94,9 @@ pub enum TokenKind {
     #[token("def")]
     DefKw,
 
+    #[token("extern")]
+    ExternKw,
+
     // Float (f32)
     #[regex(r"[0-9]+\.[0-9]+f?", |lex| {
         lex.slice().trim_end_matches('f').parse().ok()
@@ -305,6 +308,7 @@ impl Display for TokenKind {
             TokenKind::DefaultKw => "'default'".fmt(f),
             TokenKind::DecKw => "'dec'".fmt(f),
             TokenKind::DefKw => "'def'".fmt(f),
+            TokenKind::ExternKw => "'extern'".fmt(f),
         }
     }
 }

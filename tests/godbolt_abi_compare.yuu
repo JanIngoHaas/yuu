@@ -1,0 +1,63 @@
+// ABI comparison fixture for Godbolt
+// Intent: compare Yuu lowering against semantically equivalent C for SysV x86_64
+
+struct PairI64:
+    a: i64,
+    b: i64,
+.
+
+struct TripleI64:
+    a: i64,
+    b: i64,
+    c: i64,
+.
+
+struct Mixed:
+    i: i64,
+    f: f32,
+.
+
+// Direct scalar args/return
+fn add_i64(x: i64, y: i64) -> i64:
+    return x + y .
+
+// <=16B aggregate passed/returned in registers (ABI classified)
+fn make_pair(x: i64, y: i64) -> PairI64:
+    return PairI64 { a: x, b: y } .
+
+fn shift_pair(p: PairI64, d: i64) -> PairI64:
+    return PairI64 { a: p.a + d, b: p.b - d } .
+
+fn sum_pair(p: PairI64) -> i64:
+    return p.a + p.b .
+
+// >16B aggregate uses byval/sret-style lowering
+fn make_triple(a: i64, b: i64, c: i64) -> TripleI64:
+    return TripleI64 { a: a, b: b, c: c } .
+
+fn rotate_triple(t: TripleI64) -> TripleI64:
+    return TripleI64 { a: t.c, b: t.a, c: t.b } .
+
+fn sum_triple(t: TripleI64) -> i64:
+    return t.a + t.b + t.c .
+
+// Mixed layout aggregate (int + float)
+fn make_mixed(i: i64) -> Mixed:
+    return Mixed { i: i, f: 1.5 } .
+
+fn read_mixed_i(m: Mixed) -> i64:
+    return m.i .
+
+fn main() -> i64:
+    let p0 = make_pair(10, 20);
+    let p1 = shift_pair(p0, 3);
+
+    let t0 = make_triple(1, 2, 3);
+    let t1 = rotate_triple(t0);
+
+    let m0 = make_mixed(7);
+
+    let lhs = sum_pair(p1);
+    let rhs = sum_triple(t1) + read_mixed_i(m0);
+
+    return add_i64(lhs, rhs) .

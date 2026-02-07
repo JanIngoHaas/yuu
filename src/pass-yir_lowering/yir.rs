@@ -1085,10 +1085,8 @@ impl Module {
     }
 
     pub fn declare_function(&mut self, func: Function) {
-        self.functions.insert(
-            func.name,
-            FunctionDeclarationState::Declared(Arc::new(func)),
-        );
+        self.functions
+            .insert(func.name, FunctionDeclarationState::Extern(Arc::new(func)));
     }
 
     pub fn define_function(&mut self, func: Function) {
@@ -1099,7 +1097,7 @@ impl Module {
     pub fn format_yir(&self, do_color: bool, f: &mut impl fmt::Write) -> fmt::Result {
         for (name, func_state) in &self.functions {
             match func_state {
-                FunctionDeclarationState::Declared(func) => {
+                FunctionDeclarationState::Extern(func) => {
                     writeln!(
                         f,
                         "{} {} : {}",
@@ -1119,7 +1117,7 @@ impl Module {
 
 #[derive(Clone)]
 pub enum FunctionDeclarationState {
-    Declared(Arc<Function>),
+    Extern(Arc<Function>),
     Defined(Arc<Function>),
 }
 
