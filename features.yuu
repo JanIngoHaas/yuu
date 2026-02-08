@@ -1,0 +1,13 @@
+fn sum(start: i64, end_: i64) -> i64: 
+    
+    let acc = 0;
+
+    while start <= end_:
+        acc = acc + start;
+        start = start + 1;
+    end
+
+    return acc .
+
+
+fn main() -> i64: return sum(1, 10) .

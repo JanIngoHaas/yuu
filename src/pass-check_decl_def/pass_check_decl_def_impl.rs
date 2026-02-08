@@ -1,10 +1,13 @@
+use std::collections::HashSet;
+
 use crate::{
-    pass_diagnostics::{YuuErrorBuilder, error::YuuError},
+    pass_diagnostics::error::{ErrorKind, YuuError},
     pass_parse::{
-        BlockStmt, ExprNode, StmtNode, StructuralNode,
-        ast::{AST, SourceInfo},
+        Arg, BindingNode, BlockStmt, ExprNode, MatchArm, RefutablePatternNode, SourceInfo,
+        StmtNode, StructuralMetadata, StructuralNode,
+        ast::{AST, NodeId},
     },
-    utils::collections::UstrIndexSet,
+    utils::collections::FastHashMap,
 };
 use miette::Result;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -12,7 +15,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 /// Errors from check decl def analysis
 pub struct CheckDeclDefErrors(pub Vec<YuuError>);
 
-/// Pass that checks if every declaration is defined in all branches
+/// Pass that checks if every declaration is defined across all reachable control-flow paths
 pub struct CheckDeclDef;
 
 impl CheckDeclDef {
@@ -31,8 +34,12 @@ impl CheckDeclDef {
                     src_info,
                 };
 
-                if let StructuralNode::FuncDef(func_def_structural) = structural.as_ref() {
-                    let _ = analyzer.check_block(&func_def_structural.body);
+                if let StructuralNode::FuncDef(func_def) = structural.as_ref() {
+                    analyzer.check_function(
+                        func_def.decl.args.as_slice(),
+                        &func_def.body,
+                        &structural.metadata,
+                    );
                 }
 
                 analyzer.errors
@@ -49,274 +56,379 @@ impl Default for CheckDeclDef {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InitState {
+    Uninit,
+    MaybeInit,
+    Init,
+}
+
+impl InitState {
+    fn join(self, other: InitState) -> InitState {
+        match (self, other) {
+            (InitState::Init, InitState::Init) => InitState::Init,
+            (InitState::Uninit, InitState::Uninit) => InitState::Uninit,
+            _ => InitState::MaybeInit,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FlowState {
+    vars: FastHashMap<NodeId, InitState>,
+    reachable: bool,
+}
+
+impl FlowState {
+    fn with_function_args(args: &[Arg]) -> Self {
+        let mut vars = FastHashMap::default();
+        for arg in args {
+            vars.insert(arg.id, InitState::Init);
+        }
+        Self {
+            vars,
+            reachable: true,
+        }
+    }
+}
+
 struct CheckDeclDefAnalyzer<'a> {
     errors: Vec<YuuError>,
     src_info: &'a SourceInfo,
 }
 
 impl CheckDeclDefAnalyzer<'_> {
-    fn report_inconsistent_defs(
+    fn check_function(&mut self, args: &[Arg], body: &BlockStmt, metadata: &StructuralMetadata) {
+        let entry = FlowState::with_function_args(args);
+        let _ = self.check_block(body, entry, metadata);
+    }
+
+    fn check_block(
         &mut self,
-        vars_in_first: impl Iterator<Item = impl AsRef<str>>,
-        vars_in_second: impl Iterator<Item = impl AsRef<str>>,
-        first_context: &str,
-        second_context: &str,
-    ) {
-        for var in vars_in_first {
-            let error = YuuErrorBuilder::new()
-                .kind(crate::pass_diagnostics::error::ErrorKind::InvalidStatement)
-                .message(format!(
-                    "Variable '{}' is defined in {} but not in {}",
-                    var.as_ref(),
-                    first_context,
-                    second_context
-                ))
-                .source(
-                    self.src_info.source.clone(),
-                    self.src_info.file_name.clone(),
-                )
-                .help("Make sure all variables are defined consistently across all branches")
-                .build();
-            self.errors.push(error);
+        block: &BlockStmt,
+        mut flow: FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
+        for stmt in &block.body {
+            if !flow.reachable {
+                break;
+            }
+            flow = self.check_stmt(stmt, flow, metadata);
         }
-
-        for var in vars_in_second {
-            let error = YuuErrorBuilder::new()
-                .kind(crate::pass_diagnostics::error::ErrorKind::InvalidStatement)
-                .message(format!(
-                    "Variable '{}' is defined in {} but not in {}",
-                    var.as_ref(),
-                    second_context,
-                    first_context
-                ))
-                .source(
-                    self.src_info.source.clone(),
-                    self.src_info.file_name.clone(),
-                )
-                .help("Make sure all variables are defined consistently across all branches")
-                .build();
-            self.errors.push(error);
-        }
-    }
-
-    fn check_block(&mut self, block: &BlockStmt) -> UstrIndexSet {
-        let stmts = &block.body;
-
-        let mut defs = UstrIndexSet::default();
-        let mut decls = UstrIndexSet::default();
-
-        for stmt in stmts {
-            let cont = self.check_stmt(stmt, &mut defs, &mut decls);
-            if !cont {
-                return defs;
-            }
-        }
-
-        defs
-    }
-
-    fn check_expr(&mut self, expr: &ExprNode, decls: &UstrIndexSet, defs: &UstrIndexSet) {
-        match expr {
-            ExprNode::Literal(_) => (),
-            ExprNode::Binary(binary_expr) => {
-                self.check_expr(&binary_expr.left, decls, defs);
-                self.check_expr(&binary_expr.right, decls, defs);
-            }
-            ExprNode::Unary(unary_expr) => {
-                self.check_expr(&unary_expr.expr, decls, defs);
-            }
-            ExprNode::Ident(ident_expr) => {
-                // Only fail if the variable is declared but not defined
-                // If it's not declared at all, it's a let statement and shouldn't fail here
-                if decls.contains(&ident_expr.ident) && !defs.contains(&ident_expr.ident) {
-                    let error = YuuErrorBuilder::new()
-                        .kind(crate::pass_diagnostics::error::ErrorKind::InvalidExpression)
-                        .message(format!(
-                            "Variable '{}' is declared but not defined",
-                            ident_expr.ident
-                        ))
-                        .source(
-                            self.src_info.source.clone(),
-                            self.src_info.file_name.clone(),
-                        )
-                        .span(
-                            ident_expr.span.clone(),
-                            format!("Variable '{}' used here", ident_expr.ident),
-                        )
-                        .help("Make sure to define the variable before using it")
-                        .build();
-                    self.errors.push(error);
-                }
-            }
-            ExprNode::FuncCall(func_call_expr) => {
-                for arg in &func_call_expr.args {
-                    self.check_expr(arg, decls, defs);
-                }
-            }
-            ExprNode::Assignment(assignment_expr) => {
-                self.check_expr(&assignment_expr.lhs, decls, defs);
-                self.check_expr(&assignment_expr.rhs, decls, defs);
-            }
-            ExprNode::StructInstantiation(struct_instantiation_expr) => {
-                for field in &struct_instantiation_expr.fields {
-                    self.check_expr(&field.1, decls, defs);
-                }
-            }
-            ExprNode::EnumInstantiation(enum_instantiation_expr) => {
-                if let Some(ref expr) = enum_instantiation_expr.data {
-                    self.check_expr(expr, decls, defs);
-                }
-            }
-            ExprNode::MemberAccess(member_access_expr) => {
-                self.check_expr(&member_access_expr.lhs, decls, defs);
-            }
-            ExprNode::Deref(deref_expr) => {
-                self.check_expr(&deref_expr.expr, decls, defs);
-            }
-            ExprNode::AddressOf(address_of_expr) => {
-                self.check_expr(&address_of_expr.expr, decls, defs);
-            }
-            ExprNode::HeapAlloc(heap_alloc_expr) => {
-                self.check_expr(&heap_alloc_expr.expr, decls, defs);
-            }
-            ExprNode::Array(array_expr) => {
-                if let Some(expr) = array_expr.init_expr.as_ref() {
-                    self.check_expr(expr, decls, defs)
-                }
-                self.check_expr(&array_expr.size, decls, defs);
-            }
-            ExprNode::ArrayLiteral(array_literal_expr) => {
-                for element in &array_literal_expr.elements {
-                    self.check_expr(element, decls, defs);
-                }
-            }
-            ExprNode::Cast(cast_expr) => {
-                self.check_expr(&cast_expr.expr, decls, defs);
-            }
-            ExprNode::LuaMeta(_) => {
-                // TODO: implement Lua metaprogramming checking
-            }
-        }
+        flow
     }
 
     fn check_stmt(
         &mut self,
         stmt: &StmtNode,
-        defs: &mut UstrIndexSet,
-        decls: &mut UstrIndexSet,
-    ) -> bool {
+        mut flow: FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
         match stmt {
-            StmtNode::If(if_stmt) => {
-                self.check_expr(&if_stmt.if_block.condition, decls, defs);
-                let defs_if: UstrIndexSet = self.check_block(&if_stmt.if_block.body);
-
-                for else_if in &if_stmt.else_if_blocks {
-                    self.check_expr(&else_if.condition, decls, defs);
-                    let defs_elif: UstrIndexSet = self.check_block(&else_if.body);
-                    let not_declared_in_elif = defs_if.difference(&defs_elif);
-                    let not_declared_in_if = defs_elif.difference(&defs_if);
-
-                    self.report_inconsistent_defs(
-                        not_declared_in_elif.map(|s| s.as_str()),
-                        not_declared_in_if.map(|s| s.as_str()),
-                        "if branch",
-                        "else-if branch",
-                    );
+            StmtNode::If(if_stmt) => self.check_if_stmt(if_stmt, flow, metadata),
+            StmtNode::While(while_stmt) => self.check_while_stmt(while_stmt, flow, metadata),
+            StmtNode::Block(block_stmt) => self.check_block(block_stmt, flow, metadata),
+            StmtNode::Match(match_stmt) => self.check_match_stmt(match_stmt, flow, metadata),
+            StmtNode::Break(_) => {
+                flow.reachable = false;
+                flow
+            }
+            StmtNode::Return(ret) => {
+                if let Some(expr) = &ret.expr {
+                    self.check_expr(expr, &flow, metadata);
                 }
-
-                // Now check the else block if it exists
-                if let Some(else_block) = &if_stmt.else_block {
-                    let defs_else: UstrIndexSet = self.check_block(else_block);
-                    let not_declared_in_else = defs_if.difference(&defs_else);
-                    let not_declared_in_if = defs_else.difference(&defs_if);
-                    self.report_inconsistent_defs(
-                        not_declared_in_else.map(|s| s.as_str()),
-                        not_declared_in_if.map(|s| s.as_str()),
-                        "if branch",
-                        "else branch",
-                    );
+                flow.reachable = false;
+                flow
+            }
+            StmtNode::Atomic(expr) => {
+                self.check_expr(expr, &flow, metadata);
+                flow
+            }
+            StmtNode::Decl(decl_stmt) => {
+                flow.vars.insert(decl_stmt.ident.id, InitState::Uninit);
+                flow
+            }
+            StmtNode::Def(def_stmt) => {
+                self.check_expr(&def_stmt.expr, &flow, metadata);
+                if let Some(binding_id) = resolve_def_binding_id(def_stmt, metadata)
+                    && flow.vars.contains_key(&binding_id)
+                {
+                    flow.vars.insert(binding_id, InitState::Init);
                 }
-
-                // Now, add the defs from the if block (which should also be the defs from all other branches) to the defs from the current block
-                defs.extend(defs_if);
-                true
+                flow
             }
-            StmtNode::While(while_stmt) => {
-                self.check_expr(&while_stmt.condition_block.condition, decls, defs);
-                self.check_block(&while_stmt.condition_block.body);
-                true
-            }
-            StmtNode::Block(block_stmt) => {
-                self.check_block(block_stmt);
-                true
-            }
-            StmtNode::Break(_b) => false,
-            StmtNode::Return(r) => {
-                if let Some(ref e) = r.expr {
-                    self.check_expr(e, decls, defs);
-                }
-                false
-            }
-            StmtNode::Atomic(a) => {
-                self.check_expr(a, decls, defs);
-                true
-            }
-            StmtNode::Decl(d) => {
-                decls.insert(d.ident.name);
-                true
-            }
-
             StmtNode::Let(let_stmt) => {
-                self.check_expr(&let_stmt.expr, decls, defs);
-                true
+                self.check_expr(&let_stmt.expr, &flow, metadata);
+                if let BindingNode::Ident(ident) = let_stmt.binding.as_ref() {
+                    // Rust-style rebinding: a new binding ID is always initialized.
+                    flow.vars.insert(ident.id, InitState::Init);
+                }
+                flow
             }
             StmtNode::Defer(defer_stmt) => {
-                self.check_expr(&defer_stmt.expr, decls, defs);
-                true
+                self.check_expr(&defer_stmt.expr, &flow, metadata);
+                flow
             }
-            StmtNode::Match(match_stmt) => {
-                self.check_expr(&match_stmt.scrutinee, decls, defs);
-
-                if !match_stmt.arms.is_empty() {
-                    let anchor_defs = self.check_block(&match_stmt.arms[0].body);
-
-                    for arm in match_stmt.arms.iter().skip(1) {
-                        let arm_defs = self.check_block(&arm.body);
-                        let not_declared_in_arm = anchor_defs.difference(&arm_defs);
-                        let not_declared_in_anchor = arm_defs.difference(&anchor_defs);
-
-                        self.report_inconsistent_defs(
-                            not_declared_in_arm.map(|s| s.as_str()),
-                            not_declared_in_anchor.map(|s| s.as_str()),
-                            "first match arm",
-                            "other match arm",
-                        );
-                    }
-
-                    if let Some(default_case) = &match_stmt.default_case {
-                        let default_defs = self.check_block(default_case);
-                        let not_declared_in_default = anchor_defs.difference(&default_defs);
-                        let not_declared_in_anchor = default_defs.difference(&anchor_defs);
-
-                        self.report_inconsistent_defs(
-                            not_declared_in_default.map(|s| s.as_str()),
-                            not_declared_in_anchor.map(|s| s.as_str()),
-                            "match arm",
-                            "default case",
-                        );
-                    }
-
-                    defs.extend(anchor_defs);
-                }
-
-                true
-            }
-            StmtNode::Error(_) => true,
-            StmtNode::Def(def_stmt) => {
-                defs.insert(def_stmt.ident.name);
-                true
-            }
-            StmtNode::LuaMeta(_) => true,
+            StmtNode::Error(_) | StmtNode::LuaMeta(_) => flow,
         }
     }
+
+    fn check_if_stmt(
+        &mut self,
+        if_stmt: &crate::pass_parse::IfStmt,
+        incoming: FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
+        if !incoming.reachable {
+            return incoming;
+        }
+
+        self.check_expr(&if_stmt.if_block.condition, &incoming, metadata);
+
+        let mut branch_flows = Vec::new();
+        branch_flows.push(self.check_block(&if_stmt.if_block.body, incoming.clone(), metadata));
+
+        for else_if in &if_stmt.else_if_blocks {
+            self.check_expr(&else_if.condition, &incoming, metadata);
+            branch_flows.push(self.check_block(&else_if.body, incoming.clone(), metadata));
+        }
+
+        if let Some(else_block) = &if_stmt.else_block {
+            branch_flows.push(self.check_block(else_block, incoming.clone(), metadata));
+        } else {
+            // Implicit else path: straight-line continuation without running any branch body.
+            branch_flows.push(incoming);
+        }
+
+        self.merge_flows(&branch_flows)
+    }
+
+    fn check_while_stmt(
+        &mut self,
+        while_stmt: &crate::pass_parse::WhileStmt,
+        incoming: FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
+        if !incoming.reachable {
+            return incoming;
+        }
+
+        self.check_expr(&while_stmt.condition_block.condition, &incoming, metadata);
+        let body_out =
+            self.check_block(&while_stmt.condition_block.body, incoming.clone(), metadata);
+
+        // Loop may execute zero times, so include incoming as an implicit path.
+        self.merge_flows(&[incoming, body_out])
+    }
+
+    fn check_match_stmt(
+        &mut self,
+        match_stmt: &crate::pass_parse::MatchStmt,
+        incoming: FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
+        if !incoming.reachable {
+            return incoming;
+        }
+
+        self.check_expr(&match_stmt.scrutinee, &incoming, metadata);
+
+        let mut branch_flows = Vec::new();
+        for arm in &match_stmt.arms {
+            branch_flows.push(self.check_match_arm(arm, &incoming, metadata));
+        }
+
+        if let Some(default_case) = &match_stmt.default_case {
+            branch_flows.push(self.check_block(default_case, incoming.clone(), metadata));
+        } else {
+            // Non-exhaustive case fallback path.
+            branch_flows.push(incoming);
+        }
+
+        self.merge_flows(&branch_flows)
+    }
+
+    fn check_match_arm(
+        &mut self,
+        arm: &MatchArm,
+        incoming: &FlowState,
+        metadata: &StructuralMetadata,
+    ) -> FlowState {
+        let mut flow = incoming.clone();
+
+        if let Some(binding) = match_arm_binding(arm.pattern.as_ref())
+            && let BindingNode::Ident(ident) = binding
+        {
+            // Pattern binding is initialized for this arm path.
+            flow.vars.insert(ident.id, InitState::Init);
+        }
+
+        self.check_block(&arm.body, flow, metadata)
+    }
+
+    fn merge_flows(&self, flows: &[FlowState]) -> FlowState {
+        let reachable_flows = flows.iter().filter(|f| f.reachable).collect::<Vec<_>>();
+        if reachable_flows.is_empty() {
+            return FlowState {
+                vars: flows.first().map(|f| f.vars.clone()).unwrap_or_default(),
+                reachable: false,
+            };
+        }
+
+        let mut keys = HashSet::<NodeId>::new();
+        for flow in &reachable_flows {
+            for id in flow.vars.keys() {
+                keys.insert(*id);
+            }
+        }
+
+        let mut vars = FastHashMap::default();
+        for id in keys {
+            let mut joined = InitState::Uninit;
+
+            if let Some(fflow) = reachable_flows.iter().next() {
+                joined = fflow.vars.get(&id).copied().unwrap_or(InitState::Uninit);
+            }
+
+            for flow in reachable_flows.iter().skip(1) {
+                let state = flow.vars.get(&id).copied().unwrap_or(InitState::Uninit);
+                joined = joined.join(state)
+            }
+
+            vars.insert(id, joined);
+        }
+
+        FlowState {
+            vars,
+            reachable: true,
+        }
+    }
+
+    fn check_expr(&mut self, expr: &ExprNode, flow: &FlowState, metadata: &StructuralMetadata) {
+        if !flow.reachable {
+            return;
+        }
+
+        match expr {
+            ExprNode::Literal(_) => {}
+            ExprNode::Binary(binary_expr) => {
+                self.check_expr(&binary_expr.left, flow, metadata);
+                self.check_expr(&binary_expr.right, flow, metadata);
+            }
+            ExprNode::Unary(unary_expr) => {
+                self.check_expr(&unary_expr.expr, flow, metadata);
+            }
+            ExprNode::Ident(ident_expr) => {
+                if let Some(binding_id) = metadata.binding_table.get(&ident_expr.id).copied()
+                    && let Some(state) = flow.vars.get(&binding_id)
+                {
+                    match state {
+                        InitState::Init => {}
+                        InitState::Uninit => self.report_uninitialized_use(ident_expr),
+                        InitState::MaybeInit => self.report_maybe_initialized_use(ident_expr),
+                    }
+                }
+            }
+            ExprNode::FuncCall(func_call_expr) => {
+                self.check_expr(&func_call_expr.lhs, flow, metadata);
+                for arg in &func_call_expr.args {
+                    self.check_expr(arg, flow, metadata);
+                }
+            }
+            ExprNode::Assignment(assignment_expr) => {
+                self.check_expr(&assignment_expr.lhs, flow, metadata);
+                self.check_expr(&assignment_expr.rhs, flow, metadata);
+            }
+            ExprNode::StructInstantiation(struct_instantiation_expr) => {
+                for (_field, expr) in &struct_instantiation_expr.fields {
+                    self.check_expr(expr, flow, metadata);
+                }
+            }
+            ExprNode::EnumInstantiation(enum_instantiation_expr) => {
+                if let Some(expr) = enum_instantiation_expr.data.as_ref() {
+                    self.check_expr(expr, flow, metadata);
+                }
+            }
+            ExprNode::MemberAccess(member_access_expr) => {
+                self.check_expr(&member_access_expr.lhs, flow, metadata);
+            }
+            ExprNode::Deref(deref_expr) => {
+                self.check_expr(&deref_expr.expr, flow, metadata);
+            }
+            ExprNode::AddressOf(address_of_expr) => {
+                self.check_expr(&address_of_expr.expr, flow, metadata);
+            }
+            ExprNode::HeapAlloc(heap_alloc_expr) => {
+                self.check_expr(&heap_alloc_expr.expr, flow, metadata);
+            }
+            ExprNode::Array(array_expr) => {
+                if let Some(expr) = array_expr.init_expr.as_ref() {
+                    self.check_expr(expr, flow, metadata);
+                }
+                self.check_expr(&array_expr.size, flow, metadata);
+            }
+            ExprNode::ArrayLiteral(array_literal_expr) => {
+                for element in &array_literal_expr.elements {
+                    self.check_expr(element, flow, metadata);
+                }
+            }
+            ExprNode::Cast(cast_expr) => {
+                self.check_expr(&cast_expr.expr, flow, metadata);
+            }
+            ExprNode::LuaMeta(_) => {}
+        }
+    }
+
+    fn report_uninitialized_use(&mut self, ident_expr: &crate::pass_parse::IdentExpr) {
+        let error = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message(format!(
+                "Variable '{}' is declared but not defined",
+                ident_expr.ident
+            ))
+            .source(
+                self.src_info.source.clone(),
+                self.src_info.file_name.clone(),
+            )
+            .span(
+                ident_expr.span.clone(),
+                format!("Variable '{}' used here", ident_expr.ident),
+            )
+            .help("Make sure to define the variable before using it")
+            .build();
+        self.errors.push(error);
+    }
+
+    fn report_maybe_initialized_use(&mut self, ident_expr: &crate::pass_parse::IdentExpr) {
+        let error = YuuError::builder()
+            .kind(ErrorKind::InvalidExpression)
+            .message(format!(
+                "Variable '{}' may be undefined on some control-flow paths",
+                ident_expr.ident
+            ))
+            .source(
+                self.src_info.source.clone(),
+                self.src_info.file_name.clone(),
+            )
+            .span(
+                ident_expr.span.clone(),
+                format!("Variable '{}' used here", ident_expr.ident),
+            )
+            .help("Define the variable on every reachable path before using it")
+            .build();
+        self.errors.push(error);
+    }
+}
+
+fn match_arm_binding(pattern: &RefutablePatternNode) -> Option<&BindingNode> {
+    match pattern {
+        RefutablePatternNode::Enum(enum_pattern) => enum_pattern.binding.as_deref(),
+    }
+}
+
+fn resolve_def_binding_id(
+    def_stmt: &crate::pass_parse::DefStmt,
+    metadata: &StructuralMetadata,
+) -> Option<NodeId> {
+    metadata.binding_table.get(&def_stmt.ident.id).copied()
 }

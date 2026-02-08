@@ -36,6 +36,7 @@ fn infer_literal_expr(lit: &LiteralExpr, data: &mut TransientData) -> &'static T
         },
         TokenKind::F32(_) => primitive_f32(),
         TokenKind::F64(_) => primitive_f64(),
+        TokenKind::TrueKw | TokenKind::FalseKw => primitive_bool(),
         TokenKind::NilKw => primitive_nil(),
         _ => unreachable!("Compiler bug: Literal not implemented"),
     };

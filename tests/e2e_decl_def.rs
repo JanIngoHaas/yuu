@@ -288,6 +288,158 @@ fn test_decl_def_in_loops() {
     assert_eq!(output, 10); // 0+1+2+3+4 = 10
 }
 
+#[test]
+fn test_if_else_both_define_should_succeed() {
+    let source = r#"fn main() -> i64:
+        dec value;
+        if 1 < 2: def value = 10 .
+        else: def value = 20 .
+        return value .
+    "#;
+
+    let executable = run_to_executable(source, "test_if_else_both_define_should_succeed.yuu")
+        .expect("Failed to compile if-else both-define decl/def test");
+
+    let output = run_executable_with_output(executable, &[])
+        .expect("Failed to run if-else both-define decl/def test");
+
+    assert_eq!(output, 10);
+}
+
+#[test]
+fn test_if_without_else_then_use_should_fail() {
+    let source = r#"fn main() -> i64:
+        dec value;
+        if 1 < 2: def value = 10 .
+        return value .
+    "#;
+
+    let result = run_to_executable(source, "test_if_without_else_then_use_should_fail.yuu");
+
+    assert!(
+        result.is_err(),
+        "Expected compilation to fail when value is only defined on one if-path"
+    );
+}
+
+#[test]
+fn test_if_without_else_then_post_def_should_succeed() {
+    let source = r#"fn main() -> i64:
+        dec value;
+        if 1 < 2: def value = 10 .
+        def value = 33;
+        return value .
+    "#;
+
+    let executable =
+        run_to_executable(source, "test_if_without_else_then_post_def_should_succeed.yuu")
+            .expect("Failed to compile post-def after maybe-init path test");
+
+    let output = run_executable_with_output(executable, &[])
+        .expect("Failed to run post-def after maybe-init path test");
+
+    assert_eq!(output, 33);
+}
+
+#[test]
+fn test_while_body_def_may_not_run_should_fail() {
+    let source = r#"fn main() -> i64:
+        dec value;
+        while 0 < 0:
+            def value = 1;
+        end
+        return value .
+    "#;
+
+    let result = run_to_executable(source, "test_while_body_def_may_not_run_should_fail.yuu");
+
+    assert!(
+        result.is_err(),
+        "Expected compilation to fail when value is only defined inside a while body"
+    );
+}
+
+#[test]
+fn test_match_with_default_all_paths_define_should_succeed() {
+    let source = r#"
+        enum Option:
+            None,
+            Some: i64,
+        end
+
+        fn main() -> i64:
+            dec value;
+            let opt = Option::Some(7);
+            match opt:
+                Option::Some(v): def value = v .
+                Option::None: def value = 0 .
+                default: def value = 99 .
+            end
+            return value .
+    "#;
+
+    let executable = run_to_executable(
+        source,
+        "test_match_with_default_all_paths_define_should_succeed.yuu",
+    )
+    .expect("Failed to compile match all-paths-define decl/def test");
+
+    let output = run_executable_with_output(executable, &[])
+        .expect("Failed to run match all-paths-define decl/def test");
+
+    assert_eq!(output, 7);
+}
+
+#[test]
+fn test_match_branch_missing_def_should_fail() {
+    let source = r#"
+        enum Option:
+            None,
+            Some: i64,
+        end
+
+        fn main() -> i64:
+            dec value;
+            let opt = Option::None;
+            match opt:
+                Option::Some(v): def value = v .
+                Option::None: let noop = 0;
+                default: def value = 99 .
+            end
+            return value .
+    "#;
+
+    let result = run_to_executable(source, "test_match_branch_missing_def_should_fail.yuu");
+
+    assert!(
+        result.is_err(),
+        "Expected compilation to fail when one match branch leaves value undefined"
+    );
+}
+
+#[test]
+fn test_all_branches_return_makes_tail_unreachable() {
+    let source = r#"fn main() -> i64:
+        dec value;
+        def value = 0;
+        if 1 < 2: return 1 .
+        else: return 2 .
+        let tail = value;
+        return tail .
+    "#;
+
+    let executable = run_to_executable(
+        source,
+        "test_all_branches_return_makes_tail_unreachable.yuu",
+    )
+    .expect("Failed to compile unreachable-tail decl/def test");
+
+    let output = run_executable_with_output(executable, &[])
+        .expect("Failed to run unreachable-tail decl/def test");
+
+    assert_eq!(output, 1);
+}
+
 // Error case tests - these should fail to compile
 
 #[test]

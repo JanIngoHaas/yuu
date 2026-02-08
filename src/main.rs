@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use miette::Result;
 use std::fs;
 use std::path::PathBuf;
+use yuu::lsp;
 use yuu::pass_diagnostics::error;
 use yuu::utils::pipeline::Pipeline;
 
@@ -63,6 +64,8 @@ enum Commands {
         #[arg(long, help = "Show compiler pass timing breakdown")]
         compiler_timings: bool,
     },
+    #[command(about = "Start Yuu language server (LSP) over stdio")]
+    Lsp,
 }
 
 fn read_source_file(input: &PathBuf) -> Result<(String, String)> {
@@ -86,10 +89,12 @@ fn write_output(output: Option<PathBuf>, content: &str) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    // Setup error formatter with syntax highlighting
-    error::setup_error_formatter(Some("WarmEmber"), true)?;
-
     let cli = Cli::parse();
+
+    if !matches!(&cli.command, Commands::Lsp) {
+        // Setup error formatter with syntax highlighting
+        error::setup_error_formatter(Some("WarmEmber"), true)?;
+    }
 
     match cli.command {
         Commands::Yir {
@@ -209,6 +214,9 @@ fn main() -> Result<()> {
             if compiler_timings {
                 pipeline.timings.print_summary();
             }
+        }
+        Commands::Lsp => {
+            lsp::run_stdio_server()?;
         }
     }
 

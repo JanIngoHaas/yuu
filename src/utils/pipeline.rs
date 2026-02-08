@@ -2,7 +2,7 @@ use crate::pass_check_decl_def::{CheckDeclDef, CheckDeclDefErrors};
 use crate::pass_control_flow_analysis::pass_control_flow_analysis_impl::{
     ControlFlowAnalysis, ControlFlowAnalysisErrors,
 };
-use crate::pass_diagnostics::pass_diagnostics_impl::Diagnostics;
+use crate::pass_diagnostics::{YuuError, pass_diagnostics_impl::Diagnostics};
 use crate::pass_llvm_lowering::pass_yir_to_llvm::LLVMLowerer;
 use crate::pass_parse::add_ids::IdGenerator;
 use crate::pass_parse::pass_parse_impl::{Parse, SyntaxErrors};
@@ -368,6 +368,62 @@ impl Pipeline {
 
     pub fn calc_diagnostics(&mut self) -> Result<()> {
         self.diagnostics()?;
+        Ok(())
+    }
+
+    pub fn collect_errors(&mut self) -> Result<Vec<YuuError>> {
+        if !self.parse_done {
+            self.parse()?;
+        }
+
+        if let Some(syntax_errors) = &self.syntax_errors
+            && !syntax_errors.0.is_empty()
+        {
+            return Ok(syntax_errors.0.clone());
+        }
+
+        if !self.semantic_analysis_done {
+            self.semantic_analysis()?;
+        }
+
+        let mut errors = Vec::new();
+
+        if let Some(type_errors) = &self.type_errors {
+            errors.extend(type_errors.0.iter().cloned());
+        }
+
+        if let Some(control_flow_errors) = &self.control_flow_errors {
+            errors.extend(control_flow_errors.0.iter().cloned());
+        }
+
+        if let Some(type_dependency_errors) = &self.type_dependency_errors {
+            errors.extend(type_dependency_errors.0.iter().cloned());
+        }
+
+        if let Some(decl_def_errors) = &self.decl_def_errors {
+            errors.extend(decl_def_errors.0.iter().cloned());
+        }
+
+        Ok(errors)
+    }
+
+    /// Prepares AST metadata needed for editor features (e.g. inlay hints, hover details)
+    /// without running full semantic diagnostics.
+    pub fn prepare_editor_metadata(&mut self) -> Result<()> {
+        if !self.parse_done {
+            self.parse()?;
+        }
+
+        if let Some(syntax_errors) = &self.syntax_errors
+            && !syntax_errors.0.is_empty()
+        {
+            return Ok(());
+        }
+
+        if !self.type_inference_done {
+            self.type_inference()?;
+        }
+
         Ok(())
     }
 

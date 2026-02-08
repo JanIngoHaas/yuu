@@ -145,3 +145,24 @@ fn test_parenthesized_expressions() {
     // (2 + 3) * 4 = 20
     assert_eq!(output, 20);
 }
+
+#[test]
+fn test_boolean_literals() {
+    let source = r#"fn main() -> i64:
+        let t = true;
+        let f = false;
+        if t:
+            if f: return 0 .
+            else: return 1 .
+        end
+        return 0 .
+    "#;
+
+    let executable = run_to_executable(source, "test_boolean_literals.yuu")
+        .expect("Failed to compile boolean literals test");
+
+    let output =
+        run_executable_with_output(executable, &[]).expect("Failed to run boolean literals test");
+
+    assert_eq!(output, 1);
+}

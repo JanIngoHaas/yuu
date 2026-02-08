@@ -332,6 +332,14 @@ impl<'a> TransientData<'a> {
                         ..
                     } => Operand::F64Const(*f),
                     Token {
+                        kind: TokenKind::TrueKw,
+                        ..
+                    } => Operand::BoolConst(true),
+                    Token {
+                        kind: TokenKind::FalseKw,
+                        ..
+                    } => Operand::BoolConst(false),
+                    Token {
                         kind: TokenKind::NilKw,
                         ..
                     } => Operand::NoOp,

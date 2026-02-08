@@ -1,0 +1,77 @@
+{
+  "name": "yuu-language-support",
+  "displayName": "Yuu Language Support",
+  "description": "Language support and LSP client for the Yuu programming language",
+  "version": "0.0.2",
+  "publisher": "yuu-local",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JanIngoHaas/yuu.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:yuu",
+    "onCommand:yuu.restartLanguageServer"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "yuu",
+        "aliases": [
+          "Yuu",
+          "yuu"
+        ],
+        "extensions": [
+          ".yuu"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "yuu",
+        "scopeName": "source.yuu",
+        "path": "./syntaxes/yuu.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "yuu.restartLanguageServer",
+        "title": "Yuu: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Yuu",
+      "properties": {
+        "yuu.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the yuu compiler binary. Empty means auto-detect (workspace target/debug/yuu, target/release/yuu, then PATH)."
+        },
+        "yuu.lsp.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "Arguments used to start the language server process."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "echo \"No lint configured\""
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

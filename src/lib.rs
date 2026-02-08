@@ -1,3 +1,4 @@
+pub mod lsp;
 pub mod utils;
 
 // Pass modules

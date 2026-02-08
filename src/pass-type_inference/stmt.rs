@@ -45,29 +45,41 @@ fn infer_def_stmt(def_stmt: &DefStmt, block_id: usize, data: &mut TransientData)
 
     match var {
         Ok(var) => {
-            // Check if the variable was already properly defined (i.e., has a non-unknown type)
             let current_type = data
                 .type_info_table
                 .get(var.binding_info.id)
                 .unwrap_or(unknown_type());
-
-            if !matches!(current_type, TypeInfo::Unknown) {
+            if matches!(current_type, TypeInfo::Unknown) {
+                data.type_info_table.insert(var.binding_info.id, expr_type);
+            } else if let Err(err) = expr_type.unify(current_type) {
                 let err = YuuError::builder()
-                    .kind(ErrorKind::InvalidStatement)
+                    .kind(ErrorKind::TypeIncompatible)
                     .message(format!(
-                        "Variable '{}' is already defined",
-                        def_stmt.ident.name
+                        "Cannot define '{}' with incompatible type '{}'; expected '{}'",
+                        def_stmt.ident.name, err.left, err.right
                     ))
-                    .source(data.src_code.source.clone(), data.src_code.file_name.clone())
-                    .span(def_stmt.ident.span.clone(), "variable already defined here")
-                    .help("Use 'def' only once after 'dec'. For rebinding/reassignment, use 'let' or assignment operator")
+                    .source(
+                        data.src_code.source.clone(),
+                        data.src_code.file_name.clone(),
+                    )
+                    .span(
+                        def_stmt.expr.span().clone(),
+                        format!("has type '{}'", err.left),
+                    )
+                    .label(
+                        def_stmt.ident.span.clone(),
+                        format!("expected '{}'", err.right),
+                    )
+                    .help("All definitions of a declared variable must use the same type")
                     .build();
                 data.errors.push(err);
-                return;
+            } else {
+                data.type_info_table
+                    .insert(var.binding_info.id, current_type);
             }
 
-            data.type_info_table.insert(var.binding_info.id, expr_type); // Update the "unknown" type of the variable
-            data.bindings.insert(def_stmt.ident.id, var.binding_info.id); // Map def statement ident to original binding
+            // Always map this def-site identifier to the declared binding.
+            data.bindings.insert(def_stmt.ident.id, var.binding_info.id);
         }
         Err(err) => {
             data.errors.push(*err);

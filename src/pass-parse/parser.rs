@@ -136,7 +136,12 @@ impl Parser {
         let peek = self.lexer.peek();
 
         match &peek.kind {
-            TokenKind::F32(_) | TokenKind::F64(_) | TokenKind::Integer(_) | TokenKind::NilKw => {
+            TokenKind::F32(_)
+            | TokenKind::F64(_)
+            | TokenKind::Integer(_)
+            | TokenKind::TrueKw
+            | TokenKind::FalseKw
+            | TokenKind::NilKw => {
                 let t = self.lexer.next_token(); // Consume the token
                 Ok(self.make_literal_expr(t))
             }
